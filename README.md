@@ -113,7 +113,16 @@ Add these **repository secrets** (GitHub → Settings → Secrets and variables 
 | `CYBERPANEL_HOST` | `restaurant-pos.isarva.in` (or server IP `172.237.41.81`) |
 | `CYBERPANEL_SSH_USER` | `resta6907` |
 | `CYBERPANEL_SSH_PASSWORD` | Your SSH password (never commit this) |
+| `CYBERPANEL_SSH_PORT` | `22` (or custom port if CyberPanel changed SSH port) |
 
 Optional server env overrides in the workflow script: `REPO_DIR`, `POS_PUBLIC_HTML`, `VITE_API_URL`.
 
-**Security:** Use SSH keys instead of passwords when possible. Change your password if it was shared in chat or tickets.
+**If GitHub Actions SSH fails:** port 22 may be blocked externally. Use CyberPanel **Advanced → SSH / Terminal** and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/idaksh6/Restaurant-POS/main/deploy/cyberpanel/server-bootstrap.sh | bash
+```
+
+Or after clone: `bash /home/restaurant-pos.isarva.in/Restaurant-POS/deploy/cyberpanel/server-bootstrap.sh`
+
+Enable **SSH** in CyberPanel → **Security** and allow port **22** (or set `CYBERPANEL_SSH_PORT` secret to match).
