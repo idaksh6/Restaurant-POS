@@ -101,3 +101,19 @@ bash "$REPO_DIR/deploy/cyberpanel/deploy-apps.sh"
 Wire this into a **Cron** job (e.g. every 2 minutes) or run manually after webhook pulls.
 
 The script runs `npm ci`, builds `mesa-pos`, copies `dist/` to the app site, builds `mesa-api`, runs `prisma migrate deploy`, and restarts PM2.
+
+### 4. GitHub Actions (auto-deploy on push to `main`)
+
+Workflow: `.github/workflows/deploy-cyberpanel.yml`
+
+Add these **repository secrets** (GitHub → Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|--------|--------|
+| `CYBERPANEL_HOST` | `restaurant-pos.isarva.in` (or server IP `172.237.41.81`) |
+| `CYBERPANEL_SSH_USER` | `resta6907` |
+| `CYBERPANEL_SSH_PASSWORD` | Your SSH password (never commit this) |
+
+Optional server env overrides in the workflow script: `REPO_DIR`, `POS_PUBLIC_HTML`, `VITE_API_URL`.
+
+**Security:** Use SSH keys instead of passwords when possible. Change your password if it was shared in chat or tickets.

@@ -1,0 +1,41 @@
+name: Deploy to CyberPanel
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cyberpanel-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy mesa-pos + mesa-api via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.CYBERPANEL_HOST }}
+          username: ${{ secrets.CYBERPANEL_SSH_USER }}
+          password: ${{ secrets.CYBERPANEL_SSH_PASSWORD }}
+          port: 22
+          script_stop: true
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            export REPO_DIR="${REPO_DIR:-/home/restaurant-pos.isarva.in/Restaurant-POS}"
+            export POS_PUBLIC_HTML="${POS_PUBLIC_HTML:-/home/app.restaurant-pos.isarva.in/public_html}"
+            export VITE_API_URL="${VITE_API_URL:-https://api.restaurant-pos.isarva.in}"
+
+            if [[ ! -d "${REPO_DIR}/.git" ]]; then
+              echo "Cloning repository (first deploy)..."
+              mkdir -p "$(dirname "${REPO_DIR}")"
+              git clone --branch main https://github.com/idaksh6/Restaurant-POS.git "${REPO_DIR}"
+            else
+              cd "${REPO_DIR}"
+              git fetch origin main
+              git reset --hard origin/main
+            fi
+
+            bash "${REPO_DIR}/deploy/cyberpanel/deploy-apps.sh"
