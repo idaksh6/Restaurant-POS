@@ -117,7 +117,24 @@ Add these **repository secrets** (GitHub → Settings → Secrets and variables 
 
 Optional server env overrides in the workflow script: `REPO_DIR`, `POS_PUBLIC_HTML`, `VITE_API_URL`.
 
-**If GitHub Actions SSH fails:** port 22 may be blocked externally. Use CyberPanel **Advanced → SSH / Terminal** and run:
+### CyberPanel API key (optional)
+
+If you enabled **Users → API Access**, store the key as a GitHub secret `CYBERPANEL_API_KEY` (never commit it).
+
+Use it in API calls as the **Authorization** header (full value from CyberPanel, including the `Basic cp_api_v1_...` prefix):
+
+```bash
+curl -k -X POST "https://YOUR-IP:8090/api/cyberPanelVersion" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Basic cp_api_v1_YOUR_KEY_HERE" \
+  -d '{"username":"akash@idaksh.in","password":""}'
+```
+
+Note: `verifyConn` still requires your **account password**, not the API key. **GitHub Actions deploy still needs SSH** (port 22) — the API key does not run shell commands.
+
+**Security:** Regenerate the API key if it was shared in chat. Change your panel password too.
+
+**If GitHub Actions SSH fails:** use CyberPanel **Advanced → SSH / Terminal** and run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/idaksh6/Restaurant-POS/main/deploy/cyberpanel/server-bootstrap.sh | bash
@@ -125,4 +142,4 @@ curl -fsSL https://raw.githubusercontent.com/idaksh6/Restaurant-POS/main/deploy/
 
 Or after clone: `bash /home/restaurant-pos.isarva.in/Restaurant-POS/deploy/cyberpanel/server-bootstrap.sh`
 
-Enable **SSH** in CyberPanel → **Security** and allow port **22** (or set `CYBERPANEL_SSH_PORT` secret to match).
+Enable **SSH** in CyberPanel → **Security** and allow port **22** in both CyberPanel firewall and your **VPS provider** firewall.
