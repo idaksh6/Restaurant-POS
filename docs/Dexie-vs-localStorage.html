@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dexie vs localStorage — How They Work, Advantages and Disadvantages</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 18mm 16mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+      color: #1a2420;
+      line-height: 1.45;
+      font-size: 10.5pt;
+      margin: 0;
+    }
+    h1 {
+      font-size: 22pt;
+      margin: 0 0 6pt;
+      color: #0f3d32;
+    }
+    h2 {
+      font-size: 14pt;
+      color: #145c4a;
+      border-bottom: 2px solid #1f6b5c;
+      padding-bottom: 4pt;
+      margin: 18pt 0 8pt;
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 12pt;
+      color: #1a4a40;
+      margin: 12pt 0 6pt;
+      page-break-after: avoid;
+    }
+    h4 {
+      font-size: 11pt;
+      margin: 10pt 0 4pt;
+      color: #24332e;
+    }
+    p { margin: 0 0 8pt; }
+    .subtitle {
+      font-size: 11.5pt;
+      color: #4a5c56;
+      margin: 0 0 4pt;
+    }
+    .meta {
+      font-size: 9pt;
+      color: #6a7a74;
+      margin-bottom: 14pt;
+    }
+    .box {
+      background: #f3f7f5;
+      border: 1px solid #d5ddd8;
+      border-left: 4px solid #1f6b5c;
+      padding: 8pt 10pt;
+      margin: 8pt 0 12pt;
+      page-break-inside: avoid;
+    }
+    .warn {
+      border-left-color: #b7791f;
+      background: #fbf6ea;
+    }
+    .ok {
+      border-left-color: #1f7a45;
+      background: #eef6f1;
+    }
+    .flow {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 9pt;
+      background: #12201c;
+      color: #e8f0ec;
+      padding: 10pt 12pt;
+      white-space: pre;
+      line-height: 1.35;
+      margin: 8pt 0 12pt;
+      page-break-inside: avoid;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8pt 0 14pt;
+      font-size: 9.5pt;
+      page-break-inside: auto;
+    }
+    th, td {
+      border: 1px solid #c9d4ce;
+      padding: 5pt 7pt;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #1f6b5c;
+      color: #fff;
+      font-weight: 650;
+    }
+    tr:nth-child(even) td { background: #f4f8f6; }
+    ul, ol { margin: 0 0 10pt; padding-left: 18pt; }
+    li { margin: 0 0 3pt; }
+    code {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 9pt;
+      background: #e8eeea;
+      padding: 1pt 3pt;
+    }
+    .two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10pt;
+      page-break-inside: avoid;
+    }
+    .card {
+      border: 1px solid #d5ddd8;
+      border-radius: 6pt;
+      padding: 8pt 10pt;
+    }
+    .card h3 { margin-top: 0; }
+    .small { font-size: 9pt; color: #4a5c56; }
+    footer {
+      margin-top: 16pt;
+      font-size: 8.5pt;
+      color: #6a7a74;
+      border-top: 1px solid #d5ddd8;
+      padding-top: 6pt;
+    }
+  </style>
+</head>
+<body>
+  <h1>Dexie vs localStorage</h1>
+  <p class="subtitle">How browser storage works, with process flows, examples, advantages and disadvantages</p>
+  <p class="meta">Technical briefing · Independent of any specific product · August 2026</p>
+
+  <div class="box">
+    <strong>Purpose.</strong> This document explains two common ways a web app can keep data on the user’s device:
+    the browser’s built-in <strong>localStorage</strong> API, and <strong>Dexie.js</strong> (a library on top of IndexedDB).
+    Examples use a bookstore kiosk and a school attendance app — not a restaurant POS.
+  </div>
+
+  <h2>1. What problem they solve</h2>
+  <p>
+    A normal website forgets everything when the tab closes, unless data is stored somewhere.
+    The server can store it, but the device can also store it locally. Local storage is useful when:
+  </p>
+  <ul>
+    <li>The network is slow or missing (a shop on a weak connection, a classroom with no Wi‑Fi).</li>
+    <li>The app must open instantly with last-used data (cart, draft form, last page).</li>
+    <li>The same browser should remember settings (language, theme, last school selected).</li>
+  </ul>
+  <p>
+    <strong>localStorage</strong> and <strong>Dexie / IndexedDB</strong> both live <em>in that browser, on that computer</em>.
+    They are not a cloud database. Clearing site data, using another browser, or another device means the data is not there.
+  </p>
+
+  <h2>2. How localStorage works</h2>
+  <h3>2.1 What it is</h3>
+  <p>
+    localStorage is a small key–value store built into every modern browser. You save a <em>string</em> under a <em>name</em>
+    (the key). Later you read that string back. There are no tables, no indexes, and no query language.
+    If you need an object or a list, you convert it to JSON text first.
+  </p>
+  <p>Typical limits: about <strong>5 MB per site</strong> (varies by browser). Storage is <strong>synchronous</strong>: the JavaScript thread waits until the read or write finishes.</p>
+
+  <h3>2.2 The process, step by step</h3>
+  <div class="flow">User taps “Save draft”
+        │
+        ▼
+App builds a JavaScript object
+  { studentId: "S104", present: true }
+        │
+        ▼
+JSON.stringify(...)  →  '{"studentId":"S104","present":true}'
+        │
+        ▼
+localStorage.setItem("attendance-draft", thatString)
+        │
+        ▼
+Browser writes the string into its site storage
+(disk / profile folder). The call returns only when done.
+
+----- later, even after closing the tab -----
+
+App starts
+        │
+        ▼
+localStorage.getItem("attendance-draft")
+        │
+        ▼
+JSON.parse(...)  →  original object
+        │
+        ▼
+Form is filled again</div>
+
+  <h3>2.3 Worked example — bookstore shopping cart</h3>
+  <p>A customer adds books at a library kiosk. The kiosk should keep the cart if the page reloads.</p>
+  <ol>
+    <li>Customer adds “The Alchemist”, quantity 2.</li>
+    <li>The app holds an array in memory: <code>[{ isbn: "978...", qty: 2 }]</code>.</li>
+    <li>It stringifies the array and saves it as key <code>bookstore-cart</code>.</li>
+    <li>Power flickers; the page reloads. On startup the app reads <code>bookstore-cart</code>, parses JSON, and shows two copies of the book.</li>
+    <li>At checkout, the app sends the cart to the server. After success it can <code>removeItem("bookstore-cart")</code>.</li>
+  </ol>
+  <div class="box warn">
+    <strong>What localStorage cannot do well here.</strong>
+    You cannot ask “all cart lines where qty &gt; 1” inside the database. You must load the <em>entire</em> string,
+    parse it, then filter in JavaScript. For one cart that is fine. For 50,000 book records it is slow and can freeze the screen.
+  </div>
+
+  <h3>2.4 What you can do with the API</h3>
+  <table>
+    <tr><th>Action</th><th>API</th><th>Meaning</th></tr>
+    <tr><td>Write</td><td><code>setItem(key, value)</code></td><td>Create or overwrite one named string</td></tr>
+    <tr><td>Read</td><td><code>getItem(key)</code></td><td>Return the string, or null</td></tr>
+    <tr><td>Delete one</td><td><code>removeItem(key)</code></td><td>Remove that key</td></tr>
+    <tr><td>Delete all for this site</td><td><code>clear()</code></td><td>Wipe this origin’s localStorage</td></tr>
+    <tr><td>Count keys</td><td><code>length</code> / <code>key(i)</code></td><td>List keys; still no search by field</td></tr>
+  </table>
+  <p class="small">sessionStorage is the same API but is cleared when the tab closes. This document focuses on localStorage (survives close/reopen of the browser).</p>
+
+  <h2>3. How Dexie (IndexedDB) works</h2>
+  <h3>3.1 What it is</h3>
+  <p>
+    <strong>IndexedDB</strong> is the browser’s built-in database for larger, structured data. It stores objects (not only strings),
+    supports indexes, and works <strong>asynchronously</strong> so the UI can stay responsive.
+  </p>
+  <p>
+    The raw IndexedDB API is verbose (callbacks, version upgrades). <strong>Dexie.js</strong> is a small open-source library that
+    wraps IndexedDB with a simpler, Promise-based API: define tables, then <code>add</code>, <code>put</code>, <code>get</code>, <code>where(...).equals(...)</code>.
+  </p>
+  <p>Typical quota is much larger than localStorage — often <strong>hundreds of MB or more</strong>, depending on disk and browser policy.</p>
+
+  <h3>3.2 The process, step by step</h3>
+  <div class="flow">App starts
+        │
+        ▼
+new Dexie("school-attendance")
+  .version(1).stores({
+    students: "id, classCode, name",
+    marks: "++id, studentId, date"
+  })
+        │
+        ▼
+Browser opens (or creates) an IndexedDB named "school-attendance"
+with two object stores and indexes on classCode, name, studentId, date.
+
+Teacher marks S104 present
+        │
+        ▼
+db.marks.add({ studentId: "S104", date: "2026-08-18", present: true })
+        │
+        ▼
+Dexie starts an IndexedDB readwrite transaction
+        │
+        ▼
+Browser writes a record to disk in the background
+        │
+        ▼
+Promise resolves → UI shows “saved”
+(the page was not frozen while waiting)
+
+----- later: “who was absent in class 8A today?” -----
+
+db.students.where("classCode").equals("8A").toArray()
+        │
+        ▼
+Only matching student rows are read (index), not the whole database
+        │
+        ▼
+Then query marks by studentId + date and combine in the app</div>
+
+  <h3>3.3 Worked example — school attendance</h3>
+  <p>A teacher’s tablet keeps the class list even if the school Wi‑Fi drops.</p>
+  <ol>
+    <li>On first online login, the app downloads 800 students and stores them with Dexie: one row per student, indexed by <code>classCode</code>.</li>
+    <li>During the day the network fails. The teacher still opens class 8A. Dexie reads only those students via the index.</li>
+    <li>Each tap (“present” / “absent”) inserts a row in the <code>marks</code> table. That is one small write, not rewriting a giant JSON blob.</li>
+    <li>When Wi‑Fi returns, the app reads unsynced mark rows (for example where <code>synced === false</code>) and POSTs them to the school server.</li>
+    <li>After the server confirms, those rows are updated to <code>synced: true</code> — or deleted from the local queue table.</li>
+  </ol>
+  <div class="box ok">
+    <strong>Why Dexie fits this example.</strong>
+    Thousands of students, many mark events, search by class, and background writes. That is a database job.
+    Doing the same with one localStorage string would mean parse-all / stringify-all on every tap.
+  </div>
+
+  <h3>3.4 What Dexie adds on top of IndexedDB</h3>
+  <ul>
+    <li>Declare schema and indexes in a few lines.</li>
+    <li>Version upgrades when you add a table or index.</li>
+    <li>Promises / async-await instead of nested callbacks.</li>
+    <li>Queries: <code>equals</code>, <code>startsWith</code>, <code>between</code>, bulk put/delete.</li>
+    <li>Optional live queries (UI updates when the table changes) if you use the Dexie React bindings — not required.</li>
+  </ul>
+  <p class="small">Dexie does not replace the server. It is still on-device storage. Sync to a server is your own code (HTTP, outbox, and so on).</p>
+
+  <h2>4. Side-by-side: the same task two ways</h2>
+  <p>Task: save 2,000 products, then find all items in category “Stationery”.</p>
+  <table>
+    <tr>
+      <th></th>
+      <th>localStorage</th>
+      <th>Dexie / IndexedDB</th>
+    </tr>
+    <tr>
+      <td>Write 2,000 products</td>
+      <td>Build one big array → JSON.stringify → one setItem. Whole string rewritten if one price changes.</td>
+      <td>bulkPut 2,000 objects. Later, put only the one product that changed.</td>
+    </tr>
+    <tr>
+      <td>Find “Stationery”</td>
+      <td>getItem entire catalogue → parse 2,000 objects → filter in RAM.</td>
+      <td>where("category").equals("Stationery") using an index. Only matching rows are loaded.</td>
+    </tr>
+    <tr>
+      <td>UI during write</td>
+      <td>Main thread blocked until stringify + disk write finish. Can hitch.</td>
+      <td>Async transaction. UI can keep scrolling.</td>
+    </tr>
+    <tr>
+      <td>If data grows to 20,000</td>
+      <td>Likely hits quota or becomes too slow. QuotaExceededError.</td>
+      <td>Still practical; quota is much larger.</td>
+    </tr>
+  </table>
+
+  <h2>5. Complete advantages and disadvantages</h2>
+
+  <h3>5.1 localStorage — advantages</h3>
+  <ol>
+    <li><strong>Zero dependency.</strong> Built into the browser. No npm package, no version upgrade of a library.</li>
+    <li><strong>Trivial API.</strong> Two methods cover most needs: setItem and getItem.</li>
+    <li><strong>Synchronous and easy to reason about.</strong> After setItem returns, the value is there. No Promises, no “did the transaction commit?”.</li>
+    <li><strong>Perfect for tiny flags.</strong> Language, theme, “don’t show this tip again”, last selected branch/school id, a short draft.</li>
+    <li><strong>Easy to debug.</strong> Chrome DevTools → Application → Local Storage. You see keys and values as text.</li>
+    <li><strong>Works in all modern browsers,</strong> including older ones that developers still meet on kiosks.</li>
+    <li><strong>Same-origin isolation.</strong> Site A cannot read site B. Simple security boundary (still never store passwords or card PANs).</li>
+    <li><strong>Survives refresh and browser restart</strong> until the user or the app clears it.</li>
+  </ol>
+
+  <h3>5.2 localStorage — disadvantages</h3>
+  <ol>
+    <li><strong>Strings only.</strong> Numbers, dates, arrays, and objects must be JSON-encoded. Easy to corrupt with a bad parse.</li>
+    <li><strong>No queries or indexes.</strong> Any “find by field” means load everything.</li>
+    <li><strong>Rewrite the whole blob</strong> to change one field inside a stored array.</li>
+    <li><strong>Small quota (~5 MB).</strong> Photos, catalogues, or long history will fail.</li>
+    <li><strong>Synchronous = can freeze the UI</strong> on large JSON parse/stringify.</li>
+    <li><strong>No transactions.</strong> If the tab dies in the middle of two related setItem calls, data can be half-updated.</li>
+    <li><strong>No schema.</strong> Old keys linger. Migrations are homemade (“if version &lt; 2, reshape JSON”).</li>
+    <li><strong>Shared across tabs, but with races.</strong> Two tabs writing the same key can overwrite each other. The storage event notifies other tabs, but you still merge by hand.</li>
+    <li><strong>Not for secrets.</strong> Any script on the page (including XSS) can read it. Not encrypted at rest by the app.</li>
+    <li><strong>Blocking on the main thread</strong> is a problem inside service workers / strict performance budgets; some environments discourage large localStorage use.</li>
+    <li><strong>Private / strict browsers</strong> may evict or limit it more aggressively.</li>
+  </ol>
+
+  <h3>5.3 Dexie — advantages</h3>
+  <ol>
+    <li><strong>Real database on the device.</strong> Rows, primary keys, secondary indexes.</li>
+    <li><strong>Async I/O.</strong> The page stays interactive while reading or writing.</li>
+    <li><strong>Partial updates.</strong> Change one attendance mark without rewriting the whole class list.</li>
+    <li><strong>Queries.</strong> Filter by indexed fields instead of loading the world.</li>
+    <li><strong>Much larger storage</strong> than localStorage — suitable for catalogues, logs, offline queues with many ops.</li>
+    <li><strong>Transactions.</strong> Several table writes succeed or fail together (safer than two separate setItems).</li>
+    <li><strong>Versioned schema.</strong> You can add an index in version 2 and migrate existing data.</li>
+    <li><strong>Bulk operations</strong> (bulkPut, bulkDelete) for first-time download of a master list.</li>
+    <li><strong>Friendlier than raw IndexedDB.</strong> Less boilerplate, fewer footguns around versionchange events.</li>
+    <li><strong>Good fit for offline-first apps</strong> that later sync: keep a local table of pending operations, query <code>status === "pending"</code>.</li>
+    <li><strong>Works with large object graphs</strong> (nested objects, arrays) without manual stringify of the entire DB.</li>
+  </ol>
+
+  <h3>5.4 Dexie — disadvantages</h3>
+  <ol>
+    <li><strong>Extra library.</strong> Bundle size, licensing (Apache-2.0), and you must keep the package updated.</li>
+    <li><strong>Async everywhere.</strong> Callers must use await / .then(). Easy to show stale UI if you forget to wait.</li>
+    <li><strong>Steeper learning curve</strong> than setItem: schema, indexes, compound keys, upgrade functions.</li>
+    <li><strong>Schema mistakes are costly.</strong> A wrong index means a new version and a migration. IndexedDB version upgrades can fail if another tab is open.</li>
+    <li><strong>Harder to inspect.</strong> DevTools IndexedDB viewer is less obvious than a JSON string in localStorage.</li>
+    <li><strong>Still origin-scoped and still not a server.</strong> No multi-device sync unless you build it.</li>
+    <li><strong>Not encrypted by default.</strong> Same XSS warning as localStorage: page JavaScript can read the DB.</li>
+    <li><strong>Browser quirks.</strong> Safari / private mode historically evicted IndexedDB; quota prompts differ by vendor.</li>
+    <li><strong>Overkill for three flags.</strong> Opening a DB to store <code>theme=dark</code> is unnecessary complexity.</li>
+    <li><strong>Indexes only help if you planned them.</strong> Querying an unindexed field still means a table scan.</li>
+    <li><strong>Debugging transactions</strong> (AbortError, ConstraintError, VersionError) is harder than a failed setItem.</li>
+    <li><strong>SSR / Node</strong> has no IndexedDB unless you polyfill. localStorage also needs a window, but tests often mock it more easily.</li>
+  </ol>
+
+  <h2>6. Comparison table (summary)</h2>
+  <table>
+    <tr>
+      <th>Topic</th>
+      <th>localStorage</th>
+      <th>Dexie (IndexedDB)</th>
+    </tr>
+    <tr>
+      <td>Built into browser?</td>
+      <td>Yes</td>
+      <td>IndexedDB yes; Dexie is a library</td>
+    </tr>
+    <tr>
+      <td>Data shape</td>
+      <td>String per key</td>
+      <td>Objects in tables</td>
+    </tr>
+    <tr>
+      <td>Typical size</td>
+      <td>~5 MB</td>
+      <td>Much larger (disk / quota policy)</td>
+    </tr>
+    <tr>
+      <td>Blocking</td>
+      <td>Synchronous</td>
+      <td>Asynchronous</td>
+    </tr>
+    <tr>
+      <td>Query by field</td>
+      <td>No</td>
+      <td>Yes, with indexes</td>
+    </tr>
+    <tr>
+      <td>Update one record</td>
+      <td>Rewrite whole JSON</td>
+      <td>Put that record</td>
+    </tr>
+    <tr>
+      <td>Transactions</td>
+      <td>No</td>
+      <td>Yes</td>
+    </tr>
+    <tr>
+      <td>Schema / versions</td>
+      <td>DIY</td>
+      <td>Built-in version() upgrades</td>
+    </tr>
+    <tr>
+      <td>Best for</td>
+      <td>Settings, tiny drafts, tokens you accept as non-secret</td>
+      <td>Lists, catalogues, offline queues, searchable history</td>
+    </tr>
+    <tr>
+      <td>Worst for</td>
+      <td>Thousands of rows, binary files, anything that must not freeze UI</td>
+      <td>A single boolean flag; teams that will not maintain a schema</td>
+    </tr>
+    <tr>
+      <td>Multi-tab safety</td>
+      <td>Last write wins</td>
+      <td>Better, still need care (locks / versionchange)</td>
+    </tr>
+  </table>
+
+  <h2>7. How people combine them (generic pattern)</h2>
+  <p>Many apps use <strong>both</strong>, on purpose:</p>
+  <ul>
+    <li><strong>localStorage:</strong> “current language”, “last school id”, “device nickname” — tiny, read at startup before any async DB is open.</li>
+    <li><strong>Dexie:</strong> students, products, pending sync operations — anything with many rows.</li>
+  </ul>
+  <div class="flow">App boot
+  1. Read localStorage "lang" and "lastSchoolId"   ← instant, sync
+  2. Open Dexie database                          ← async
+  3. Load class list from Dexie
+  4. If online, fetch server updates and bulkPut
+  5. If offline, keep teaching; queue new marks in a Dexie table
+  6. When online again, send pending rows, then mark them synced</div>
+  <p>
+    A weaker (but common) pattern is <strong>dual-write</strong>: save the same list into Dexie <em>and</em> a localStorage JSON copy
+    so old code that only knows getItem still works. That wastes space and can drift if one write fails. Prefer one source of truth
+    per kind of data.
+  </p>
+
+  <h2>8. Decision guide</h2>
+  <table>
+    <tr><th>If you need…</th><th>Choose</th></tr>
+    <tr><td>Theme, language, “onboarding seen”, last dropdown value</td><td>localStorage</td></tr>
+    <tr><td>A draft of one form (a few kilobytes)</td><td>localStorage is enough</td></tr>
+    <tr><td>Hundreds or thousands of records, search, or paging</td><td>Dexie</td></tr>
+    <tr><td>Offline work all day, then upload a queue of events</td><td>Dexie (table of pending ops)</td></tr>
+    <tr><td>Must not stall animations / barcode scan UI</td><td>Dexie (async)</td></tr>
+    <tr><td>No extra libraries allowed on a tiny kiosk page</td><td>localStorage</td></tr>
+    <tr><td>Passwords, payment card numbers, national ID</td><td>Neither — keep on server / OS keystore</td></tr>
+  </table>
+
+  <h2>9. Security and operations (both technologies)</h2>
+  <ul>
+    <li><strong>XSS:</strong> if malicious script runs on your origin, it can read localStorage and IndexedDB. Storage choice does not fix XSS.</li>
+    <li><strong>Shared computers:</strong> a bookstore kiosk should wipe or use a locked-down profile; otherwise the next customer can open DevTools.</li>
+    <li><strong>Backup:</strong> neither is a backup. Export to a file or sync to a server if the device can be lost.</li>
+    <li><strong>Clearing site data</strong> in the browser deletes both.</li>
+    <li><strong>Incognito:</strong> data may vanish when the window closes.</li>
+  </ul>
+
+  <h2>10. Short recap</h2>
+  <div class="two">
+    <div class="card">
+      <h3>localStorage</h3>
+      <p>A named box of text. Save a string, read a string. Fast to learn, easy to debug, small and synchronous. Use it for settings and tiny drafts. Do not use it as a database.</p>
+    </div>
+    <div class="card">
+      <h3>Dexie</h3>
+      <p>A friendly API over IndexedDB. Tables, indexes, transactions, async writes. Use it when the device must hold and search real records, especially offline. It is still local to that browser.</p>
+    </div>
+  </div>
+
+  <p>
+    <strong>Rule of thumb:</strong> if the data is one key you could write on a sticky note, use localStorage.
+    If it looks like a spreadsheet with many rows you would filter, use Dexie.
+  </p>
+
+  <footer>
+    This briefing is educational. Browser quotas and DevTools labels change by vendor and version.
+    Dexie.js is a third-party wrapper around the W3C IndexedDB standard; localStorage is part of the Web Storage standard.
+  </footer>
+</body>
+</html>

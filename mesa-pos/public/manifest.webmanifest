@@ -1,0 +1,17 @@
+{
+  "name": "Mesa KSA Restaurant POS",
+  "short_name": "Mesa POS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eef2ef",
+  "theme_color": "#1f6b5c",
+  "description": "Saudi restaurant POS — local-first",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,756 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Control-plane map: which Postgres database holds each company's data.
+/// Written only in the primary DATABASE_URL database; tenant DBs may have an empty copy of this table.
+model TenantRegistry {
+  id           String   @id
+  taxId        String   @unique
+  companyName  String
+  databaseName String
+  databaseUrl  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Company {
+  id           String     @id
+  companyName  String
+  aliasName    String?
+  taxId        String?
+  enableTax    Boolean    @default(true)
+  /** Phase 1 ZATCA TLV QR on settled receipts (POS company setting). */
+  zatcaEnabled Boolean    @default(false)
+  /** Phase 2: report/clear via mesa-api (CSID never leaves the server). */
+  zatcaPhase2Enabled Boolean @default(false)
+  /** sandbox | production */
+  zatcaPhase2Env     String  @default("sandbox")
+  zatcaCsid          String?
+  zatcaPrivateKey    String?
+  zatcaBinaryToken   String?
+  /** Previous invoice hash (PIH chain). */
+  zatcaPih           String?
+  currency     String     @default("Saudi Arabia · SAR")
+  logoDataUrl  String?
+  hqPhone      String?
+  branches     Branch[]
+  users        User[]
+  roles        Role[]
+  categories   Category[]
+  products     Product[]
+  customers           Customer[]
+  tickets             Ticket[]
+  dayCloses           DayClose[]
+  shifts              Shift[]
+  foodVoucherBatches  FoodVoucherBatch[]
+  foodVoucherCodes    FoodVoucherCode[]
+  vendors             Vendor[]
+  vendorLedger        VendorLedger[]
+  giftCards           GiftCard[]
+  taxRates            TaxRate[]
+  discountRates       DiscountRate[]
+  measureUnits        MeasureUnit[]
+  paymentTypes        PaymentType[]
+  expenseTypes        ExpenseType[]
+  expenseDetails      ExpenseDetail[]
+  menuTimetables      MenuTimetable[]
+  extraCharges        ExtraCharge[]
+  deliveryRiders      DeliveryRider[]
+  deliveryChannels    DeliveryChannelIntegration[]
+  floorTables         FloorTable[]
+  stockItems          StockItem[]
+  ingredients         Ingredient[]
+  stockReceipts       StockReceipt[]
+  purchaseOrders      PurchaseOrder[]
+  stockTransfers      StockTransfer[]
+  salesLedgers        SalesLedger[]
+  sequences           BranchSequence[]
+  printStations       PrintStation[]
+  zatcaInvoices       ZatcaInvoice[]
+  updatedAt           DateTime           @updatedAt
+}
+
+model ZatcaInvoice {
+  id          String   @id
+  companyId   String
+  status      String   @default("pending")
+  totalSar    Float
+  vatSar      Float
+  sellerVat   String
+  sellerName  String
+  timestamp   String
+  tlvBase64   String?
+  invoiceHash String?
+  zatcaUuid   String?
+  message     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  company     Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId])
+}
+
+model Branch {
+  id         String     @id
+  companyId  String
+  company    Company    @relation(fields: [companyId], references: [id])
+  name       String
+  nameAr     String?
+  code       String
+  address    String?
+  addressAr  String?
+  phone      String?
+  active     Boolean    @default(true)
+  users      User[]
+  customers  Customer[]
+  tickets     Ticket[]
+  dayCloses   DayClose[]
+  shifts      Shift[]
+  devices     Device[]
+  floorTables FloorTable[]
+  stockItems     StockItem[]
+  stockReceipts  StockReceipt[]
+  extraCharges   ExtraCharge[]
+  deliveryRiders DeliveryRider[]
+  deliveryChannels DeliveryChannelIntegration[]
+  purchaseOrders PurchaseOrder[]
+  stockTransfers StockTransfer[]
+  salesLedgers   SalesLedger[]
+  sequences      BranchSequence[]
+  printStations  PrintStation[]
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String
+  pinHash   String
+  name      String
+  nameAr    String?
+  role      String
+  active    Boolean  @default(true)
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id])
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, username])
+  @@index([companyId])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  key         String
+  name        String
+  nameAr      String?
+  system      Boolean  @default(false)
+  privileges  Json
+  updatedAt   DateTime @updatedAt
+
+  @@unique([companyId, key])
+  @@index([companyId])
+}
+
+model Category {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  branchId  String?
+  name      String
+  alias     String?
+  parentId  String?
+  active    Boolean  @default(true)
+  sort      Int      @default(0)
+  meta      Json?
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, branchId])
+}
+
+model Product {
+  id         String   @id
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+  branchId   String?
+  name       String
+  alias      String?
+  categoryId String
+  category   String
+  price      Float
+  cost       Float    @default(0)
+  code       String
+  active     Boolean  @default(true)
+  meta       Json?
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, branchId])
+}
+
+model Customer {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  branchId  String?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  name      String
+  phone     String
+  address   String?
+  email     String?
+  visits    Int      @default(0)
+  spent     Float    @default(0)
+  points    Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, branchId])
+  @@index([companyId, phone])
+}
+
+model FoodVoucherBatch {
+  id         String            @id
+  companyId  String
+  company    Company           @relation(fields: [companyId], references: [id])
+  name       String
+  expiryDate String
+  count      Int
+  amount     Float
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  codes      FoodVoucherCode[]
+
+  @@index([companyId])
+}
+
+model FoodVoucherCode {
+  id         String           @id
+  companyId  String
+  company    Company          @relation(fields: [companyId], references: [id])
+  batchId    String
+  batch      FoodVoucherBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  name       String
+  code       String
+  expiryDate String
+  amount     Float
+  status     String           @default("available")
+  usedAt     DateTime?
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([companyId, batchId])
+}
+
+model Vendor {
+  id        String         @id
+  companyId String
+  company   Company        @relation(fields: [companyId], references: [id])
+  name      String
+  phone     String         @default("")
+  phone2    String?
+  email     String?
+  taxId     String?
+  address   String?
+  city      String         @default("")
+  active    Boolean        @default(true)
+  updatedAt DateTime       @updatedAt
+  ledger    VendorLedger[]
+
+  @@index([companyId])
+}
+
+model VendorLedger {
+  id          String   @id
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  vendorId    String
+  vendor      Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  date        String
+  description String
+  debit       Float    @default(0)
+  credit      Float    @default(0)
+  kind        String
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId, vendorId])
+}
+
+model GiftCard {
+  id           String   @id
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
+  number       String
+  customerId   String?
+  customerName String   @default("")
+  phone        String   @default("")
+  description  String   @default("")
+  expiryDate   String
+  issueAmount  Float
+  extraCharges Float    @default(0)
+  usedAmount   Float    @default(0)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([companyId, number])
+  @@index([companyId])
+}
+
+model TaxRate {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  percent   Float
+  active    Boolean  @default(true)
+  isDefault Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model DiscountRate {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  percent   Float
+  active    Boolean  @default(true)
+  isDefault Boolean  @default(false)
+  sort      Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model MeasureUnit {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  code      String
+  name      String
+  quantity  Float    @default(1)
+  kind      String   @default("generic")
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model PaymentType {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  parent    String
+  active    Boolean  @default(true)
+  sort      Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model ExpenseType {
+  id          String          @id
+  companyId   String
+  company     Company         @relation(fields: [companyId], references: [id])
+  name        String
+  description String?
+  active      Boolean         @default(true)
+  sort        Int             @default(0)
+  updatedAt   DateTime        @updatedAt
+  details     ExpenseDetail[]
+
+  @@index([companyId])
+}
+
+model ExpenseDetail {
+  id            String      @id
+  companyId     String
+  company       Company     @relation(fields: [companyId], references: [id])
+  branchId      String?
+  expenseTypeId String
+  expenseType   ExpenseType @relation(fields: [expenseTypeId], references: [id], onDelete: Cascade)
+  description   String
+  invoiceNo     String?
+  amount        Float
+  date          String
+  paymentTypeId String?
+  notes         String?
+  updatedAt     DateTime    @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, branchId])
+  @@index([companyId, expenseTypeId])
+}
+
+model MenuTimetable {
+  id            String   @id
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id])
+  branchId      String?
+  name          String
+  validFrom     String
+  validTo       String
+  timeFrom      String
+  timeTo        String
+  departmentIds Json
+  productIds    Json
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, branchId])
+}
+
+model PrintStation {
+  id           String   @id
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
+  branchId     String
+  branch       Branch   @relation(fields: [branchId], references: [id])
+  kind         String
+  name         String
+  target       String   @default("browser")
+  copies       Int      @default(1)
+  paperWidthMm Int      @default(80)
+  templateId   String   @default("classic")
+  departmentId String?
+  header       String   @default("")
+  footer       String   @default("")
+  active       Boolean  @default(true)
+  sort         Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  @@index([companyId, branchId])
+}
+
+model ExtraCharge {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  name      String
+  amount    Float
+  percent   Boolean  @default(false)
+  active    Boolean  @default(true)
+  sort      Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, branchId])
+}
+
+model DeliveryRider {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  name      String
+  phone     String   @default("")
+  active    Boolean  @default(true)
+  sort      Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, branchId])
+}
+
+/// Partner credentials + sync state per branch (HungerStation, Jahez, …).
+model DeliveryChannelIntegration {
+  id               String    @id
+  companyId        String
+  company          Company   @relation(fields: [companyId], references: [id])
+  branchId         String
+  branch           Branch    @relation(fields: [branchId], references: [id])
+  channelId        String
+  enabled          Boolean   @default(false)
+  storeId          String?
+  apiKey           String?
+  apiBaseUrl       String?
+  webhookSecret    String?
+  lastMenuSyncAt   DateTime?
+  lastMenuSyncNote String?
+  meta             Json?
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([branchId, channelId])
+  @@index([companyId, branchId])
+}
+
+model FloorTable {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  label     String
+  seats     Int      @default(2)
+  area      String   @default("Main Hall")
+  sort      Int      @default(0)
+  active    Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId, branchId])
+}
+
+model StockItem {
+  id               String   @id
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id])
+  branchId         String?
+  branch           Branch?  @relation(fields: [branchId], references: [id])
+  ingredientId     String?
+  name             String
+  sku              String   @default("")
+  category         String   @default("")
+  unit             String   @default("pcs")
+  onHand           Float    @default(0)
+  locationBalances Json?
+  reorderAt        Float    @default(0)
+  cost             Float    @default(0)
+  vendorId         String?
+  vendor           String   @default("")
+  updatedAt        DateTime @updatedAt
+
+  @@index([companyId])
+  @@index([companyId, branchId])
+  @@index([companyId, ingredientId])
+}
+
+model Ingredient {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  sku       String   @default("")
+  category  String   @default("")
+  unit      String   @default("pcs")
+  active    Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model StockReceipt {
+  id               String   @id
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id])
+  branchId         String
+  branch           Branch   @relation(fields: [branchId], references: [id])
+  receiveNumber    String
+  receivingDate    String
+  invoiceNumber    String   @default("")
+  invoiceDate      String
+  supplierId       String
+  receivingPerson  String   @default("")
+  packingQty       Float    @default(1)
+  notes            String?
+  lines            Json
+  netAmount        Float
+  createdAt        DateTime
+  updatedAt        DateTime @updatedAt
+
+  @@index([companyId, branchId])
+}
+
+model PurchaseOrder {
+  id          String   @id
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id])
+  supplierId  String
+  status      String   @default("draft")
+  notes       String?
+  lines       Json
+  createdAt   DateTime
+  updatedAt   DateTime @updatedAt
+
+  @@index([companyId, branchId])
+}
+
+model StockTransfer {
+  id             String    @id
+  companyId      String
+  company        Company   @relation(fields: [companyId], references: [id])
+  branchId       String
+  branch         Branch    @relation(fields: [branchId], references: [id])
+  kind           String    @default("location")
+  status         String    @default("completed")
+  stockId        String?
+  fromLocation   String?
+  toLocation     String?
+  fromBranchId   String?
+  toBranchId     String?
+  fromBranchName String?
+  toBranchName   String?
+  fromStockId    String
+  toStockId      String
+  fromName       String
+  toName         String
+  fromSku        String    @default("")
+  toSku          String    @default("")
+  qty            Float
+  unit           String    @default("pcs")
+  rawQty         Float?
+  outputQty      Float?
+  yieldRatio     Float?
+  note           String?
+  staff          String?
+  createdAt      DateTime
+  receivedAt     DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@index([companyId, branchId])
+  @@index([companyId, toBranchId])
+}
+
+model Ticket {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  type      String
+  customer  String
+  phone     String?
+  payload   Json
+  status    String   @default("open")
+  updatedAt DateTime @updatedAt
+
+  @@index([branchId, status])
+  @@index([companyId, branchId, status])
+}
+
+model SyncOp {
+  id        String   @id
+  deviceId  String
+  companyId String?
+  branchId  String?
+  type      String
+  entityId  String
+  payload   Json
+  createdAt DateTime
+  appliedAt DateTime @default(now())
+
+  @@index([branchId])
+  @@index([companyId, branchId])
+}
+
+model Device {
+  id         String   @id
+  companyId  String?
+  branchId   String?
+  branch     Branch?  @relation(fields: [branchId], references: [id])
+  lastCursor String   @default("0")
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model BranchSequence {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id])
+  kind      String
+  value     Int
+  updatedAt DateTime @updatedAt
+
+  @@unique([branchId, kind])
+  @@index([companyId, branchId])
+}
+
+model DayClose {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id])
+  dayKey      String
+  countedCash Float
+  staff       String?
+  closedAt    DateTime @default(now())
+
+  @@unique([branchId, dayKey])
+  @@index([companyId])
+}
+
+model Shift {
+  id          String    @id
+  companyId   String
+  company     Company   @relation(fields: [companyId], references: [id])
+  branchId    String
+  branch      Branch    @relation(fields: [branchId], references: [id])
+  userId      String
+  userName    String
+  openedAt    DateTime
+  closedAt    DateTime?
+  floatAmount Float
+  cashIn      Float     @default(0)
+  countedCash Float?
+  variance    Float?
+  open        Boolean   @default(true)
+  updatedAt   DateTime  @updatedAt
+
+  @@index([companyId, branchId])
+  @@index([branchId, open])
+}
+
+model SalesLedger {
+  id             String   @id
+  companyId      String
+  company        Company  @relation(fields: [companyId], references: [id])
+  branchId       String
+  branch         Branch   @relation(fields: [branchId], references: [id])
+  at             DateTime
+  day            String
+  type           String
+  source         String
+  method         String
+  subtotal       Float
+  tax            Float
+  total          Float
+  discountAmt    Float?
+  staff          String?
+  lines          Json?
+  splitPayments  Json?
+  charges        Json?
+  customerId     String?
+  loyaltyRedeem  Float?
+  voidReason     String?
+  voidLineName   String?
+  updatedAt      DateTime @updatedAt
+
+  @@index([companyId, branchId])
+  @@index([branchId, day])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  companyId String?
+  branchId  String?
+  action    String
+  staff     String?
+  entityId  String?
+  detail    String?
+  amount    Float?
+  at        DateTime @default(now())
+
+  @@index([companyId, branchId])
+}

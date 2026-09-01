@@ -1,0 +1,147 @@
+/* -- Back Office · shell & responsive scroll ----------------- */
+
+.app-shell:has(.zk-bo) .main-stage {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.zk-bo {
+  min-height: 0;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.zk-bo .bo-page {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+  overflow: hidden;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.zk-bo .bo-page > .bo-hero,
+.zk-bo .bo-page > .bo-metrics,
+.zk-bo .bo-page > .bo-tabs {
+  flex-shrink: 0;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.zk-bo .bo-page > .bo-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.zk-bo .bo-overview,
+.zk-bo .bo-charts,
+.zk-bo .bo-grid,
+.zk-bo .bo-panel,
+.zk-bo .bo-chart,
+.zk-bo .bo-roles-layout {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.zk-bo .bo-tabs {
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 960px) {
+  .zk-bo .zk-dash-header {
+    margin: 0.5rem 0.55rem 0;
+  }
+
+  /* One vertical scroll for the whole page (hero + metrics + tabs + content). */
+  .zk-bo .bo-page {
+    margin: 0.5rem 0.55rem 0.35rem;
+    gap: 0.65rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    padding-bottom: 0.5rem;
+  }
+
+  .zk-bo .bo-page > .bo-body {
+    flex: none;
+    min-height: auto;
+    overflow: visible;
+  }
+
+  /* Tabs row scrolls sideways only — page still scrolls up/down. */
+  .zk-bo .bo-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    gap: 0.4rem;
+    padding-bottom: 0.15rem;
+  }
+
+  .zk-bo .bo-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .zk-bo .bo-tabs button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    min-height: var(--touch-min, 44px);
+  }
+
+  .zk-bo .bo-metrics {
+    gap: 0.45rem;
+  }
+
+  .zk-bo .bo-metric {
+    padding: 0.55rem 0.65rem;
+  }
+
+  .zk-bo .bo-metric strong {
+    font-size: 0.95rem;
+  }
+
+  .zk-bo .bo-hero {
+    padding: 0.85rem 0.95rem;
+  }
+
+  .zk-bo .bo-hero p {
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+
+  .zk-bo .bo-panel-head {
+    flex-wrap: wrap;
+    gap: 0.45rem;
+  }
+
+  .zk-bo .bo-panel-head h2 {
+    min-width: 0;
+    font-size: 0.92rem;
+  }
+
+  .zk-bo .bo-chip {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 961px) {
+  .zk-bo .bo-tabs {
+    flex-wrap: wrap;
+  }
+}
+
+html[dir='rtl'] .zk-bo .bo-tabs {
+  direction: rtl;
+}

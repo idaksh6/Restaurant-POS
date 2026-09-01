@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mesa KSA — Saudi Restaurant POS</title>
+    <script>
+      if (/electron/i.test(navigator.userAgent)) {
+        document.documentElement.classList.add('mesa-desktop')
+      } else {
+        document.documentElement.classList.add('mesa-no-boot')
+      }
+    </script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #eef2ef;
+      }
+      .mesa-no-boot #mesa-boot-splash {
+        display: none !important;
+      }
+      #mesa-boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(900px 420px at 12% 0%, rgba(20, 184, 166, 0.22), transparent 58%),
+          radial-gradient(700px 360px at 88% 100%, rgba(15, 118, 110, 0.16), transparent 55%),
+          linear-gradient(180deg, #eef2ef 0%, #e3ece8 100%);
+        transition: opacity 0.38s ease, visibility 0.38s ease;
+      }
+      #mesa-boot-splash.mesa-boot-out {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+      .mesa-boot-card {
+        display: grid;
+        justify-items: center;
+        gap: 1.1rem;
+        padding: 2rem 2.4rem 1.85rem;
+        border-radius: 22px;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(15, 118, 110, 0.14);
+        box-shadow: 0 22px 48px rgba(15, 23, 42, 0.1);
+        min-width: min(320px, 88vw);
+      }
+      .mesa-boot-mark {
+        width: 4.5rem;
+        height: 4.5rem;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        font: 800 1.35rem/1 system-ui, "Segoe UI", sans-serif;
+        letter-spacing: 0.04em;
+        color: #fff;
+        background: linear-gradient(145deg, #0f766e 0%, #14b8a6 55%, #0d9488 100%);
+        box-shadow: 0 12px 24px rgba(15, 118, 110, 0.28);
+      }
+      .mesa-boot-title {
+        margin: 0;
+        font: 800 1.35rem/1.2 system-ui, "Segoe UI", sans-serif;
+        color: #0f172a;
+        letter-spacing: 0.01em;
+      }
+      .mesa-boot-sub {
+        margin: -0.35rem 0 0;
+        font: 600 0.88rem/1.4 system-ui, "Segoe UI", sans-serif;
+        color: #64748b;
+      }
+      .mesa-boot-spinner {
+        width: 2.4rem;
+        height: 2.4rem;
+        border-radius: 50%;
+        border: 3px solid rgba(15, 118, 110, 0.18);
+        border-top-color: #0f766e;
+        animation: mesa-boot-spin 0.85s linear infinite;
+      }
+      @keyframes mesa-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&family=Source+Sans+3:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1f6b5c" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Mesa POS" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  </head>
+  <body>
+    <div id="mesa-boot-splash" role="status" aria-live="polite" aria-busy="true">
+      <div class="mesa-boot-card">
+        <div class="mesa-boot-mark" aria-hidden="true">MP</div>
+        <div>
+          <p class="mesa-boot-title">Mesa POS</p>
+          <p class="mesa-boot-sub">Loading…</p>
+        </div>
+        <div class="mesa-boot-spinner" aria-hidden="true"></div>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Company" ADD COLUMN IF NOT EXISTS "zatcaEnabled" BOOLEAN NOT NULL DEFAULT false;

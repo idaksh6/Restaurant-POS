@@ -1,0 +1,684 @@
+/* -- Accounts / Expenses desk (matches Vendors shell) ---------------- */
+
+.app-shell:has(.zk-acct) .main-stage {
+  background: #eef3f0;
+  flex-direction: column;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.app-shell:has(.zk-acct) .main-stage > .zk-acct {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.zk-acct {
+  background:
+    radial-gradient(720px 340px at 0 0, rgba(31, 107, 92, 0.12), transparent 55%),
+    radial-gradient(560px 280px at 100% 8%, rgba(25, 113, 194, 0.08), transparent 50%),
+    linear-gradient(180deg, #eef3f0 0%, #e6ece8 100%);
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.zk-acct .zk-dash-header {
+  z-index: 30;
+  isolation: isolate;
+  flex-shrink: 0;
+  min-width: 0;
+  margin: 0.55rem 0.8rem 0;
+  position: relative;
+}
+
+.zk-acct .zk-dash-brand {
+  color: inherit;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.zk-acct > .zk-hub-foot {
+  z-index: 20;
+  flex-shrink: 0;
+  margin-top: 0;
+  position: relative;
+}
+
+.acct-page-inner {
+  overscroll-behavior: contain;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 0.85rem;
+  min-width: 0;
+  min-height: 0;
+  margin: 0.55rem 0.8rem 0;
+  padding-bottom: 0.35rem;
+  display: flex;
+  overflow: auto;
+}
+
+.acct-hero {
+  color: #f3fbf7;
+  z-index: 10;
+  background: linear-gradient(135deg, #0b3d2e 0%, #1f6b5c 45%, #1971c2 100%);
+  border-radius: 16px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem;
+  display: flex;
+  position: sticky;
+  top: 0;
+  box-shadow: 0 10px 24px rgba(11, 61, 46, 0.2);
+}
+
+.acct-hero-brand {
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  display: flex;
+}
+
+.acct-hero-mark {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 1.15rem;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  flex-shrink: 0;
+}
+
+.acct-hero-brand h1 {
+  font-family: var(--font-display);
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 750;
+}
+
+.acct-hero-brand p {
+  opacity: 0.9;
+  margin: 0.1rem 0 0;
+  font-size: 0.78rem;
+}
+
+.acct-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.zk-acct-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 0.85rem;
+  min-height: 0;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .zk-acct-body {
+    grid-template-columns: 1fr;
+  }
+
+  .zk-acct-side {
+    order: 2;
+  }
+
+  .zk-acct-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .zk-acct-nav-link {
+    flex: 1 1 calc(33% - 0.5rem);
+    min-width: 140px;
+  }
+}
+
+.zk-acct-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 16px;
+  border: 1px solid #e8eeea;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(16, 40, 28, 0.04);
+  align-self: start;
+  position: sticky;
+  top: 0;
+}
+
+.zk-acct-side-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.zk-acct-kicker {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.zk-acct-side-head strong {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+}
+
+.zk-acct-side-head small,
+.zk-acct-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.zk-acct-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.zk-acct-nav-link {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.65rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: var(--surface-2);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.zk-acct-nav-link:hover {
+  border-color: color-mix(in srgb, var(--teal) 30%, var(--line));
+  background: #fff;
+}
+
+.zk-acct-nav-link.active {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--teal) 16%, transparent);
+}
+
+.zk-acct-nav-icon {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+  background: #fff;
+  border: 1px solid color-mix(in srgb, var(--teal) 18%, var(--line));
+}
+
+.zk-acct-nav-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.zk-acct-nav-copy strong {
+  font-size: 0.92rem;
+}
+
+.zk-acct-nav-copy small {
+  font-size: 0.75rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.zk-acct-side-note {
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px dashed var(--line);
+}
+
+.zk-acct-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+  background: #fff;
+  border: 1px solid #e8eeea;
+  border-radius: 16px;
+  padding: 0.85rem;
+  box-shadow: 0 8px 20px rgba(16, 40, 28, 0.04);
+}
+
+.zk-acct-add {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid #fff;
+  border-radius: 999px;
+  background: #fff;
+  color: #1b4332;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.zk-acct-add:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+}
+
+/* Expense details — metrics + table */
+
+.zk-exp-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 760px) {
+  .zk-exp-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
+.zk-exp-metric {
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.zk-exp-metric span {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.zk-exp-metric strong {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  color: var(--ink);
+}
+
+.zk-exp-metric.accent strong {
+  color: var(--accent-deep);
+}
+
+.zk-exp-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.zk-exp-search {
+  flex: 1 1 200px;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.zk-exp-search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font: inherit;
+  min-width: 0;
+}
+
+.zk-exp-search input:focus {
+  outline: none;
+}
+
+.zk-exp-panel {
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+}
+
+.zk-exp-table-wrap {
+  overflow: auto;
+  flex: 1 1 auto;
+}
+
+.zk-exp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.zk-exp-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: color-mix(in srgb, var(--teal-soft) 65%, #fff);
+}
+
+.zk-exp-table th {
+  padding: 0.7rem 0.85rem;
+  text-align: start;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.zk-exp-table td {
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  vertical-align: middle;
+}
+
+.zk-exp-table tbody tr {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.zk-exp-table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+.zk-exp-table tbody tr.selected {
+  background: var(--teal-soft);
+}
+
+.zk-exp-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.zk-exp-amt {
+  font-weight: 700;
+  color: var(--accent-deep);
+  white-space: nowrap;
+}
+
+.zk-exp-type-pill {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.zk-exp-narration {
+  max-width: 280px;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+
+.zk-exp-empty {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  color: var(--muted);
+}
+
+.zk-exp-empty strong {
+  display: block;
+  font-size: 1.05rem;
+  color: var(--ink);
+  margin-bottom: 0.35rem;
+}
+
+.zk-exp-edit-btn {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: var(--teal);
+}
+
+.zk-exp-edit-btn:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+/* Expense form sheet */
+
+.zk-exp-sheet-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: #12201c59;
+  backdrop-filter: blur(3px);
+}
+
+.zk-exp-sheet {
+  width: min(720px, 100%);
+  max-height: min(90vh, 720px);
+  overflow: auto;
+  border-radius: calc(var(--radius) + 2px);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 24px 60px #12201c2e;
+}
+
+.zk-exp-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.zk-exp-sheet-close {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
+}
+
+.zk-exp-sheet-close:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.zk-exp-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem 1.1rem;
+  padding: 1.15rem 1.25rem 1.25rem;
+}
+
+@media (max-width: 640px) {
+  .zk-exp-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+.zk-exp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.zk-exp-form label.zk-exp-span2 {
+  grid-column: 1 / -1;
+}
+
+.zk-exp-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  line-height: 1.25;
+}
+
+.zk-exp-label .mesa-req {
+  margin: 0;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.zk-exp-input,
+.zk-exp-form .mesa-select-trigger {
+  width: 100%;
+  min-height: var(--touch-min);
+  border: 1px solid color-mix(in srgb, var(--line) 85%, var(--ink-soft));
+  border-radius: 11px;
+  padding: 0.55rem 0.8rem;
+  font: inherit;
+  color: var(--ink);
+  background: #fff;
+  box-sizing: border-box;
+  transition:
+    border-color 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.zk-exp-form .mesa-select {
+  width: 100%;
+}
+
+.zk-exp-form .mesa-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: start;
+}
+
+.zk-exp-input:focus,
+.zk-exp-form .mesa-select.open .mesa-select-trigger,
+.zk-exp-form .mesa-select-trigger:focus-visible {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 14%, transparent);
+}
+
+.zk-exp-input-amount {
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-family: var(--font-display);
+  color: var(--accent-deep);
+}
+
+.zk-exp-narration-input {
+  min-height: 6.5rem;
+  resize: vertical;
+  line-height: 1.45;
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+}
+
+.zk-exp-sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  padding: 0.9rem 1.25rem 1.15rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.zk-exp-btn-left {
+  margin-right: auto;
+}
+
+.zk-exp-sheet-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+}
+
+.zk-exp-btn {
+  min-height: var(--touch-min);
+  padding: 0.55rem 1.1rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.zk-exp-btn.primary {
+  border-color: var(--teal);
+  background: var(--teal);
+  color: #fff;
+}
+
+.zk-exp-btn.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+}

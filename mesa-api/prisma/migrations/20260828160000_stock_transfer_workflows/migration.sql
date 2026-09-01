@@ -1,0 +1,13 @@
+ALTER TABLE "StockTransfer" ADD COLUMN IF NOT EXISTS "status" TEXT NOT NULL DEFAULT 'completed';
+ALTER TABLE "StockTransfer" ADD COLUMN IF NOT EXISTS "fromBranchId" TEXT;
+ALTER TABLE "StockTransfer" ADD COLUMN IF NOT EXISTS "toBranchId" TEXT;
+ALTER TABLE "StockTransfer" ADD COLUMN IF NOT EXISTS "fromBranchName" TEXT;
+ALTER TABLE "StockTransfer" ADD COLUMN IF NOT EXISTS "toBranchName" TEXT;
+ALTER TABLE "StockTransfer" ADD COLUMN IF NOT EXISTS "rawQty" DOUBLE PRECISION;
+ALTER TABLE "StockTransfer" ADD COLUMN IF NOT EXISTS "outputQty" DOUBLE PRECISION;
+ALTER TABLE "StockTransfer" ADD COLUMN IF NOT EXISTS "yieldRatio" DOUBLE PRECISION;
+ALTER TABLE "StockTransfer" ADD COLUMN IF NOT EXISTS "receivedAt" TIMESTAMP(3);
+
+ALTER TABLE "StockTransfer" ALTER COLUMN "kind" SET DEFAULT 'location';
+
+CREATE INDEX IF NOT EXISTS "StockTransfer_companyId_toBranchId_idx" ON "StockTransfer"("companyId", "toBranchId");
