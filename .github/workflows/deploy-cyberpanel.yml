@@ -19,7 +19,7 @@ jobs:
           host: ${{ secrets.CYBERPANEL_HOST }}
           username: ${{ secrets.CYBERPANEL_SSH_USER }}
           password: ${{ secrets.CYBERPANEL_SSH_PASSWORD }}
-          port: ${{ secrets.CYBERPANEL_SSH_PORT }}
+          port: ${{ secrets.CYBERPANEL_SSH_PORT != '' && secrets.CYBERPANEL_SSH_PORT || '22' }}
           script_stop: true
           command_timeout: 20m
           script: |
