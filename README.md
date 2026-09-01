@@ -48,42 +48,56 @@ Open `mesa-pos-website/index.html` in a browser or serve the folder with any sta
 | server | 2222 |
 | kitchen | 3333 |
 
-## Deploy on CyberPanel (`restaurant-pos.isarva.in`)
+## Deploy on CyberPanel (mesa-pos + mesa-api only)
 
-This repo is a **monorepo**. The marketing site lives in `mesa-pos-website/` — not the repo root.
+`mesa-pos-website` is **not** deployed to the server — only the POS app and API.
 
-### Marketing website (static)
+### Recommended domains
 
-1. In CyberPanel → **Websites** → `restaurant-pos.isarva.in` → **Advanced** → **Git Deployment**
-2. Repository: `https://github.com/idaksh6/Restaurant-POS.git` · branch `main`
-3. Add CyberPanel’s **deployment key** to GitHub → repo **Settings → Deploy keys**
-4. **Empty** the attach directory before first attach (remove default `index.html`)
-5. Add the **GitHub webhook** URL from CyberPanel (disable SSL verify only if using IP, not hostname SSL)
+| App | Subdomain | What gets published |
+|-----|-----------|---------------------|
+| `mesa-pos` | `app.restaurant-pos.isarva.in` | Built `mesa-pos/dist/` → `public_html` |
+| `mesa-api` | `api.restaurant-pos.isarva.in` | Node process (PM2) on port 3001 + reverse proxy |
 
-After each `git pull`, publish only the website folder:
+Create both websites in CyberPanel (PHP 8.x is fine; the POS is static files, API is Node).
+
+### 1. Git + server layout
+
+1. Create folder **outside** `public_html`, e.g. `/home/restaurant-pos.isarva.in/Restaurant-POS`
+2. **Advanced → Git Deployment** → attach `https://github.com/idaksh6/Restaurant-POS.git` branch `main`
+3. Add CyberPanel deployment key to GitHub → **Deploy keys**
+4. Add GitHub **webhook** from CyberPanel
+
+### 2. One-time server setup (SSH / CyberPanel terminal)
 
 ```bash
-export CYBERPANEL_SITE_USER="restaurant-pos.isarva.in"
-bash /home/restaurant-pos.isarva.in/public_html/deploy/cyberpanel/post-deploy-website.sh
+# PM2 for API
+npm install -g pm2
+
+# API environment
+cp /home/restaurant-pos.isarva.in/Restaurant-POS/mesa-api/.env.example \
+    /home/restaurant-pos.isarva.in/Restaurant-POS/mesa-api/.env
+# Edit .env: DATABASE_URL, JWT_SECRET, REDIS_URL, etc.
+
+# POS build-time API URL (used when deploy script builds mesa-pos)
+echo 'VITE_API_URL=https://api.restaurant-pos.isarva.in' > \
+  /home/restaurant-pos.isarva.in/Restaurant-POS/mesa-pos/.env
+
+# Postgres + Redis (docker on same VPS, or CyberPanel databases)
+# See docker-compose.yml for local dev reference
 ```
 
-If Git clones into `public_html`, set `REPO_DIR` to that path. The script copies `mesa-pos-website/*` into `public_html` so `index.html` is at the domain root.
+Point **api** subdomain OpenLiteSpeed reverse proxy to `http://127.0.0.1:3001`.
 
-**Better layout (recommended):** clone the repo outside `public_html` (e.g. `/home/restaurant-pos.isarva.in/Restaurant-POS`), then run the script with:
+### 3. Deploy after each git pull
 
 ```bash
 export REPO_DIR="/home/restaurant-pos.isarva.in/Restaurant-POS"
-export PUBLIC_HTML="/home/restaurant-pos.isarva.in/public_html"
-bash "$REPO_DIR/deploy/cyberpanel/post-deploy-website.sh"
+export POS_PUBLIC_HTML="/home/app.restaurant-pos.isarva.in/public_html"
+export VITE_API_URL="https://api.restaurant-pos.isarva.in"
+bash "$REPO_DIR/deploy/cyberpanel/deploy-apps.sh"
 ```
 
-Wire that into CyberPanel **Cron** (every minute after webhook) or your webhook handler.
+Wire this into a **Cron** job (e.g. every 2 minutes) or run manually after webhook pulls.
 
-### API & POS app (later)
-
-| App | Suggested host | Notes |
-|-----|----------------|-------|
-| `mesa-api` | `api.restaurant-pos.isarva.in` | Node.js + Postgres + Redis (Docker or CyberPanel Node app) |
-| `mesa-pos` | `app.restaurant-pos.isarva.in` | `npm run build` → serve `dist/` or Electron for tills |
-
-See `mesa-api/.env.example` and `mesa-pos/.env.example` for environment variables.
+The script runs `npm ci`, builds `mesa-pos`, copies `dist/` to the app site, builds `mesa-api`, runs `prisma migrate deploy`, and restarts PM2.
