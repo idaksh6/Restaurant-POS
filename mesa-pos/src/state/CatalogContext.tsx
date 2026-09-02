@@ -69,6 +69,12 @@ import {
   type PrintStation,
 } from '../data/printers'
 import {
+  fromApiTableArea,
+  loadTableAreas,
+  mergeRemoteTableAreas,
+  toApiTableArea,
+} from '../data/tableAreas'
+import {
   apiDeleteCatalog,
   apiListCatalog,
   apiMastersReady,
@@ -211,6 +217,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         const nextPrinters = Array.isArray(remote.printStations)
           ? remote.printStations.map(fromApiPrinter)
           : loadAllPrinters()
+        const remoteAreas = Array.isArray(remote.tableAreas)
+          ? remote.tableAreas.map(fromApiTableArea).filter((a) => a.id && a.name)
+          : []
         saveGiftCards(nextCards)
         saveTaxes(nextTaxes)
         if (Array.isArray(remote.discounts)) {
@@ -225,6 +234,20 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         saveAllCharges(nextCharges)
         saveAllRiders(nextRiders)
         saveAllPrinters(nextPrinters)
+        if (remoteAreas.length) {
+          const merged = mergeRemoteTableAreas(remoteAreas)
+          for (const area of merged) {
+            if (!remoteAreas.some((r) => r.id === area.id)) {
+              pushRow('tableArea', toApiTableArea(area) as { id: string })
+            }
+          }
+        } else {
+          // Upload local areas once so other devices can pull them.
+          const localAreas = loadTableAreas()
+          for (const area of localAreas) {
+            pushRow('tableArea', toApiTableArea(area) as { id: string })
+          }
+        }
         setGiftCards(nextCards)
         setTaxes(nextTaxes)
         setUnits(nextUnits)

@@ -104,6 +104,11 @@ import {
 } from '../data/charges'
 import { fromApiRider, isDemoRider, loadAllRiders, saveAllRiders } from '../data/deliveryRiders'
 import { fromApiPrinter, loadAllPrinters, saveAllPrinters } from '../data/printers'
+import {
+  fromApiTableArea,
+  loadTableAreas,
+  saveTableAreas,
+} from '../data/tableAreas'
 import type { ItemCustomizer, MasterDish, MenuCategory } from '../data/masters'
 import { recipeLineIngredientId } from '../data/masters'
 import type { CrmCustomer } from '../state/CrmContext'
@@ -349,6 +354,13 @@ async function applyCatalog(kind: string, row: Record<string, unknown>, remove =
         ? loadAllPrinters().filter((p) => p.id !== id)
         : upsertById(loadAllPrinters(), mapped),
     )
+  } else if (kind === 'tableArea') {
+    const mapped = fromApiTableArea(row)
+    if (!mapped.id || !mapped.name) return
+    const next = remove
+      ? loadTableAreas().filter((a) => a.id !== id)
+      : upsertById(loadTableAreas(), mapped)
+    saveTableAreas(next)
   }
 }
 

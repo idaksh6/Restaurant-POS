@@ -353,6 +353,7 @@ export type CatalogKind =
   | 'extraCharge'
   | 'deliveryRider'
   | 'printStation'
+  | 'tableArea'
 
 export type ApiCatalog = {
   giftCards: Record<string, unknown>[]
@@ -366,6 +367,7 @@ export type ApiCatalog = {
   extraCharges: Record<string, unknown>[]
   deliveryRiders: Record<string, unknown>[]
   printStations: Record<string, unknown>[]
+  tableAreas?: Record<string, unknown>[]
 }
 
 export async function apiListCatalog(): Promise<ApiCatalog> {

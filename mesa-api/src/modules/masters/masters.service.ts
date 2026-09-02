@@ -631,6 +631,14 @@ ALTER TABLE "DiscountRate"
           SELECT * FROM "PrintStation" WHERE "companyId" = ${companyId} ORDER BY sort ASC
         `,
       ])
+    let tableAreas: Array<Record<string, unknown>> = []
+    try {
+      tableAreas = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
+        SELECT * FROM "TableArea" WHERE "companyId" = ${companyId} ORDER BY sort ASC, name ASC
+      `
+    } catch {
+      tableAreas = []
+    }
     return {
       giftCards,
       taxes,
@@ -643,6 +651,7 @@ ALTER TABLE "DiscountRate"
       extraCharges,
       deliveryRiders,
       printStations,
+      tableAreas,
     }
   }
 
@@ -921,6 +930,20 @@ ALTER TABLE "DiscountRate"
         )
         break
       }
+      case 'tableArea':
+        await this.prisma.$executeRawUnsafe(
+          `INSERT INTO "TableArea" (id, "companyId", name, sort, active, "updatedAt")
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (id) DO UPDATE SET
+             name = EXCLUDED.name, sort = EXCLUDED.sort, active = EXCLUDED.active, "updatedAt" = EXCLUDED."updatedAt"`,
+          id,
+          companyId,
+          String(input.name ?? '').trim() || 'Area',
+          Number(input.sort ?? input.sortOrder ?? 0) || 0,
+          input.active !== false,
+          now,
+        )
+        break
       default:
         throw new BadRequestException(`Unknown catalog kind ${kind}`)
     }
@@ -940,6 +963,7 @@ ALTER TABLE "DiscountRate"
       extraCharge: 'ExtraCharge',
       deliveryRider: 'DeliveryRider',
       printStation: 'PrintStation',
+      tableArea: 'TableArea',
     }
     const table = tables[kind]
     if (!table) throw new BadRequestException(`Unknown catalog kind ${kind}`)

@@ -79,6 +79,43 @@ export function saveTableAreas(rows: TableArea[]) {
   return next
 }
 
+export function fromApiTableArea(row: Record<string, unknown>): TableArea {
+  return {
+    id: String(row.id ?? ''),
+    name: String(row.name ?? '').trim(),
+    sortOrder: Number(row.sort ?? row.sortOrder ?? 0) || 0,
+    active: row.active !== false,
+  }
+}
+
+export function toApiTableArea(row: TableArea): Record<string, unknown> {
+  return {
+    id: row.id,
+    name: row.name,
+    sort: row.sortOrder,
+    sortOrder: row.sortOrder,
+    active: row.active !== false,
+  }
+}
+
+/** Merge server catalog into local areas (server wins on same id). */
+export function mergeRemoteTableAreas(remote: TableArea[], local = loadTableAreas()): TableArea[] {
+  const byId = new Map<string, TableArea>()
+  for (const a of local) byId.set(a.id, a)
+  for (const a of remote) {
+    if (!a.id || !a.name) continue
+    byId.set(a.id, a)
+  }
+  // Also match by name so seed/local ids don't duplicate remote rows
+  const byName = new Map<string, TableArea>()
+  for (const a of byId.values()) {
+    const key = a.name.toLowerCase()
+    const prev = byName.get(key)
+    if (!prev || remote.some((r) => r.id === a.id)) byName.set(key, a)
+  }
+  return saveTableAreas([...byName.values()])
+}
+
 export function nextAreaSortOrder(rows: TableArea[]) {
   return (rows.reduce((m, r) => Math.max(m, r.sortOrder), 0) || 0) + 10
 }

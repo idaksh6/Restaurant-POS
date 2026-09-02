@@ -11,14 +11,18 @@ import {
   loadTableAreas,
   nextAreaSortOrder,
   saveTableAreas,
+  toApiTableArea,
   type TableArea,
 } from '../data/tableAreas'
 import { loadPosPrefs, POS_PREFS_EVENT, savePosPrefs, type PosPrefs } from '../data/posPrefs'
 import { useDeleteConfirm } from '../hooks/useDeleteConfirm'
+import { apiDeleteCatalog, apiMastersReady, apiPutCatalog } from '../lib/apiMasters'
 import { settingsHubPath } from '../lib/settingsHub'
 import { useI18n, type Dict } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
 import { usePos } from '../state/PosContext'
+import { getDeviceId } from '../sync/deviceId'
+import { dropPendingUpsertsFor, enqueueOutbox } from '../sync/outbox'
 
 type Tab = 'areas' | 'tables'
 type StatusFilter = 'all' | 'free' | 'occupied' | 'billing'
@@ -283,6 +287,34 @@ export default function FloorTablesMasterPage() {
 
   function persistAreas(next: TableArea[]) {
     setAreas(saveTableAreas(next))
+    for (const area of next) {
+      pushTableArea(area)
+    }
+  }
+
+  function pushTableArea(area: TableArea) {
+    const row = toApiTableArea(area)
+    if (apiMastersReady()) {
+      void apiPutCatalog('tableArea', row)
+        .then(() => dropPendingUpsertsFor(area.id, 'catalog.upsert'))
+        .catch(() =>
+          enqueueOutbox('catalog.upsert', area.id, { kind: 'tableArea', row }, getDeviceId(), null),
+        )
+    } else {
+      enqueueOutbox('catalog.upsert', area.id, { kind: 'tableArea', row }, getDeviceId(), null)
+    }
+  }
+
+  function deleteTableAreaRemote(id: string) {
+    if (apiMastersReady()) {
+      void apiDeleteCatalog('tableArea', id)
+        .then(() => dropPendingUpsertsFor(id, 'catalog.upsert'))
+        .catch(() =>
+          enqueueOutbox('catalog.delete', id, { kind: 'tableArea' }, getDeviceId(), null),
+        )
+    } else {
+      enqueueOutbox('catalog.delete', id, { kind: 'tableArea' }, getDeviceId(), null)
+    }
   }
 
   function startAddArea() {
@@ -358,7 +390,9 @@ export default function FloorTablesMasterPage() {
     askDelete({
       name: editingArea.name,
       onConfirm: () => {
-        persistAreas(areas.filter((a) => a.id !== editingArea.id))
+        const id = editingArea.id
+        persistAreas(areas.filter((a) => a.id !== id))
+        deleteTableAreaRemote(id)
         setEditingArea(null)
         flash('Area deleted')
       },

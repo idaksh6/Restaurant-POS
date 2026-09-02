@@ -64,6 +64,7 @@ model Company {
   deliveryRiders      DeliveryRider[]
   deliveryChannels    DeliveryChannelIntegration[]
   floorTables         FloorTable[]
+  tableAreas          TableArea[]
   stockItems          StockItem[]
   ingredients         Ingredient[]
   stockReceipts       StockReceipt[]
@@ -357,6 +358,18 @@ model PaymentType {
   parent    String
   active    Boolean  @default(true)
   sort      Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model TableArea {
+  id        String   @id
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  sort      Int      @default(0)
+  active    Boolean  @default(true)
   updatedAt DateTime @updatedAt
 
   @@index([companyId])
