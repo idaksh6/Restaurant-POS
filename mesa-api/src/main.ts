@@ -9,7 +9,11 @@ async function bootstrap() {
   // rejects that and the browser reports it as "Failed to fetch".
   app.useBodyParser('json', { limit: '10mb' })
   app.useBodyParser('urlencoded', { limit: '10mb', extended: true })
-  app.enableCors({ origin: true })
+  // LiteSpeed/CyberPanel OLS duplicates Access-Control-Allow-Origin when both
+  // the reverse proxy and Nest send it. Set CORS_IN_APP=0 on the server.
+  if (process.env.CORS_IN_APP !== '0') {
+    app.enableCors({ origin: true })
+  }
   const port = Number(process.env.PORT ?? 3001)
   const host = process.env.HOST ?? '0.0.0.0'
   await app.listen(port, host)
