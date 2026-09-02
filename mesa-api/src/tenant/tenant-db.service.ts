@@ -300,6 +300,13 @@ export class TenantDbService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** Re-run migrations for an existing tenant (e.g. after a new migration ships). */
+  async migrateTenant(companyId: string) {
+    const url = this.urlByCompany.get(companyId) ?? (await this.getRegistry(companyId))?.databaseUrl
+    if (!url) throw new Error(`No database URL for company ${companyId}`)
+    this.migrateDatabase(url)
+  }
+
   private migrateDatabase(databaseUrl: string) {
     const root = apiRootDir()
     const prismaCli = path.join(root, 'node_modules', 'prisma', 'build', 'index.js')

@@ -192,6 +192,58 @@ export class DevService {
     const branchId = slugId('br', `${branchCode}-${companyId}`)
     const pinHash = await bcrypt.hash(adminPassword, 8)
 
+    // If a prior register created the company but seed failed (schema gap), finish seed.
+    const existingReg = await this.tenants.getRegistryByTaxId(taxId)
+    if (existingReg) {
+      try {
+        await this.tenants.migrateTenant(existingReg.id)
+        const existing = await this.tenants.clientFor(existingReg.id)
+        const company = await existing.company.findFirst()
+        const stockCount = await existing.stockItem.count().catch(() => 0)
+        if (company && stockCount === 0) {
+          const branches = await existing.branch.findMany({
+            where: { companyId: company.id },
+            select: { id: true },
+          })
+          if (branches.length) {
+            await this.seed.seedTenant(existing, {
+              companyId: company.id,
+              branchIds: branches.map((b) => b.id),
+            })
+            const admin = await existing.user.findFirst({
+              where: { companyId: company.id, role: 'admin' },
+              select: {
+                id: true,
+                username: true,
+                name: true,
+                nameAr: true,
+                role: true,
+                companyId: true,
+                branchId: true,
+              },
+            })
+            const branch = await existing.branch.findFirst({
+              where: { companyId: company.id },
+            })
+            return {
+              ok: true,
+              provisioned: false,
+              seeded: true,
+              recovered: true,
+              databaseName: existingReg.databaseName,
+              message: `Completed starter seed for existing company in ${existingReg.databaseName}.`,
+              company,
+              branch,
+              admin,
+            }
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        throw new BadRequestException(`Could not finish seed for existing company: ${msg}`)
+      }
+    }
+
     let prisma
     try {
       prisma = await this.tenants.provisionCompanyDb({
