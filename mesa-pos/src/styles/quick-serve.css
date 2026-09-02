@@ -109,7 +109,7 @@
 .zk-qs .qs-ticket-head,
 .zk-qs .qs-note,
 .zk-qs .qs-totals,
-.zk-qs .qs-actions {
+.zk-qs .qs-ticket-actions {
   flex-shrink: 0;
 }
 
