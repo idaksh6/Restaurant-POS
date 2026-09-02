@@ -1,20 +1,21 @@
-/* Quick Serve — desktop: pinned chrome + dual-pane scroll; mobile: sticky header. */
+/* Quick Serve shell: header/footer never scroll; only content scrolls. */
 
 .app-shell:has(.zk-qs) {
-  height: 100%;
-  max-height: 100dvh;
-  overflow: hidden;
+  height: 100% !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+  grid-template-rows: auto minmax(0, 1fr) !important;
 }
 
 .app-shell:has(.zk-qs) .main-stage {
   background: #eef3f0;
   flex-direction: column;
   max-width: none;
-  height: 100%;
-  min-height: 0;
-  max-height: 100%;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
   padding: 0 !important;
-  display: flex;
+  display: flex !important;
   overflow: hidden !important;
 }
 
@@ -24,19 +25,20 @@
     radial-gradient(560px 280px at 100% 10%, #c45c2614, #0000 50%),
     linear-gradient(#eef3f0 0%, #e6ece8 100%);
   flex-direction: column;
-  flex: 1 1 auto !important;
+  flex: 1 1 0 !important;
   width: 100%;
   min-width: 0;
   max-width: 100%;
   height: 100% !important;
   min-height: 0 !important;
-  max-height: 100%;
-  display: flex;
+  max-height: 100% !important;
+  display: flex !important;
   overflow: hidden !important;
 }
 
+/* Fixed in the flex column — not inside the scrolling region */
 .zk-qs .zk-dash-header.zk-dash-header-bar {
-  flex-shrink: 0;
+  flex-shrink: 0 !important;
   margin: 0 !important;
   width: 100%;
   border-radius: 0;
@@ -45,8 +47,8 @@
 }
 
 .zk-qs > .qs-page {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
   margin: 0 !important;
   padding: 0.65rem 0.85rem 0.5rem;
   gap: 0.55rem;
@@ -61,7 +63,7 @@
 }
 
 .zk-qs .qs-desk {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   align-items: stretch;
   overflow: hidden;
@@ -83,7 +85,7 @@
 }
 
 .zk-qs .qs-menu-panel .mp-root {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   height: 100%;
   display: flex;
@@ -96,7 +98,7 @@
 }
 
 .zk-qs .qs-menu-panel .mp-body {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow: hidden;
   display: flex;
@@ -108,7 +110,7 @@
 }
 
 .zk-qs .qs-menu-panel .mp-items {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
@@ -122,7 +124,7 @@
 }
 
 .zk-qs .qs-lines {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
@@ -130,23 +132,21 @@
 
 .zk-qs > .zk-hub-foot {
   z-index: 55;
-  flex-shrink: 0;
-  margin-top: 0;
+  flex-shrink: 0 !important;
+  margin-top: 0 !important;
   width: 100%;
   border-radius: 0;
-  position: relative;
-  bottom: auto;
+  position: relative !important;
+  bottom: auto !important;
 }
 
-/*
- * Narrow: one scroll on .zk-qs with sticky DashHeader + footer.
- * (Nested overflow:hidden + height:100% fails when the header wraps tall.)
- */
+/* Mobile / tablet: same pinned header; scroll only .qs-page */
 @media (max-width: 960px) {
   .app-shell:has(.zk-qs) {
     height: 100dvh !important;
     max-height: 100dvh !important;
     overflow: hidden !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
   }
 
   .app-shell:has(.zk-qs) .side-nav {
@@ -155,38 +155,37 @@
 
   .app-shell:has(.zk-qs) .main-stage {
     min-height: 0 !important;
-    height: auto !important;
-    max-height: none;
+    height: 100% !important;
     overflow: hidden !important;
   }
 
   .zk-qs {
-    flex: 1 1 auto !important;
-    height: auto !important;
+    flex: 1 1 0 !important;
+    height: 100% !important;
     min-height: 0 !important;
-    max-height: 100%;
-    overflow-x: hidden !important;
+    max-height: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .zk-qs .zk-dash-header.zk-dash-header-bar {
+    position: relative !important;
+    top: auto !important;
+    flex-shrink: 0 !important;
+    box-shadow: 0 4px 12px rgba(5, 71, 42, 0.18);
+  }
+
+  .zk-qs > .qs-page {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0.5rem 0.55rem 0.75rem;
+    gap: 0.5rem;
+    overflow-x: clip;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-y;
-  }
-
-  .zk-qs .zk-dash-header.zk-dash-header-bar {
-    position: sticky;
-    top: 0;
-    z-index: 70;
-    box-shadow: 0 6px 16px rgba(5, 71, 42, 0.22);
-  }
-
-  .zk-qs > .qs-page {
-    flex: 0 0 auto;
-    height: auto;
-    min-height: auto;
-    margin: 0 !important;
-    padding: 0.5rem 0.55rem 0.75rem;
-    gap: 0.5rem;
-    overflow: visible !important;
   }
 
   .zk-qs .qs-tools {
@@ -264,10 +263,9 @@
   }
 
   .zk-qs > .zk-hub-foot {
-    position: sticky;
-    bottom: 0;
-    z-index: 70;
-    box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.18);
+    position: relative !important;
+    bottom: auto !important;
+    box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.14);
   }
 }
 
