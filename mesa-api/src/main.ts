@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import { NestFactory } from '@nestjs/core'
 import type { NestExpressApplication } from '@nestjs/platform-express'
+import type { NextFunction, Request, Response } from 'express'
 import { AppModule } from './app.module'
 
 async function bootstrap() {
@@ -14,7 +15,7 @@ async function bootstrap() {
   // headers on the LiteSpeed vhost (extraHeaders). Nest must still answer
   // OPTIONS with 204 or the browser rejects the preflight (404 is not OK).
   if (process.env.CORS_IN_APP === '0') {
-    app.use((req, res, next) => {
+    app.use((req: Request, res: Response, next: NextFunction) => {
       if (req.method === 'OPTIONS') {
         res.status(204).end()
         return
