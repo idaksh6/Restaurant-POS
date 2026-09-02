@@ -130,29 +130,142 @@
   bottom: auto;
 }
 
+/* Tablet / phone: page scrolls (desktop dual-pane overflow:hidden traps content). */
 @media (max-width: 960px) {
+  .app-shell:has(.zk-qs) .main-stage {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .zk-qs {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .zk-qs .zk-dash-header.zk-dash-header-bar {
+    flex-shrink: 0;
+  }
+
+  .zk-qs > .qs-page {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0.5rem 0.55rem 0.75rem;
+    gap: 0.5rem;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+  }
+
+  .zk-qs .qs-toolbar,
+  .zk-qs .qs-tools {
+    flex-shrink: 0;
+  }
+
+  .zk-qs .qs-tools {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .zk-qs .qs-tool {
+    flex: 0 0 auto;
+  }
+
   .zk-qs .qs-desk {
-    grid-template-columns: 1fr;
-    overflow: auto;
+    flex: 0 0 auto;
+    height: auto;
+    min-height: 0;
+    align-items: stretch;
     align-content: start;
+    grid-template-columns: 1fr;
+    overflow: visible;
   }
 
   .zk-qs .qs-menu-panel,
   .zk-qs .qs-ticket-panel {
     height: auto;
     max-height: none;
-    min-height: 18rem;
+    min-height: 0;
+    overflow: visible;
   }
 
-  .zk-qs .qs-menu-panel .mp-root,
-  .zk-qs .qs-menu-panel .mp-body,
-  .zk-qs .qs-menu-panel .mp-items {
+  .zk-qs .qs-menu-panel .mp-root {
     height: auto;
-    min-height: 14rem;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .zk-qs .qs-menu-panel .mp-body {
+    display: grid;
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .zk-qs .qs-menu-panel .mp-nav {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 0.25rem;
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .zk-qs .qs-menu-panel .mp-nav-block {
+    flex: 0 0 auto;
+  }
+
+  .zk-qs .qs-menu-panel .mp-items {
+    flex: none;
+    height: auto;
+    min-height: 12rem;
     overflow: visible;
   }
 
   .zk-qs .qs-lines {
-    max-height: 16rem;
+    flex: none;
+    min-height: 7rem;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 720px) {
+  .zk-qs .zk-dash-header.zk-dash-header-bar {
+    margin: 0;
+  }
+
+  .zk-qs > .qs-page {
+    padding: 0.4rem 0.4rem 0.85rem;
+  }
+
+  .zk-qs .qs-toolbar {
+    flex-wrap: wrap;
+    border-radius: 10px;
+  }
+
+  .zk-qs .qs-toolbar-actions {
+    width: 100%;
+  }
+
+  .zk-qs .qs-toolbar-actions .btn,
+  .zk-qs .qs-link-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .zk-qs .qs-menu-panel .mp-toolbar {
+    grid-template-columns: 1fr;
   }
 }
