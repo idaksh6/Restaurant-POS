@@ -1,4 +1,10 @@
-/* Quick Serve — pin DashHeader + toolbars; scroll menu/ticket only (match Drive Thru shell). */
+/* Quick Serve — desktop: pinned chrome + dual-pane scroll; mobile: sticky header. */
+
+.app-shell:has(.zk-qs) {
+  height: 100%;
+  max-height: 100dvh;
+  overflow: hidden;
+}
 
 .app-shell:has(.zk-qs) .main-stage {
   background: #eef3f0;
@@ -6,9 +12,10 @@
   max-width: none;
   height: 100%;
   min-height: 0;
-  padding: 0;
+  max-height: 100%;
+  padding: 0 !important;
   display: flex;
-  overflow: hidden;
+  overflow: hidden !important;
 }
 
 .zk-qs {
@@ -17,29 +24,30 @@
     radial-gradient(560px 280px at 100% 10%, #c45c2614, #0000 50%),
     linear-gradient(#eef3f0 0%, #e6ece8 100%);
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 1 auto !important;
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  height: 100%;
-  min-height: 0;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100%;
   display: flex;
-  overflow: hidden;
+  overflow: hidden !important;
 }
 
 .zk-qs .zk-dash-header.zk-dash-header-bar {
   flex-shrink: 0;
-  margin: 0;
+  margin: 0 !important;
   width: 100%;
   border-radius: 0;
   position: relative;
-  z-index: 40;
+  z-index: 50;
 }
 
 .zk-qs > .qs-page {
   flex: 1 1 auto;
   min-height: 0;
-  margin: 0;
+  margin: 0 !important;
   padding: 0.65rem 0.85rem 0.5rem;
   gap: 0.55rem;
   display: flex;
@@ -121,7 +129,7 @@
 }
 
 .zk-qs > .zk-hub-foot {
-  z-index: 5;
+  z-index: 55;
   flex-shrink: 0;
   margin-top: 0;
   width: 100%;
@@ -130,40 +138,55 @@
   bottom: auto;
 }
 
-/* Tablet / phone: page scrolls (desktop dual-pane overflow:hidden traps content). */
+/*
+ * Narrow: one scroll on .zk-qs with sticky DashHeader + footer.
+ * (Nested overflow:hidden + height:100% fails when the header wraps tall.)
+ */
 @media (max-width: 960px) {
-  .app-shell:has(.zk-qs) .main-stage {
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
+  .app-shell:has(.zk-qs) {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
   }
 
-  .zk-qs {
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .zk-qs .zk-dash-header.zk-dash-header-bar {
+  .app-shell:has(.zk-qs) .side-nav {
     flex-shrink: 0;
   }
 
-  .zk-qs > .qs-page {
-    flex: 1 1 auto;
-    min-height: 0;
-    margin: 0;
-    padding: 0.5rem 0.55rem 0.75rem;
-    gap: 0.5rem;
-    overflow-x: hidden;
-    overflow-y: auto;
+  .app-shell:has(.zk-qs) .main-stage {
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none;
+    overflow: hidden !important;
+  }
+
+  .zk-qs {
+    flex: 1 1 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: 100%;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     touch-action: pan-y;
   }
 
-  .zk-qs .qs-toolbar,
-  .zk-qs .qs-tools {
-    flex-shrink: 0;
+  .zk-qs .zk-dash-header.zk-dash-header-bar {
+    position: sticky;
+    top: 0;
+    z-index: 70;
+    box-shadow: 0 6px 16px rgba(5, 71, 42, 0.22);
+  }
+
+  .zk-qs > .qs-page {
+    flex: 0 0 auto;
+    height: auto;
+    min-height: auto;
+    margin: 0 !important;
+    padding: 0.5rem 0.55rem 0.75rem;
+    gap: 0.5rem;
+    overflow: visible !important;
   }
 
   .zk-qs .qs-tools {
@@ -184,30 +207,30 @@
     min-height: 0;
     align-items: stretch;
     align-content: start;
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
     overflow: visible;
   }
 
   .zk-qs .qs-menu-panel,
   .zk-qs .qs-ticket-panel {
-    height: auto;
-    max-height: none;
+    height: auto !important;
+    max-height: none !important;
     min-height: 0;
-    overflow: visible;
+    overflow: visible !important;
   }
 
   .zk-qs .qs-menu-panel .mp-root {
-    height: auto;
+    height: auto !important;
     min-height: 0;
-    overflow: visible;
+    overflow: visible !important;
   }
 
   .zk-qs .qs-menu-panel .mp-body {
-    display: grid;
-    grid-template-columns: 1fr;
-    height: auto;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    height: auto !important;
     min-height: 0;
-    overflow: visible;
+    overflow: visible !important;
   }
 
   .zk-qs .qs-menu-panel .mp-nav {
@@ -228,22 +251,45 @@
 
   .zk-qs .qs-menu-panel .mp-items {
     flex: none;
-    height: auto;
+    height: auto !important;
     min-height: 12rem;
-    overflow: visible;
+    overflow: visible !important;
   }
 
   .zk-qs .qs-lines {
     flex: none;
     min-height: 7rem;
     max-height: none;
-    overflow: visible;
+    overflow: visible !important;
+  }
+
+  .zk-qs > .zk-hub-foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 70;
+    box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.18);
   }
 }
 
 @media (max-width: 720px) {
   .zk-qs .zk-dash-header.zk-dash-header-bar {
-    margin: 0;
+    padding: 0.5rem 0.55rem;
+    gap: 0.45rem;
+  }
+
+  .zk-qs .zk-dash-header .zk-dash-brand {
+    max-width: min(42vw, 9.5rem);
+  }
+
+  .zk-qs .zk-dash-header-actions {
+    width: auto;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    gap: 0.35rem;
+  }
+
+  .zk-qs .zk-dash-header .mesa-select-chrome {
+    max-width: 7.5rem;
   }
 
   .zk-qs > .qs-page {
