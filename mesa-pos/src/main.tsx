@@ -10,6 +10,7 @@ import './styles/dash-header.css'
 import './styles/side-nav.css'
 import './styles/accounts-module.css'
 import './styles/drive-thru.css'
+import './styles/quick-serve.css'
 import App from './App.tsx'
 
 const isDesktop = navigator.userAgent.toLowerCase().includes('electron')

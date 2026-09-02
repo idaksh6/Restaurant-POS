@@ -1,0 +1,158 @@
+/* Quick Serve — pin DashHeader + toolbars; scroll menu/ticket only (match Drive Thru shell). */
+
+.app-shell:has(.zk-qs) .main-stage {
+  background: #eef3f0;
+  flex-direction: column;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.zk-qs {
+  background:
+    radial-gradient(700px 320px at 0 0, #2aa35f24, #0000 55%),
+    radial-gradient(560px 280px at 100% 10%, #c45c2614, #0000 50%),
+    linear-gradient(#eef3f0 0%, #e6ece8 100%);
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.zk-qs .zk-dash-header.zk-dash-header-bar {
+  flex-shrink: 0;
+  margin: 0;
+  width: 100%;
+  border-radius: 0;
+  position: relative;
+  z-index: 40;
+}
+
+.zk-qs > .qs-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0.65rem 0.85rem 0.5rem;
+  gap: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.zk-qs .qs-toolbar,
+.zk-qs .qs-tools {
+  flex-shrink: 0;
+}
+
+.zk-qs .qs-desk {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.zk-qs .qs-menu-panel,
+.zk-qs .qs-ticket-panel {
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.zk-qs .qs-ticket-panel {
+  position: static;
+  top: auto;
+}
+
+.zk-qs .qs-menu-panel .mp-root {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.zk-qs .qs-menu-panel .mp-toolbar {
+  flex-shrink: 0;
+}
+
+.zk-qs .qs-menu-panel .mp-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.zk-qs .qs-menu-panel .mp-nav {
+  flex-shrink: 0;
+  overflow: auto;
+}
+
+.zk-qs .qs-menu-panel .mp-items {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.zk-qs .qs-ticket-head,
+.zk-qs .qs-note,
+.zk-qs .qs-totals,
+.zk-qs .qs-actions {
+  flex-shrink: 0;
+}
+
+.zk-qs .qs-lines {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.zk-qs > .zk-hub-foot {
+  z-index: 5;
+  flex-shrink: 0;
+  margin-top: 0;
+  width: 100%;
+  border-radius: 0;
+  position: relative;
+  bottom: auto;
+}
+
+@media (max-width: 960px) {
+  .zk-qs .qs-desk {
+    grid-template-columns: 1fr;
+    overflow: auto;
+    align-content: start;
+  }
+
+  .zk-qs .qs-menu-panel,
+  .zk-qs .qs-ticket-panel {
+    height: auto;
+    max-height: none;
+    min-height: 18rem;
+  }
+
+  .zk-qs .qs-menu-panel .mp-root,
+  .zk-qs .qs-menu-panel .mp-body,
+  .zk-qs .qs-menu-panel .mp-items {
+    height: auto;
+    min-height: 14rem;
+    overflow: visible;
+  }
+
+  .zk-qs .qs-lines {
+    max-height: 16rem;
+  }
+}
