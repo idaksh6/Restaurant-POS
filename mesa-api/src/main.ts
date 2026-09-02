@@ -9,9 +9,19 @@ async function bootstrap() {
   // rejects that and the browser reports it as "Failed to fetch".
   app.useBodyParser('json', { limit: '10mb' })
   app.useBodyParser('urlencoded', { limit: '10mb', extended: true })
-  // LiteSpeed/CyberPanel OLS duplicates Access-Control-Allow-Origin when both
-  // the reverse proxy and Nest send it. Set CORS_IN_APP=0 on the server.
-  if (process.env.CORS_IN_APP !== '0') {
+  // CyberPanel OpenLiteSpeed reverse-proxy duplicates Access-Control-Allow-Origin
+  // when Nest also sets it. On the server set CORS_IN_APP=0 and put the CORS
+  // headers on the LiteSpeed vhost (extraHeaders). Nest must still answer
+  // OPTIONS with 204 or the browser rejects the preflight (404 is not OK).
+  if (process.env.CORS_IN_APP === '0') {
+    app.use((req, res, next) => {
+      if (req.method === 'OPTIONS') {
+        res.status(204).end()
+        return
+      }
+      next()
+    })
+  } else {
     app.enableCors({ origin: true })
   }
   const port = Number(process.env.PORT ?? 3001)

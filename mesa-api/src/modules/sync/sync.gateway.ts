@@ -8,8 +8,7 @@ import { OnModuleDestroy, OnModuleInit } from '@nestjs/common'
 import { Server } from 'socket.io'
 import { mesaBus } from './bus'
 
-// When CORS_IN_APP=0, LiteSpeed sets Access-Control-Allow-Origin; Nest must not
-// also set it or browsers reject duplicate CORS headers on socket.io responses.
+// Match HTTP CORS: Nest owns it unless CORS_IN_APP=0 (proxy-only CORS).
 const gatewayCors =
   process.env.CORS_IN_APP === '0' ? false : { origin: true }
 
