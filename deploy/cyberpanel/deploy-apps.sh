@@ -86,6 +86,9 @@ fi
 (cd "${API_DIR}" && npx prisma generate)
 (cd "${API_DIR}" && npm run build)
 (cd "${API_DIR}" && npx prisma migrate deploy)
+if [[ -f "${API_DIR}/scripts/migrate-all-tenants.js" ]]; then
+  (cd "${API_DIR}" && node scripts/migrate-all-tenants.js)
+fi
 
 if command -v pm2 >/dev/null 2>&1; then
   if run_pm2 describe "${PM2_APP_NAME}" >/dev/null 2>&1; then
