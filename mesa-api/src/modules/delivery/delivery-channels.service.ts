@@ -5,6 +5,7 @@ import { assertBranchInCompany } from '../auth/tenant'
 import { notifyTicketChanged } from '../sync/bus'
 import { adapterForChannel, supportedChannelIds } from './adapters/registry'
 import type {
+  AdapterResult,
   ChannelIntegrationRow,
   ChannelMenuItem,
   ChannelOrderStatus,
@@ -188,9 +189,9 @@ export class DeliveryChannelsService {
     )
     const adapter = adapterFor(channel)
     const row = await this.findConfigRow(companyId, branchId, channel)
-    let result = {
+    let result: AdapterResult = {
       ok: true,
-      mode: 'local' as const,
+      mode: 'stub',
       message: 'Accepted at POS (configure channel API for live partner callback)',
     }
 
@@ -224,9 +225,9 @@ export class DeliveryChannelsService {
     )
     const adapter = adapterFor(channel)
     const row = await this.findConfigRow(companyId, branchId, channel)
-    let result = {
+    let result: AdapterResult = {
       ok: true,
-      mode: 'local' as const,
+      mode: 'stub',
       message: 'Rejected at POS (configure channel API for live partner callback)',
     }
 

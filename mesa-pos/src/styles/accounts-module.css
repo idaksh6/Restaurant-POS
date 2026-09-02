@@ -32,12 +32,14 @@
   overflow: hidden;
 }
 
-.zk-acct .zk-dash-header {
+.zk-acct .zk-dash-header.zk-dash-header-bar {
   z-index: 30;
   isolation: isolate;
   flex-shrink: 0;
   min-width: 0;
-  margin: 0.55rem 0.8rem 0;
+  margin: 0;
+  width: 100%;
+  border-radius: 0;
   position: relative;
 }
 
@@ -61,8 +63,8 @@
   gap: 0.85rem;
   min-width: 0;
   min-height: 0;
-  margin: 0.55rem 0.8rem 0;
-  padding-bottom: 0.35rem;
+  margin: 0;
+  padding: 0.85rem 1rem 0.5rem;
   display: flex;
   overflow: auto;
 }
@@ -274,10 +276,12 @@
   flex-direction: column;
   gap: 0.85rem;
   min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
   background: #fff;
   border: 1px solid #e8eeea;
-  border-radius: 16px;
-  padding: 0.85rem;
+  border-radius: 12px;
+  padding: 1rem;
   box-shadow: 0 8px 20px rgba(16, 40, 28, 0.04);
 }
 
@@ -347,10 +351,15 @@
   flex-wrap: wrap;
   gap: 0.55rem;
   align-items: center;
-  padding: 0.75rem 1rem;
-  border-radius: 14px;
+  justify-content: space-between;
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
   border: 1px solid var(--line);
-  background: var(--panel);
+  background: var(--surface-2);
+}
+
+.zk-exp-toolbar .mesa-select {
+  min-width: min(16rem, 100%);
 }
 
 .zk-exp-search {
@@ -377,14 +386,15 @@
 }
 
 .zk-exp-panel {
-  border-radius: var(--radius);
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--panel);
-  box-shadow: var(--shadow);
+  box-shadow: none;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 320px;
+  flex: 1 1 auto;
+  min-height: 280px;
 }
 
 .zk-exp-table-wrap {
@@ -396,6 +406,31 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 0.92rem;
+  table-layout: fixed;
+}
+
+.zk-exp-table col.col-date {
+  width: 9.5rem;
+}
+
+.zk-exp-table col.col-invoice {
+  width: 5.5rem;
+}
+
+.zk-exp-table col.col-type {
+  width: 8rem;
+}
+
+.zk-exp-table col.col-paid {
+  width: 7rem;
+}
+
+.zk-exp-table col.col-amt {
+  width: 7.5rem;
+}
+
+.zk-exp-table col.col-action {
+  width: 3rem;
 }
 
 .zk-exp-table thead {
@@ -457,9 +492,12 @@
 }
 
 .zk-exp-narration {
-  max-width: 280px;
+  max-width: none;
   color: var(--ink-soft);
   line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .zk-exp-empty {

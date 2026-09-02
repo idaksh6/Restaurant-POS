@@ -1,0 +1,26 @@
+/* Side nav — keep icons and labels centered (long labels e.g. Drive Thru) */
+
+.side-nav .nav-links {
+  align-items: stretch;
+  width: 100%;
+}
+
+.side-nav .nav-link {
+  width: 100%;
+  justify-items: center;
+  text-align: center;
+}
+
+.side-nav .nav-link svg {
+  margin-inline: auto;
+}
+
+.side-nav .nav-link strong {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  text-align: center;
+  line-height: 1.15;
+  overflow-wrap: break-word;
+  word-break: keep-all;
+}

@@ -1,0 +1,342 @@
+/* Home shell — header flush to top, no floating panel */
+.app-shell.home-mode .main-stage {
+  padding: 0 !important;
+  background: #eef2ef;
+  flex-direction: column;
+  display: flex;
+  overflow: hidden;
+}
+
+.zk-dash-home {
+  --home-stat-radius: 14px;
+  background: #eef2ef;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.zk-dash-home .zk-dash-header.zk-dash-header-bar {
+  flex-shrink: 0;
+  border-radius: 0;
+  margin: 0;
+  width: 100%;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.zk-dash-home .zk-dash-body {
+  padding: 0.9rem 1rem 0.75rem;
+  gap: 1.15rem;
+  background: #eef2ef;
+}
+
+/* Footer — full-width bar, flush to edges */
+.zk-dash-home .zk-dash-foot {
+  border-radius: 0;
+  margin: 0;
+  width: 100%;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.75rem 1.35rem;
+  padding: 0.85rem 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.zk-dash-home .zk-dash-open-amt {
+  margin-inline-start: auto;
+  font-weight: 800;
+  font-size: 0.95rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ok) 22%, transparent);
+  color: #8ce99a;
+}
+
+/* Welcome + quick stats */
+.zk-home-hero {
+  display: grid;
+  gap: 1rem;
+}
+
+.zk-home-welcome {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.zk-home-welcome h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.zk-home-welcome p {
+  margin: 0.2rem 0 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+  max-width: 36rem;
+}
+
+.zk-home-day-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 650;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-soft);
+}
+
+.zk-home-day-pill.is-closed {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.zk-home-day-pill span {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+
+.zk-home-day-pill.is-closed span {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+.zk-home-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.zk-home-stat {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: var(--home-stat-radius);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 0 1px 2px #12201c08;
+  min-height: 4.5rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.zk-home-stat:hover {
+  border-color: color-mix(in srgb, var(--teal) 35%, var(--line));
+  box-shadow: 0 8px 20px #12201c0c;
+}
+
+.zk-home-stat-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.zk-home-stat-value {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.zk-home-stat-value.money {
+  color: var(--teal);
+}
+
+.zk-home-stat.accent-warn .zk-home-stat-value {
+  color: var(--warn);
+}
+
+.zk-home-stat.accent-kot .zk-home-stat-value {
+  color: #1971c2;
+}
+
+/* Sections */
+.zk-dash-home .zk-dash-section {
+  gap: 0.75rem;
+}
+
+.zk-dash-home .zk-dash-section-head {
+  border-bottom: none;
+  padding-bottom: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.zk-dash-home .zk-dash-section-head h2 {
+  font-size: 1rem;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  font-weight: 750;
+}
+
+.zk-dash-home .zk-dash-section-head h2::before {
+  width: 0.45rem;
+  height: 1rem;
+  border-radius: 4px;
+  vertical-align: -0.1em;
+}
+
+.zk-home-section-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0;
+  padding-left: 1.05rem;
+}
+
+/* Service tiles */
+.zk-dash-home .zk-dash-ops {
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.75rem;
+}
+
+.zk-dash-home .zk-dash-tile {
+  min-height: 6.25rem;
+  border-radius: 18px;
+  padding: 1rem 0.75rem 0.85rem;
+  border-width: 1px;
+  box-shadow:
+    0 1px 2px #12201c08,
+    0 0 0 1px color-mix(in srgb, var(--tile, var(--teal)) 6%, transparent);
+}
+
+.zk-dash-home .zk-dash-tile::before {
+  height: 4px;
+  border-radius: 18px 18px 0 0;
+}
+
+.zk-dash-home .zk-dash-glow {
+  position: absolute;
+  inset: -40% auto auto 50%;
+  transform: translateX(-50%);
+  width: 120%;
+  height: 70%;
+  background: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--tile, var(--teal)) 28%, transparent) 0%,
+    transparent 68%
+  );
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.zk-dash-home .zk-dash-icon {
+  z-index: 1;
+  width: 2.65rem;
+  height: 2.65rem;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--tile, var(--teal)) 88%, #fff),
+    var(--tile, var(--teal))
+  );
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--tile, var(--teal)) 35%, transparent);
+  transition: transform 0.16s ease;
+}
+
+.zk-dash-home .zk-dash-icon svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.zk-dash-home .zk-dash-tile strong {
+  z-index: 1;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.25;
+  max-width: 100%;
+}
+
+.zk-home-tile-badge {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.55rem;
+  z-index: 2;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 750;
+  line-height: 1.35rem;
+  text-align: center;
+  color: #fff;
+  background: var(--danger);
+  box-shadow: 0 2px 6px #b4231840;
+}
+
+/* Back office tools */
+.zk-dash-home .zk-dash-tools {
+  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+  gap: 0.65rem;
+}
+
+.zk-dash-home .zk-dash-tool {
+  min-height: 5.25rem;
+  border-radius: 16px;
+  padding: 0.75rem 0.5rem;
+}
+
+.zk-dash-home .zk-dash-tool-icon {
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--tile, var(--teal)) 28%, transparent);
+}
+
+.zk-dash-home .zk-dash-tool strong {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+@media (max-width: 1100px) {
+  .zk-home-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .zk-home-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .zk-dash-home .zk-dash-ops {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .zk-dash-home .zk-dash-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .zk-home-welcome h1 {
+    font-size: 1.15rem;
+  }
+}

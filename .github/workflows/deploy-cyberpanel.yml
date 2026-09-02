@@ -27,11 +27,21 @@ jobs:
             export REPO_DIR="${REPO_DIR:-/home/restaurant-pos.isarva.in/Restaurant-POS}"
             export POS_PUBLIC_HTML="${POS_PUBLIC_HTML:-/home/app.restaurant-pos.isarva.in/public_html}"
             export VITE_API_URL="${VITE_API_URL:-https://api.restaurant-pos.isarva.in}"
+            export NVM_DIR="${NVM_DIR:-/home/restaurant-pos.isarva.in/.nvm}"
 
             if [[ ! -d "${REPO_DIR}/.git" ]]; then
-              echo "Cloning repository (first deploy)..."
-              mkdir -p "$(dirname "${REPO_DIR}")"
-              git clone --branch main https://github.com/idaksh6/Restaurant-POS.git "${REPO_DIR}"
+              if [[ -d "${REPO_DIR}" ]]; then
+                echo "Initializing git in existing REPO_DIR..."
+                cd "${REPO_DIR}"
+                git init
+                git remote add origin https://github.com/idaksh6/Restaurant-POS.git 2>/dev/null || git remote set-url origin https://github.com/idaksh6/Restaurant-POS.git
+                git fetch origin main
+                git reset --hard origin/main
+              else
+                echo "Cloning repository (first deploy)..."
+                mkdir -p "$(dirname "${REPO_DIR}")"
+                git clone --branch main https://github.com/idaksh6/Restaurant-POS.git "${REPO_DIR}"
+              fi
             else
               cd "${REPO_DIR}"
               git fetch origin main

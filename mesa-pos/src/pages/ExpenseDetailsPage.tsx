@@ -187,6 +187,15 @@ export default function ExpenseDetailsPage() {
       <div className="zk-exp-panel">
         <div className="zk-exp-table-wrap">
           <table className="zk-exp-table">
+            <colgroup>
+              <col className="col-date" />
+              <col className="col-invoice" />
+              <col className="col-type" />
+              <col />
+              <col className="col-paid" />
+              <col className="col-amt" />
+              <col className="col-action" />
+            </colgroup>
             <thead>
               <tr>
                 <th>{t.expenseColDate}</th>

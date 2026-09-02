@@ -44,6 +44,10 @@ if [[ ! -f "${REPO_DIR}/mesa-api/.env" ]]; then
   cp "${REPO_DIR}/mesa-api/.env.example" "${REPO_DIR}/mesa-api/.env"
 fi
 
+if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -qx mesa-postgres; then
+  echo "NOTE: Local Postgres not detected. Run: bash ${REPO_DIR}/deploy/cyberpanel/install-postgres.sh"
+fi
+
 echo "VITE_API_URL=${VITE_API_URL}" > "${REPO_DIR}/mesa-pos/.env"
 
 bash "${REPO_DIR}/deploy/cyberpanel/deploy-apps.sh"

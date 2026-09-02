@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { money, lineTotal } from '../data/mock'
+import { money } from '../data/mock'
 import { getPermissions, type NavKey } from '../auth/roles'
+import { badgeCount, useHomeDashboardStats } from '../lib/homeDashboardStats'
 import { useAuth } from '../state/AuthContext'
 import { useBranch } from '../state/BranchContext'
 import { localeTag, useI18n, type I18nKey } from '../locale/i18n'
 import { usePos } from '../state/PosContext'
-import { useShift } from '../state/ShiftContext'
 import DashHeader from '../components/DashHeader'
 
 type TileDef = {
@@ -18,6 +18,7 @@ type TileDef = {
   adminAlways?: boolean
   icon: ReactNode
   color: string
+  badge?: number
 }
 
 function Glyph({ children }: { children: ReactNode }) {
@@ -185,7 +186,7 @@ function IconStore() {
 const opsTiles: TileDef[] = [
   { id: 'dine', labelKey: 'tileDineIn', to: '/dine-in', nav: 'dine-in', icon: <IconPlate />, color: '#2f9e44' },
   { id: 'quick', labelKey: 'tileQuickServe', to: '/quick-serve', nav: 'takeaway', icon: <IconBolt />, color: '#f08c00' },
-  { id: 'drive', labelKey: 'tileDriveThru', to: '/drive-thru', nav: 'takeaway', adminAlways: true, icon: <IconCar />, color: '#845ef7' },
+  { id: 'drive', labelKey: 'tileDriveThru', to: '/drive-thru', nav: 'drive-thru', icon: <IconCar />, color: '#845ef7' },
   { id: 'delivery', labelKey: 'tileDelivery', to: '/delivery', nav: 'delivery', icon: <IconBike />, color: '#1971c2' },
   { id: 'online', labelKey: 'tileOnline', to: '/online', nav: 'online', icon: <IconGlobe />, color: '#0c8599' },
   { id: 'takeaway', labelKey: 'tileTakeAway', to: '/takeaway', nav: 'takeaway', icon: <IconBag />, color: '#5c7cfa' },
@@ -207,14 +208,32 @@ const toolTiles: TileDef[] = [
   { id: 'store', labelKey: 'tileZkStore', adminAlways: true, icon: <IconStore />, color: '#212529' },
 ]
 
+function TileBadge({ count }: { count?: number }) {
+  if (!count || count <= 0) return null
+  return (
+    <span className="zk-home-tile-badge" aria-label={`${count}`}>
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
 export default function HomePage() {
   const { user } = useAuth()
-  const { kitchen, tables, tickets, dayIsClosed, flash } = usePos()
-  const { activeShift } = useShift()
+  const { kitchen, tables, tickets, dayIsClosed, flash, tableOrders, tableDiscounts, getTableChargeLines } =
+    usePos()
   const { activeBranch } = useBranch()
   const { t, lang } = useI18n()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
+
+  const stats = useHomeDashboardStats({
+    tables,
+    tableOrders,
+    tickets,
+    kitchen,
+    tableDiscounts,
+    getTableChargeLines,
+  })
 
   if (!user) return null
 
@@ -222,26 +241,48 @@ export default function HomePage() {
   const allowed = new Set(perms.nav)
   const isAdmin = user.role === 'admin'
 
-  const openTables = tables.filter((t) => t.status === 'occupied' || t.status === 'billing')
-  const billing = tables.filter((t) => t.status === 'billing')
-  const kitchenQueue = kitchen.filter((k) => k.status !== 'ready').length
-  const openValue =
-    openTables.reduce((s, t) => s + (t.amount ?? 0), 0) +
-    tickets.reduce((s, t) => s + lineTotal(t.lines), 0)
-
   function canSee(tile: TileDef) {
     if (isAdmin && tile.adminAlways) return true
     if (tile.nav) return allowed.has(tile.nav)
     return isAdmin
   }
 
+  function tileBadge(tile: TileDef): number | undefined {
+    switch (tile.id) {
+      case 'dine':
+        return badgeCount(stats.dineOpenCount)
+      case 'quick':
+        return badgeCount(stats.quickServeCount)
+      case 'drive':
+        return badgeCount(stats.driveThruCount)
+      case 'delivery':
+        return badgeCount(stats.deliveryCount)
+      case 'online':
+        return badgeCount(stats.onlineCount)
+      case 'takeaway':
+        return badgeCount(stats.takeawayCount)
+      case 'unset':
+        return badgeCount(stats.unsettledCount)
+      default:
+        return tile.badge
+    }
+  }
+
+  function toolBadge(tile: TileDef): number | undefined {
+    if (tile.id === 'kds') return badgeCount(stats.kitchenQueue)
+    if (tile.id === 'tkt') return badgeCount(stats.billingCount)
+    return tile.badge
+  }
+
   const q = query.trim().toLowerCase()
   const ops = opsTiles
     .filter(canSee)
     .filter((tile) => !q || t[tile.labelKey].toLowerCase().includes(q))
+    .map((tile) => ({ ...tile, badge: tileBadge(tile) }))
   const tools = toolTiles
     .filter(canSee)
     .filter((tile) => !q || t[tile.labelKey].toLowerCase().includes(q))
+    .map((tile) => ({ ...tile, badge: toolBadge(tile) }))
 
   function soon(label: string) {
     flash(`${label} — ${t.comingLater}`)
@@ -253,102 +294,113 @@ export default function HomePage() {
     if (hit?.to) navigate(hit.to)
   }
 
+  function renderTile(
+    tile: TileDef,
+    className: string,
+    iconClass: string,
+    animationIndex?: number,
+  ) {
+    const body = (
+      <>
+        {className === 'zk-dash-tile' ? <span className="zk-dash-glow" aria-hidden /> : null}
+        <TileBadge count={tile.badge} />
+        <span className={iconClass}>{tile.icon}</span>
+        <strong>{t[tile.labelKey]}</strong>
+      </>
+    )
+    const style = {
+      animationDelay: animationIndex !== undefined ? `${animationIndex * 0.03}s` : undefined,
+      ['--tile' as string]: tile.color,
+    }
+    if (tile.to) {
+      return (
+        <Link key={tile.id} to={tile.to} className={className} style={style}>
+          {body}
+        </Link>
+      )
+    }
+    return (
+      <button
+        key={tile.id}
+        type="button"
+        className={className}
+        style={style}
+        onClick={() => soon(t[tile.labelKey])}
+      >
+        {body}
+      </button>
+    )
+  }
+
   return (
-    <div className="zk-dash">
+    <div className="zk-dash zk-dash-home">
       <DashHeader search={query} onSearchChange={setQuery} onSearchKeyDown={onSearchKey} />
 
       <div className="zk-dash-body">
-      {ops.length > 0 ? (
-        <section className="zk-dash-section">
-          <header className="zk-dash-section-head">
-            <h2>{t.serviceHub}</h2>
-          </header>
-          <div className="zk-dash-ops">
-            {ops.map((tile, i) => {
-              const body = (
-                <>
-                  <span className="zk-dash-glow" aria-hidden />
-                  <span className="zk-dash-icon">{tile.icon}</span>
-                  <strong>{t[tile.labelKey]}</strong>
-                </>
-              )
-              const style = { animationDelay: `${i * 0.03}s`, ['--tile' as string]: tile.color }
-              if (tile.to) {
-                return (
-                  <Link key={tile.id} to={tile.to} className="zk-dash-tile" style={style}>
-                    {body}
-                  </Link>
-                )
-              }
-              return (
-                <button
-                  key={tile.id}
-                  type="button"
-                  className="zk-dash-tile"
-                  style={style}
-                  onClick={() => soon(t[tile.labelKey])}
-                >
-                  {body}
-                </button>
-              )
-            })}
+        <section className="zk-home-hero" aria-label={t.navHome}>
+          <div className="zk-home-welcome">
+            <div>
+              <h1>{t.homeWelcome}, {user.name}</h1>
+              <p>{t.homeSubtitle}</p>
+            </div>
+            <div
+              className={`zk-home-day-pill${dayIsClosed ? ' is-closed' : ''}`}
+              title={dayIsClosed ? t.dayClosed : t.dayOpen}
+            >
+              <span aria-hidden />
+              {dayIsClosed ? t.dayClosed : t.dayOpen}
+            </div>
+          </div>
+
+          <div className="zk-home-stats">
+            <div className="zk-home-stat">
+              <span className="zk-home-stat-label">{t.homeStatsTables}</span>
+              <span className="zk-home-stat-value">{stats.openTablesCount}</span>
+            </div>
+            <div className="zk-home-stat accent-warn">
+              <span className="zk-home-stat-label">{t.homeStatsBilling}</span>
+              <span className="zk-home-stat-value">{stats.billingCount}</span>
+            </div>
+            <div className="zk-home-stat accent-kot">
+              <span className="zk-home-stat-label">{t.homeStatsKitchen}</span>
+              <span className="zk-home-stat-value">{stats.kitchenQueue}</span>
+            </div>
+            <div className="zk-home-stat">
+              <span className="zk-home-stat-label">{t.homeStatsSales}</span>
+              <span className="zk-home-stat-value money mesa-ltr-nums">{money(stats.openValue)}</span>
+            </div>
           </div>
         </section>
-      ) : null}
 
-      <section className="zk-dash-section">
-        {tools.length > 0 ? (
-          <header className="zk-dash-section-head">
-            <h2>{t.backOfficeHub}</h2>
-          </header>
+        {ops.length > 0 ? (
+          <section className="zk-dash-section">
+            <header className="zk-dash-section-head">
+              <h2>{t.serviceHub}</h2>
+              <p className="zk-home-section-hint">{t.serviceHubHint}</p>
+            </header>
+            <div className="zk-dash-ops">
+              {ops.map((tile, i) => renderTile(tile, 'zk-dash-tile', 'zk-dash-icon', i))}
+            </div>
+          </section>
         ) : null}
-        <div className="zk-dash-tools">
-          {tools.map((tile) => {
-            const body = (
-              <>
-                <span className="zk-dash-tool-icon">{tile.icon}</span>
-                <strong>{t[tile.labelKey]}</strong>
-              </>
-            )
-            const style = { ['--tile' as string]: tile.color }
-            if (tile.to) {
-              return (
-                <Link key={tile.id} to={tile.to} className="zk-dash-tool" style={style}>
-                  {body}
-                </Link>
-              )
-            }
-            return (
-              <button
-                key={tile.id}
-                type="button"
-                className="zk-dash-tool"
-                style={style}
-                onClick={() => soon(t[tile.labelKey])}
-              >
-                {body}
-              </button>
-            )
-          })}
-        </div>
-      </section>
-      {q && ops.length === 0 && tools.length === 0 ? (
-        <p className="zk-dash-empty">
-          {t.noMatches} “{query.trim()}”
-        </p>
-      ) : null}
-      </div>
 
-      <div className="zk-dash-announce">
-        <span className="zk-dash-announce-dot" aria-hidden />
-        <p>
-          <strong>{perms.label}</strong>
-          <span>
-            {openTables.length} {t.openLabel} · {billing.length} {t.billingLabel} · {kitchenQueue}{' '}
-            {t.kotLabel} · {dayIsClosed ? t.dayClosed : t.dayOpen}
-            {activeShift ? ` · ${t.shiftLabel} ${activeShift.userName}` : ''}
-          </span>
-        </p>
+        {tools.length > 0 ? (
+          <section className="zk-dash-section">
+            <header className="zk-dash-section-head">
+              <h2>{t.backOfficeHub}</h2>
+              <p className="zk-home-section-hint">{t.backOfficeHubHint}</p>
+            </header>
+            <div className="zk-dash-tools">
+              {tools.map((tile) => renderTile(tile, 'zk-dash-tool', 'zk-dash-tool-icon'))}
+            </div>
+          </section>
+        ) : null}
+
+        {q && ops.length === 0 && tools.length === 0 ? (
+          <p className="zk-dash-empty">
+            {t.noMatches} “{query.trim()}”
+          </p>
+        ) : null}
       </div>
 
       <footer className="zk-dash-foot">
@@ -365,10 +417,10 @@ export default function HomePage() {
             month: 'short',
             year: '2-digit',
           })}{' '}
-          · {t.dayOpen}
+          · {dayIsClosed ? t.dayClosed : t.dayOpen}
         </span>
-        <span className="zk-dash-open-amt">
-          {t.openAmount} {money(openValue)}
+        <span className="zk-dash-open-amt mesa-ltr-nums">
+          {t.openAmount} {money(stats.openValue)}
         </span>
       </footer>
     </div>

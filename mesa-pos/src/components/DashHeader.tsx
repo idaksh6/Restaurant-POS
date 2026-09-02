@@ -6,7 +6,6 @@ import { useAuth } from '../state/AuthContext'
 import { useBranch } from '../state/BranchContext'
 import { usePos } from '../state/PosContext'
 import { useSync } from '../sync/SyncContext'
-import BrandMark from './BrandMark'
 import LangSwitch from './LangSwitch'
 import MesaSelect from './MesaSelect'
 
@@ -25,7 +24,7 @@ export default function DashHeader({
   const { kitchen, tables } = usePos()
   const { branches, activeBranch, switchBranch, company } = useBranch()
   const { t, lang } = useI18n()
-  const { connectivity, queued, outbox, runSync } = useSync()
+  const { connectivity, outbox, runSync } = useSync()
   const navigate = useNavigate()
   const [notesOpen, setNotesOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
@@ -55,22 +54,22 @@ export default function DashHeader({
     connectivity === 'offline'
       ? t.offline
       : connectivity === 'syncing'
-        ? `${t.syncing}${queued ? ` (${queued})` : ''}`
+        ? t.syncing
         : poison
-          ? `${t.online} · ${t.syncPoison}`
-          : queued
-            ? `${t.online} · ${queued} ${t.queuedCount}`
-            : t.online
+          ? t.syncPoison
+          : t.online
 
   const brandName = companyDisplayName(company, lang)
-  const branchLabel = `${activeBranch.code} · ${branchDisplayName(activeBranch, lang)}`
+  const branchLabel = `${activeBranch.code} - ${branchDisplayName(activeBranch, lang)}`
   const billing = tables.filter((table) => table.status === 'billing')
   const kitchenQueue = kitchen.filter((ticket) => ticket.status !== 'ready').length
   const alertCount = kitchenQueue + billing.length
-  const clockDate = new Date(now).toLocaleDateString(localeTag(lang), {
-    day: '2-digit',
-    month: 'short',
-  })
+  const clockDate = new Date(now)
+    .toLocaleDateString(localeTag(lang), {
+      day: '2-digit',
+      month: 'short',
+    })
+    .toUpperCase()
   const clockTime = new Date(now).toLocaleTimeString(localeTag(lang), {
     hour: '2-digit',
     minute: '2-digit',
@@ -78,17 +77,14 @@ export default function DashHeader({
   })
 
   const brand = (
-    <>
-      <BrandMark name={brandName} logoUrl={company.logoDataUrl} className="zk-dash-mark" />
-      <div>
-        <strong title={brandName}>{brandName}</strong>
-        <small>{branchLabel}</small>
-      </div>
-    </>
+    <div>
+      <strong title={brandName}>{brandName}</strong>
+      <small>{branchLabel}</small>
+    </div>
   )
 
   return (
-    <header className="zk-dash-header">
+    <header className="zk-dash-header zk-dash-header-bar">
       {brandTo ? (
         <Link to={brandTo} className="zk-dash-brand">
           {brand}
@@ -125,7 +121,7 @@ export default function DashHeader({
               .filter((b) => b.active)
               .map((b) => ({
                 value: b.id,
-                label: `${b.code} · ${branchDisplayName(b, lang)}`,
+                label: `${b.code} - ${branchDisplayName(b, lang)}`,
               }))}
           />
         </div>

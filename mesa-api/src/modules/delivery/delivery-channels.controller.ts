@@ -38,7 +38,7 @@ export class DeliveryChannelsController {
   ) {
     return this.channels.upsertConfig(requireCompany(req.user), {
       ...body,
-      branchId: body.branchId ?? req.user?.branchId,
+      branchId: body.branchId ?? req.user?.branchId ?? '',
     })
   }
 

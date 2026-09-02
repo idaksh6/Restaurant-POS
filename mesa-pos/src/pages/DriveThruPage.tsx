@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getPermissions } from '../auth/roles'
+import DashHeader from '../components/DashHeader'
+import { HubFooter } from '../components/HubChrome'
 import CustomerSearchPanel from '../components/CustomerSearchPanel'
 import MesaSelect from '../components/MesaSelect'
 import MenuPicker from '../components/MenuPicker'
@@ -62,6 +64,7 @@ export default function DriveThruPage() {
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
   const [showKeypad, setShowKeypad] = useState(false)
   const [keypadCode, setKeypadCode] = useState('')
+  const [search, setSearch] = useState('')
 
   const selected = tickets.find((t) => t.id === ticketId)
   const driveTickets = useMemo(
@@ -207,19 +210,43 @@ export default function DriveThruPage() {
   )
 
   return (
-    <div className="dt-page">
-      <header className="dt-top">
-        <strong>Mesa · Drive Thru</strong>
-        <div className="dt-top-right">
-          <span>{nowLabel}</span>
-          {dayIsClosed ? <span className="chip">Day closed</span> : null}
-          <Link to="/" className="dt-close" aria-label="Close">
-            ✕
-          </Link>
-        </div>
-      </header>
+    <div className="zk-dt">
+      <DashHeader search={search} onSearchChange={setSearch} brandTo="/" />
 
-      <div className="dt-shell">
+      <div className="dt-page">
+        <header className="dt-toolbar">
+          <div className="dt-toolbar-brand">
+            <span className="dt-hero-mark" aria-hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M4 14h16l-1.5-5H6L4 14Z" />
+                <path d="M7 9 8.2 6h7.6L17 9" />
+                <circle cx="7.5" cy="16.5" r="1.6" />
+                <circle cx="16.5" cy="16.5" r="1.6" />
+              </svg>
+            </span>
+            <div>
+              <h1>Drive Thru</h1>
+              <p>
+                #{laneNo || '—'} · {lines.length === 0 ? 'New order' : pending > 0 ? 'Open' : 'Sent'}
+                {driveTickets.length > 1 ? ` · ${driveTickets.length} lanes` : ''}
+              </p>
+            </div>
+          </div>
+          <div className="dt-toolbar-actions">
+            <span className="dt-clock mesa-ltr-nums">{nowLabel}</span>
+            {dayIsClosed ? <span className="dt-pill closed">Day closed</span> : null}
+            <button
+              type="button"
+              className="btn btn-primary dt-new-btn"
+              disabled={dayIsClosed}
+              onClick={newTicket}
+            >
+              New lane
+            </button>
+          </div>
+        </header>
+
+        <div className="dt-shell">
         <aside className="dt-actions">
           <Link to="/dine-in" className="dt-action">
             Select table
@@ -429,17 +456,14 @@ export default function DriveThruPage() {
             Keypad
           </button>
         </section>
+        </div>
       </div>
 
-      <footer className="dt-foot">
-        <Link to="/quick-serve" className="dt-foot-link">
-          Quick Serve
-        </Link>
-        <span>{user?.roleLabel ?? user?.name}</span>
-        <Link to="/" className="dt-foot-home">
-          Main Menu
-        </Link>
-      </footer>
+      <HubFooter
+        backTo="/quick-serve"
+        backLabel="Quick Serve"
+        actions={<span className="dt-foot-meta">{user?.name ?? user?.roleLabel}</span>}
+      />
 
       {showSend && selected ? (
         <SendOrdersModal

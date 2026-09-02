@@ -58,6 +58,17 @@ function IconKitchen() {
   )
 }
 
+function IconCar() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M4 14h16l-1.5-5H6L4 14Z" />
+      <path d="M7 9 8.2 6h7.6L17 9" />
+      <circle cx="7.5" cy="16.5" r="1.5" />
+      <circle cx="16.5" cy="16.5" r="1.5" />
+    </svg>
+  )
+}
+
 function IconBoxes() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -147,6 +158,7 @@ const icons: Record<NavKey, () => ReactNode> = {
   'dine-in': IconTables,
   payments: IconPay,
   takeaway: IconBag,
+  'drive-thru': IconCar,
   delivery: IconTruck,
   online: IconOnline,
   kitchen: IconKitchen,
@@ -251,7 +263,6 @@ export default function AppShell() {
     pathname.startsWith('/rider') ||
     pathname.startsWith('/courier')
   const counterMode =
-    pathname.startsWith('/drive-thru') ||
     pathname.startsWith('/rider') ||
     pathname.startsWith('/courier')
 

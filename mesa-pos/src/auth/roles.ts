@@ -8,6 +8,7 @@ export type NavKey =
   | 'dine-in'
   | 'payments'
   | 'takeaway'
+  | 'drive-thru'
   | 'delivery'
   | 'online'
   | 'kitchen'
@@ -52,6 +53,7 @@ const allNav: NavKey[] = [
   'dine-in',
   'payments',
   'takeaway',
+  'drive-thru',
   'delivery',
   'online',
   'kitchen',
@@ -110,7 +112,7 @@ export const rolePermissions: Record<SystemRoleKey, RolePermissions> = {
     label: 'Cashier',
     homeTitle: 'Cashier Desk · KSA',
     homeSubtitle: 'Settle with mada / Apple Pay / STC Pay, takeaway & delivery',
-    nav: ['home', 'payments', 'dine-in', 'takeaway', 'delivery', 'online', 'crm'],
+    nav: ['home', 'payments', 'dine-in', 'takeaway', 'drive-thru', 'delivery', 'online', 'crm'],
     canOpenTable: true,
     canSendOrders: true,
     canChangeTable: false,
@@ -125,7 +127,7 @@ export const rolePermissions: Record<SystemRoleKey, RolePermissions> = {
     label: 'Food Server',
     homeTitle: 'Food Server · Floor',
     homeSubtitle: 'Seat guests, take orders, send kitchen, request payment',
-    nav: ['home', 'dine-in', 'kitchen', 'takeaway'],
+    nav: ['home', 'dine-in', 'kitchen', 'takeaway', 'drive-thru'],
     canOpenTable: true,
     canSendOrders: true,
     canChangeTable: true,
@@ -605,6 +607,7 @@ export const navMeta: Record<NavKey, { to: string; label: string; end?: boolean 
   'dine-in': { to: '/dine-in', label: 'Floor' },
   payments: { to: '/payments', label: 'Payments' },
   takeaway: { to: '/takeaway', label: 'Takeaway' },
+  'drive-thru': { to: '/drive-thru', label: 'Drive Thru', end: true },
   delivery: { to: '/delivery', label: 'Delivery' },
   online: { to: '/online', label: 'Online' },
   kitchen: { to: '/kitchen', label: 'KOT' },
@@ -692,7 +695,10 @@ export function pathAllowed(role: RoleKey, pathname: string) {
 
   const allowed = perms.nav.map((key) => navMeta[key].to)
   if (pathname === '/') return allowed.includes('/')
-  if (pathname.startsWith('/quick-serve') || pathname.startsWith('/drive-thru')) {
+  if (pathname.startsWith('/drive-thru')) {
+    return allowed.includes('/drive-thru') || allowed.includes('/takeaway') || isAdmin
+  }
+  if (pathname.startsWith('/quick-serve')) {
     return allowed.some((to) => to === '/takeaway' || to === '/payments' || to === '/dine-in')
   }
   if (pathname === '/crm' || pathname.startsWith('/settings/customers')) {

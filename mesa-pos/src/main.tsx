@@ -5,7 +5,11 @@ import './styles/mesa-base.css'
 import './styles/floor-tables.css'
 import './styles/back-office-layout.css'
 import './styles/back-office-roles.css'
+import './styles/home-dashboard.css'
+import './styles/dash-header.css'
+import './styles/side-nav.css'
 import './styles/accounts-module.css'
+import './styles/drive-thru.css'
 import App from './App.tsx'
 
 const isDesktop = navigator.userAgent.toLowerCase().includes('electron')
