@@ -13,6 +13,18 @@ type Handler = (event: RealtimeEvent) => void
 let socket: Socket | null = null
 const handlers = new Set<Handler>()
 
+/** LiteSpeed/CyberPanel often breaks wss upgrade (HTTP/2); polling is reliable. */
+function socketIoOptions(base: string) {
+  const local =
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(base) ||
+    base.startsWith('http://localhost') ||
+    base.startsWith('http://127.0.0.1')
+  if (local) {
+    return { transports: ['websocket', 'polling'] as const, upgrade: true }
+  }
+  return { transports: ['polling'] as const, upgrade: false }
+}
+
 export function connectRealtime(apiBase?: string) {
   const base = apiBase ?? getApiBaseUrl()
   if (!base || typeof window === 'undefined') return () => undefined
@@ -21,11 +33,11 @@ export function connectRealtime(apiBase?: string) {
   socket?.disconnect()
   socket = null
 
+  const { transports, upgrade } = socketIoOptions(base)
+
   socket = io(base, {
-    // Polling first: LiteSpeed reverse-proxy often fails pure websocket upgrades.
-    // Socket.IO then upgrades to websocket when the proxy allows it.
-    transports: ['polling', 'websocket'],
-    upgrade: true,
+    transports: [...transports],
+    upgrade,
     query: { deviceId: getDeviceId() },
     reconnection: true,
     reconnectionAttempts: 8,
