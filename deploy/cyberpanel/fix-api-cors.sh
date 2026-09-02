@@ -3,14 +3,15 @@
 # sets it. Fix: LiteSpeed owns CORS headers; Nest answers OPTIONS with empty 204.
 #
 # Run once on server as root.
-# Optional: CORS_ORIGIN=https://app.restaurant-pos.isarva.in
+# Optional: CORS_ORIGIN=*  (default) — required for Electron mesa:// and the web app
+#            CORS_ORIGIN=https://app.restaurant-pos.isarva.in  — web only
 
 set -euo pipefail
 
 VHOST="/usr/local/lsws/conf/vhosts/api.restaurant-pos.isarva.in/vhost.conf"
 API_ENV="/home/restaurant-pos.isarva.in/Restaurant-POS/mesa-api/.env"
 REPO_DIR="${REPO_DIR:-/home/restaurant-pos.isarva.in/Restaurant-POS}"
-ORIGIN="${CORS_ORIGIN:-https://app.restaurant-pos.isarva.in}"
+ORIGIN="${CORS_ORIGIN:-*}"
 NODE="/home/restaurant-pos.isarva.in/.nvm/versions/node/v20.20.2/bin"
 
 if [[ ! -f "${VHOST}" ]]; then

@@ -413,6 +413,9 @@ async function createWindow(root) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Custom mesa:// UI origin fails CORS against a locked Access-Control-Allow-Origin.
+      // Desktop talks to our API with Authorization headers (no cookies).
+      webSecurity: false,
     },
   })
 
