@@ -28,6 +28,7 @@ jobs:
             export POS_PUBLIC_HTML="${POS_PUBLIC_HTML:-/home/app.restaurant-pos.isarva.in/public_html}"
             export VITE_API_URL="${VITE_API_URL:-https://api.restaurant-pos.isarva.in}"
             export NVM_DIR="${NVM_DIR:-/home/restaurant-pos.isarva.in/.nvm}"
+            git config --global --add safe.directory "${REPO_DIR}" 2>/dev/null || true
 
             if [[ ! -d "${REPO_DIR}/.git" ]]; then
               if [[ -d "${REPO_DIR}" ]]; then
