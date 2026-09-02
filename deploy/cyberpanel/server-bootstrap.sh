@@ -5,12 +5,12 @@
 set -euo pipefail
 
 export REPO_DIR="${REPO_DIR:-/home/restaurant-pos.isarva.in/Restaurant-POS}"
-export POS_PUBLIC_HTML="${POS_PUBLIC_HTML:-/home/app.restaurant-pos.isarva.in/public_html}"
 export VITE_API_URL="${VITE_API_URL:-https://api.restaurant-pos.isarva.in}"
+# POS_PUBLIC_HTML: leave unset — deploy-apps.sh reads the LiteSpeed vhost docRoot.
 
 echo "=== Restaurant POS server bootstrap ==="
 echo "REPO_DIR=${REPO_DIR}"
-echo "POS_PUBLIC_HTML=${POS_PUBLIC_HTML}"
+echo "POS_PUBLIC_HTML=${POS_PUBLIC_HTML:-<auto from vhost docRoot>}"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "ERROR: Node.js not found. Install Node 20+ in CyberPanel or via nvm, then re-run."

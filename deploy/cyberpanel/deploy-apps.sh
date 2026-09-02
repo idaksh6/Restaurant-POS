@@ -4,8 +4,9 @@
 #
 # Required env (adjust for your server):
 #   export REPO_DIR="/home/restaurant-pos.isarva.in/Restaurant-POS"
-#   export POS_PUBLIC_HTML="/home/app.restaurant-pos.isarva.in/public_html"
 #   export VITE_API_URL="https://api.restaurant-pos.isarva.in"
+#   # POS_PUBLIC_HTML is auto-detected from the LiteSpeed vhost docRoot; override only if needed:
+#   export POS_PUBLIC_HTML="/home/restaurant-pos.isarva.in/app.restaurant-pos.isarva.in"
 #
 # Optional:
 #   export PM2_APP_NAME="mesa-api"
@@ -20,7 +21,19 @@ set -euo pipefail
 source "$(dirname "$0")/env.sh"
 
 REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/../../" && pwd)}"
-POS_PUBLIC_HTML="${POS_PUBLIC_HTML:-/home/app.restaurant-pos.isarva.in/public_html}"
+POS_DOMAIN="${POS_DOMAIN:-app.restaurant-pos.isarva.in}"
+
+# CyberPanel child domains live under the parent site, e.g.
+# /home/restaurant-pos.isarva.in/app.restaurant-pos.isarva.in — never guess;
+# read the docRoot LiteSpeed actually serves.
+detect_docroot() {
+  local conf="/usr/local/lsws/conf/vhosts/${POS_DOMAIN}/vhost.conf"
+  if [[ -r "${conf}" ]]; then
+    awk '$1=="docRoot"{print $2; exit}' "${conf}"
+  fi
+}
+POS_PUBLIC_HTML="${POS_PUBLIC_HTML:-$(detect_docroot)}"
+POS_PUBLIC_HTML="${POS_PUBLIC_HTML:-/home/${POS_DOMAIN}/public_html}"
 PM2_APP_NAME="${PM2_APP_NAME:-mesa-api}"
 SKIP_NPM_INSTALL="${SKIP_NPM_INSTALL:-0}"
 
@@ -55,7 +68,11 @@ fi
 (cd "${POS_DIR}" && npm run build)
 
 mkdir -p "${POS_PUBLIC_HTML}"
+site_owner="$(stat -c '%U:%G' "$(dirname "${POS_PUBLIC_HTML}")" 2>/dev/null || true)"
 rsync -a --delete "${POS_DIR}/dist/" "${POS_PUBLIC_HTML}/"
+if [[ -n "${site_owner}" && "$(id -un)" == "root" ]]; then
+  chown -R "${site_owner}" "${POS_PUBLIC_HTML}"
+fi
 echo "POS static files → ${POS_PUBLIC_HTML}"
 
 echo "=== Deploy mesa-api (backend) ==="

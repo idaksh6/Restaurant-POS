@@ -56,7 +56,7 @@ Open `mesa-pos-website/index.html` in a browser or serve the folder with any sta
 
 | App | Subdomain | What gets published |
 |-----|-----------|---------------------|
-| `mesa-pos` | `app.restaurant-pos.isarva.in` | Built `mesa-pos/dist/` → `public_html` |
+| `mesa-pos` | `app.restaurant-pos.isarva.in` | Built `mesa-pos/dist/` → vhost docRoot (child domain: `/home/restaurant-pos.isarva.in/app.restaurant-pos.isarva.in`) |
 | `mesa-api` | `api.restaurant-pos.isarva.in` | Node process (PM2) on port 3001 + reverse proxy |
 
 Create both websites in CyberPanel (PHP 8.x is fine; the POS is static files, API is Node).
@@ -93,8 +93,8 @@ Point **api** subdomain OpenLiteSpeed reverse proxy to `http://127.0.0.1:3001`.
 
 ```bash
 export REPO_DIR="/home/restaurant-pos.isarva.in/Restaurant-POS"
-export POS_PUBLIC_HTML="/home/app.restaurant-pos.isarva.in/public_html"
 export VITE_API_URL="https://api.restaurant-pos.isarva.in"
+# POS_PUBLIC_HTML is auto-detected from /usr/local/lsws/conf/vhosts/<domain>/vhost.conf docRoot
 bash "$REPO_DIR/deploy/cyberpanel/deploy-apps.sh"
 ```
 
