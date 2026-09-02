@@ -22,7 +22,10 @@ export function connectRealtime(apiBase?: string) {
   socket = null
 
   socket = io(base, {
-    transports: ['websocket', 'polling'],
+    // Polling first: LiteSpeed reverse-proxy often fails pure websocket upgrades.
+    // Socket.IO then upgrades to websocket when the proxy allows it.
+    transports: ['polling', 'websocket'],
+    upgrade: true,
     query: { deviceId: getDeviceId() },
     reconnection: true,
     reconnectionAttempts: 8,

@@ -8,7 +8,12 @@ import { OnModuleDestroy, OnModuleInit } from '@nestjs/common'
 import { Server } from 'socket.io'
 import { mesaBus } from './bus'
 
-@WebSocketGateway({ cors: { origin: true } })
+// When CORS_IN_APP=0, LiteSpeed sets Access-Control-Allow-Origin; Nest must not
+// also set it or browsers reject duplicate CORS headers on socket.io responses.
+const gatewayCors =
+  process.env.CORS_IN_APP === '0' ? false : { origin: true }
+
+@WebSocketGateway({ cors: gatewayCors })
 export class SyncGateway implements OnModuleInit, OnModuleDestroy {
   private onTicket = (ticketId: string) => {
     this.broadcast({ type: 'ticket.updated', ticketId })
