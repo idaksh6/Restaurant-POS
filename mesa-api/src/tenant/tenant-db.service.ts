@@ -114,6 +114,7 @@ export class TenantDbService implements OnModuleInit, OnModuleDestroy {
           data: {
             id: c.id,
             taxId,
+            companyCode: await this.nextCompanyCode(),
             companyName: c.companyName,
             databaseName: useTenant ? tenantName : dbName,
             databaseUrl: useTenant ? tenantUrl : primary,
@@ -136,12 +137,47 @@ export class TenantDbService implements OnModuleInit, OnModuleDestroy {
     return this.control.tenantRegistry.findFirst({ where: { taxId: taxId.trim() } })
   }
 
+  async getRegistryByCompanyCode(companyCode: string) {
+    const code = companyCode.trim().toUpperCase()
+    if (!code) return null
+    return this.control.tenantRegistry.findFirst({ where: { companyCode: code } })
+  }
+
+  /** Next unused C001 / C002 … code for new companies. */
+  async nextCompanyCode() {
+    const rows = await this.control.tenantRegistry.findMany({ select: { companyCode: true } })
+    let max = 0
+    for (const row of rows) {
+      const m = /^C(\d+)$/i.exec(row.companyCode || '')
+      if (m) max = Math.max(max, Number.parseInt(m[1], 10))
+    }
+    return `C${String(max + 1).padStart(3, '0')}`
+  }
+
   async getRegistry(companyId: string) {
     return this.control.tenantRegistry.findUnique({ where: { id: companyId } })
   }
 
   async listRegistries() {
     return this.control.tenantRegistry.findMany({ orderBy: { companyName: 'asc' } })
+  }
+
+  async updateLicense(
+    companyId: string,
+    data: {
+      licenseStatus?: string
+      activatedAt?: Date | null
+      expiresAt?: Date | null
+    },
+  ) {
+    return this.control.tenantRegistry.update({
+      where: { id: companyId },
+      data: {
+        ...(data.licenseStatus != null ? { licenseStatus: data.licenseStatus } : {}),
+        ...(data.activatedAt !== undefined ? { activatedAt: data.activatedAt } : {}),
+        ...(data.expiresAt !== undefined ? { expiresAt: data.expiresAt } : {}),
+      },
+    })
   }
 
   private async resolveUrl(companyId: string) {
@@ -209,11 +245,18 @@ export class TenantDbService implements OnModuleInit, OnModuleDestroy {
     companyId: string
     companyName: string
     taxId: string
+    companyCode: string
   }) {
     const companyId = input.companyId.trim()
     const taxId = input.taxId.trim()
+    const companyCode = input.companyCode.trim().toUpperCase()
     const dbName = sanitizeDbName(companyId)
     const databaseUrl = withDatabaseName(this.primaryUrl(), dbName)
+
+    const codeTaken = await this.control.tenantRegistry.findFirst({ where: { companyCode } })
+    if (codeTaken) {
+      throw new Error(`Tenant registry already has company code ${companyCode}`)
+    }
 
     const taxTaken = await this.control.tenantRegistry.findFirst({ where: { taxId } })
     if (taxTaken) {
@@ -248,6 +291,7 @@ export class TenantDbService implements OnModuleInit, OnModuleDestroy {
       data: {
         id: companyId,
         taxId,
+        companyCode,
         companyName: input.companyName.trim(),
         databaseName: dbName,
         databaseUrl,
@@ -255,7 +299,7 @@ export class TenantDbService implements OnModuleInit, OnModuleDestroy {
     })
     this.urlByCompany.set(companyId, databaseUrl)
 
-    this.log.log(`Provisioned tenant database ${dbName} for ${companyId}`)
+    this.log.log(`Provisioned tenant database ${dbName} for ${companyId} (${companyCode})`)
     return this.clientFor(companyId)
   }
 

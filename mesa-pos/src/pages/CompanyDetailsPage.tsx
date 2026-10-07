@@ -13,7 +13,17 @@ import { useAuth } from '../state/AuthContext'
 import { useBranch } from '../state/BranchContext'
 import { usePos } from '../state/PosContext'
 import SuccessModal from '../components/SuccessModal'
-import { apiGetZatcaConfig, apiPutZatcaConfig, apiZatcaReady } from '../lib/apiZatca'
+import {
+  apiGetZatcaConfig,
+  apiPutZatcaConfig,
+  apiGetZatcaProxyStatus,
+  apiZatcaOnboardCsr,
+  apiZatcaOnboardProduction,
+  apiZatcaCompliance,
+  apiZatcaReady,
+  asZatcaEnvironment,
+  type ZatcaEnvironment,
+} from '../lib/apiZatca'
 import { cacheZatcaPhase2Config, peekZatcaPhase2Config } from '../hardware/zatca'
 
 function emptyBranch(companyId: string): Branch {
@@ -59,16 +69,39 @@ export default function CompanyDetailsPage() {
   const envForced = import.meta.env.VITE_ZATCA_ENABLED === 'true'
   const cachedP2 = peekZatcaPhase2Config()
   const [phase2Enabled, setPhase2Enabled] = useState(!!cachedP2?.phase2Enabled)
-  const [phase2Env, setPhase2Env] = useState<'sandbox' | 'production'>(
-    cachedP2?.environment === 'production' ? 'production' : 'sandbox',
-  )
+  const [phase2Env, setPhase2Env] = useState<ZatcaEnvironment>(asZatcaEnvironment(cachedP2?.environment))
   const [csid, setCsid] = useState('')
   const [privateKey, setPrivateKey] = useState('')
   const [binaryToken, setBinaryToken] = useState('')
   const [hasCsid, setHasCsid] = useState(!!cachedP2?.hasCsid)
   const [hasPrivateKey, setHasPrivateKey] = useState(!!cachedP2?.hasPrivateKey)
   const [hasBinaryToken, setHasBinaryToken] = useState(!!cachedP2?.hasBinaryToken)
-  const [proxyConfigured, setProxyConfigured] = useState(!!cachedP2?.proxyConfigured)
+  const [hasSecret, setHasSecret] = useState(!!cachedP2?.hasSecret)
+  const [csidKind, setCsidKind] = useState(cachedP2?.csidKind ?? '')
+  const [fatooraReachable, setFatooraReachable] = useState(!!cachedP2?.fatooraReachable)
+  const [gatewayMessage, setGatewayMessage] = useState(
+    cachedP2?.fatooraMessage ?? cachedP2?.proxyMessage ?? '',
+  )
+  const [gatewayReady, setGatewayReady] = useState(!!cachedP2?.gatewayReady)
+  const [zatcaMode, setZatcaMode] = useState(cachedP2?.mode ?? 'fatoora')
+  const [showAdvancedCreds, setShowAdvancedCreds] = useState(false)
+  const [onboardOtp, setOnboardOtp] = useState('')
+  const [gatewayBusy, setGatewayBusy] = useState(false)
+
+  function applyZatcaCfg(cfg: Awaited<ReturnType<typeof apiGetZatcaConfig>>) {
+    cacheZatcaPhase2Config(cfg)
+    setPhase2Enabled(cfg.phase2Enabled)
+    setPhase2Env(asZatcaEnvironment(cfg.environment))
+    setHasCsid(cfg.hasCsid)
+    setHasPrivateKey(cfg.hasPrivateKey)
+    setHasBinaryToken(cfg.hasBinaryToken)
+    setHasSecret(!!cfg.hasSecret)
+    setCsidKind(cfg.csidKind ?? '')
+    setFatooraReachable(!!cfg.fatooraReachable)
+    setGatewayMessage(cfg.fatooraMessage ?? cfg.proxyMessage ?? '')
+    setGatewayReady(!!cfg.gatewayReady)
+    setZatcaMode(cfg.mode ?? 'fatoora')
+  }
 
   useEffect(() => {
     if (dirty.current) return
@@ -79,14 +112,20 @@ export default function CompanyDetailsPage() {
     if (!apiZatcaReady()) return
     void apiGetZatcaConfig()
       .then((cfg) => {
-        cacheZatcaPhase2Config(cfg)
-        if (dirty.current) return
-        setPhase2Enabled(cfg.phase2Enabled)
-        setPhase2Env(cfg.environment === 'production' ? 'production' : 'sandbox')
-        setHasCsid(cfg.hasCsid)
-        setHasPrivateKey(cfg.hasPrivateKey)
-        setHasBinaryToken(cfg.hasBinaryToken)
-        setProxyConfigured(cfg.proxyConfigured)
+        if (dirty.current) {
+          cacheZatcaPhase2Config(cfg)
+          setHasCsid(cfg.hasCsid)
+          setHasPrivateKey(cfg.hasPrivateKey)
+          setHasBinaryToken(cfg.hasBinaryToken)
+          setHasSecret(!!cfg.hasSecret)
+          setCsidKind(cfg.csidKind ?? '')
+          setFatooraReachable(!!cfg.fatooraReachable)
+          setGatewayMessage(cfg.fatooraMessage ?? cfg.proxyMessage ?? '')
+          setGatewayReady(!!cfg.gatewayReady)
+          setZatcaMode(cfg.mode ?? 'fatoora')
+          return
+        }
+        applyZatcaCfg(cfg)
       })
       .catch(() => undefined)
   }, [])
@@ -193,11 +232,7 @@ export default function CompanyDetailsPage() {
             ...(privateKey.trim() ? { privateKey: privateKey.trim() } : {}),
             ...(binaryToken.trim() ? { binaryToken: binaryToken.trim() } : {}),
           })
-          cacheZatcaPhase2Config(cfg)
-          setHasCsid(cfg.hasCsid)
-          setHasPrivateKey(cfg.hasPrivateKey)
-          setHasBinaryToken(cfg.hasBinaryToken)
-          setProxyConfigured(cfg.proxyConfigured)
+          applyZatcaCfg(cfg)
           setCsid('')
           setPrivateKey('')
           setBinaryToken('')
@@ -410,70 +445,255 @@ export default function CompanyDetailsPage() {
                     <small className="zk-co-hint">{t.zatcaPhase2Hint}</small>
                   </div>
                   {phase2Enabled ? (
-                    <>
-                      <label className="zk-co-field">
-                        <span>{t.zatcaPhase2Env}</span>
-                        <MesaSelect
-                          value={phase2Env}
-                          onChange={(v) => {
-                            markDirty()
-                            setPhase2Env(v === 'production' ? 'production' : 'sandbox')
-                          }}
-                          options={[
-                            { value: 'sandbox', label: t.zatcaPhase2Sandbox },
-                            { value: 'production', label: t.zatcaPhase2Production },
-                          ]}
-                        />
-                      </label>
-                      <div className="zk-co-field">
-                        <span>{t.zatcaPhase2}</span>
-                        <small className="zk-co-hint">
-                          {proxyConfigured
-                            ? `Proxy OK · CSID ${hasCsid ? '✓' : '—'} · Key ${hasPrivateKey ? '✓' : '—'} · Token ${hasBinaryToken ? '✓' : '—'}`
-                            : `Sandbox local · CSID ${hasCsid ? '✓' : '—'} · Key ${hasPrivateKey ? '✓' : '—'} · Token ${hasBinaryToken ? '✓' : '—'}`}
-                        </small>
+                    <div className="zk-co-field zk-co-span-2">
+                      <div className="zk-zatca-card">
+                        <div className="zk-zatca-head">
+                          <div className="zk-zatca-head-copy">
+                            <strong>{t.zatcaGateway}</strong>
+                            <small>
+                              {gatewayReady
+                                ? t.zatcaGatewayReady
+                                : fatooraReachable
+                                  ? t.zatcaFatooraOk
+                                  : t.zatcaFatooraHint}
+                              {gatewayMessage ? ` — ${gatewayMessage}` : ''}
+                            </small>
+                          </div>
+                          <span
+                            className={`zk-zatca-envchip${phase2Env === 'production' ? ' prod' : phase2Env === 'simulation' ? ' sim' : ''}`}
+                          >
+                            {phase2Env === 'production'
+                              ? t.zatcaPhase2Production
+                              : phase2Env === 'simulation'
+                                ? t.zatcaPhase2Simulation
+                                : t.zatcaPhase2Sandbox}
+                          </span>
+                        </div>
+
+                        <div className="zk-zatca-block">
+                          <span className="zk-zatca-block-title">Production readiness</span>
+                          <ul className="zk-zatca-checklist">
+                            <li className={(hq.taxId.replace(/\D/g, '').length >= 15 || hq.taxId.replace(/\D/g, '').length === 10) ? 'done' : ''}>
+                              <i aria-hidden />Seller VAT on company profile
+                            </li>
+                            <li className={phase2Enabled ? 'done' : ''}>
+                              <i aria-hidden />Phase 2 reporting enabled
+                            </li>
+                            <li className={fatooraReachable || gatewayReady ? 'done' : ''}>
+                              <i aria-hidden />Fatoora / gateway reachable
+                            </li>
+                            <li className={hasCsid && hasPrivateKey ? 'done' : ''}>
+                              <i aria-hidden />Compliance CSID + private key
+                            </li>
+                            <li className={hasSecret || hasBinaryToken ? 'done' : ''}>
+                              <i aria-hidden />Binary security token / secret
+                            </li>
+                            <li className={csidKind === 'production' ? 'done' : ''}>
+                              <i aria-hidden />Production CSID{csidKind ? ` (now: ${csidKind})` : ''}
+                            </li>
+                            <li className={phase2Env === 'production' && csidKind === 'production' ? 'done' : ''}>
+                              <i aria-hidden />Env set to Production
+                            </li>
+                            <li className="link">
+                              <Link to="/settings/zatca/invoices">Open e-invoice queue →</Link>
+                            </li>
+                          </ul>
+                          <small className="zk-co-hint">
+                            {phase2Env === 'production' && csidKind === 'production' && (fatooraReachable || gatewayReady)
+                              ? 'Ready for production reporting (settle still never blocked).'
+                              : 'Complete OTP → Generate CSID → Compliance → Production CSID before go-live.'}
+                          </small>
+                        </div>
+
+                        <div className="zk-zatca-block">
+                          <span className="zk-zatca-block-title">{t.zatcaPhase2}</span>
+                          <div className="zk-zatca-chips">
+                            <span className={`zk-zatca-chip${hasCsid ? ' ok' : ''}`}>CSID</span>
+                            <span className={`zk-zatca-chip${hasPrivateKey ? ' ok' : ''}`}>Private key</span>
+                            <span className={`zk-zatca-chip${hasBinaryToken ? ' ok' : ''}`}>Token</span>
+                            <span className={`zk-zatca-chip${hasSecret ? ' ok' : ''}`}>Secret</span>
+                            <span className={`zk-zatca-chip${fatooraReachable || gatewayReady ? ' ok' : ''}`}>Fatoora</span>
+                            {csidKind ? <span className="zk-zatca-chip info">{csidKind} CSID</span> : null}
+                            {zatcaMode === 'proxy' ? <span className="zk-zatca-chip info">proxy override</span> : null}
+                          </div>
+                        </div>
+
+                        <div className="zk-zatca-controls">
+                          <label className="zk-co-field">
+                            <span>{t.zatcaPhase2Env}</span>
+                            <MesaSelect
+                              value={phase2Env}
+                              onChange={(v) => {
+                                markDirty()
+                                setPhase2Env(asZatcaEnvironment(v))
+                              }}
+                              options={[
+                                { value: 'sandbox', label: t.zatcaPhase2Sandbox },
+                                { value: 'simulation', label: t.zatcaPhase2Simulation },
+                                { value: 'production', label: t.zatcaPhase2Production },
+                              ]}
+                            />
+                            <small className="zk-co-hint">
+                              {phase2Env === 'production'
+                                ? t.zatcaEnvHintProduction
+                                : phase2Env === 'simulation'
+                                  ? t.zatcaEnvHintSimulation
+                                  : t.zatcaEnvHintSandbox}
+                            </small>
+                          </label>
+                          <label className="zk-co-field">
+                            <span>{t.zatcaOnboardOtp}</span>
+                            <input
+                              className="zk-co-input mesa-ltr-nums"
+                              value={onboardOtp}
+                              onChange={(e) => setOnboardOtp(e.target.value)}
+                              placeholder={phase2Env === 'sandbox' ? '123345' : '123456'}
+                              autoComplete="off"
+                            />
+                          </label>
+                          <div className="zk-zatca-cta">
+                            <button
+                              type="button"
+                              className="zk-co-btn primary"
+                              disabled={gatewayBusy || !onboardOtp.trim() || !apiZatcaReady()}
+                              onClick={() => {
+                                setGatewayBusy(true)
+                                void apiZatcaOnboardCsr({
+                                  otp: onboardOtp.trim(),
+                                  environment: phase2Env,
+                                  vatNumber: hq.taxId,
+                                  commonName: hq.companyName,
+                                })
+                                  .then((res) => {
+                                    if (res?.config) applyZatcaCfg(res.config)
+                                    flash(res?.message || t.failedTitle, res?.ok ? 'ok' : 'err', res?.ok ? 6000 : undefined)
+                                    if (res?.ok) setOnboardOtp('')
+                                  })
+                                  .catch((err) =>
+                                    flash(err instanceof Error ? err.message : String(err), 'err'),
+                                  )
+                                  .finally(() => setGatewayBusy(false))
+                              }}
+                            >
+                              {t.zatcaGenerateCsid}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="zk-zatca-actions">
+                          <button
+                            type="button"
+                            className="zk-co-btn"
+                            disabled={gatewayBusy || !apiZatcaReady()}
+                            onClick={() => {
+                              setGatewayBusy(true)
+                              void apiGetZatcaProxyStatus()
+                                .then((st) => {
+                                  setFatooraReachable(st.reachable)
+                                  setGatewayMessage(st.message)
+                                  flash(st.reachable ? t.zatcaFatooraOk : st.message, st.reachable ? 'ok' : 'err')
+                                })
+                                .catch((err) =>
+                                  flash(err instanceof Error ? err.message : String(err), 'err'),
+                                )
+                                .finally(() => setGatewayBusy(false))
+                            }}
+                          >
+                            {t.zatcaTestGateway}
+                          </button>
+                          <button
+                            type="button"
+                            className="zk-co-btn"
+                            disabled={gatewayBusy || !hasSecret || !apiZatcaReady()}
+                            onClick={() => {
+                              setGatewayBusy(true)
+                              void apiZatcaCompliance()
+                                .then((res) => {
+                                  if (res?.config) applyZatcaCfg(res.config)
+                                  flash(res?.message || t.failedTitle, res?.ok ? 'ok' : 'err', res?.ok ? 6000 : undefined)
+                                })
+                                .catch((err) =>
+                                  flash(err instanceof Error ? err.message : String(err), 'err'),
+                                )
+                                .finally(() => setGatewayBusy(false))
+                            }}
+                          >
+                            {t.zatcaComplianceCheck}
+                          </button>
+                          <button
+                            type="button"
+                            className="zk-co-btn"
+                            disabled={gatewayBusy || !hasSecret || !apiZatcaReady()}
+                            onClick={() => {
+                              setGatewayBusy(true)
+                              void apiZatcaOnboardProduction()
+                                .then((res) => {
+                                  if (res?.config) applyZatcaCfg(res.config)
+                                  flash(res?.message || t.failedTitle, res?.ok ? 'ok' : 'err', res?.ok ? 6000 : undefined)
+                                })
+                                .catch((err) =>
+                                  flash(err instanceof Error ? err.message : String(err), 'err'),
+                                )
+                                .finally(() => setGatewayBusy(false))
+                            }}
+                          >
+                            {t.zatcaRequestProductionCsid}
+                          </button>
+                          <button
+                            type="button"
+                            className="zk-co-btn"
+                            onClick={() => setShowAdvancedCreds((v) => !v)}
+                          >
+                            {showAdvancedCreds ? t.zatcaHideAdvanced : t.zatcaShowAdvanced}
+                          </button>
+                        </div>
+
+                        {showAdvancedCreds ? (
+                          <div className="zk-zatca-adv">
+                            <label className="zk-co-field">
+                              <span>{t.zatcaCsid}</span>
+                              <textarea
+                                className="zk-co-input zk-co-textarea mesa-ltr-nums"
+                                rows={3}
+                                value={csid}
+                                onChange={(e) => {
+                                  markDirty()
+                                  setCsid(e.target.value)
+                                }}
+                                placeholder={hasCsid ? '•••• stored on server — paste to replace' : '-----BEGIN CERTIFICATE-----'}
+                              />
+                            </label>
+                            <label className="zk-co-field">
+                              <span>{t.zatcaPrivateKey}</span>
+                              <textarea
+                                className="zk-co-input zk-co-textarea mesa-ltr-nums"
+                                rows={3}
+                                value={privateKey}
+                                onChange={(e) => {
+                                  markDirty()
+                                  setPrivateKey(e.target.value)
+                                }}
+                                placeholder={hasPrivateKey ? '•••• stored on server — paste to replace' : '-----BEGIN PRIVATE KEY-----'}
+                              />
+                            </label>
+                            <label className="zk-co-field">
+                              <span>{t.zatcaBinaryToken}</span>
+                              <input
+                                className="zk-co-input mesa-ltr-nums"
+                                value={binaryToken}
+                                onChange={(e) => {
+                                  markDirty()
+                                  setBinaryToken(e.target.value)
+                                }}
+                                placeholder={hasBinaryToken ? '•••• stored on server — paste to replace' : ''}
+                                autoComplete="off"
+                              />
+                              <small className="zk-co-hint">{t.zatcaCredsHint}</small>
+                            </label>
+                          </div>
+                        ) : null}
                       </div>
-                      <label className="zk-co-field zk-co-span-2">
-                        <span>{t.zatcaCsid}</span>
-                        <textarea
-                          className="zk-co-input zk-co-textarea mesa-ltr-nums"
-                          rows={3}
-                          value={csid}
-                          onChange={(e) => {
-                            markDirty()
-                            setCsid(e.target.value)
-                          }}
-                          placeholder={hasCsid ? '•••• stored on server — paste to replace' : '-----BEGIN CERTIFICATE-----'}
-                        />
-                      </label>
-                      <label className="zk-co-field zk-co-span-2">
-                        <span>{t.zatcaPrivateKey}</span>
-                        <textarea
-                          className="zk-co-input zk-co-textarea mesa-ltr-nums"
-                          rows={3}
-                          value={privateKey}
-                          onChange={(e) => {
-                            markDirty()
-                            setPrivateKey(e.target.value)
-                          }}
-                          placeholder={hasPrivateKey ? '•••• stored on server — paste to replace' : '-----BEGIN EC PRIVATE KEY-----'}
-                        />
-                      </label>
-                      <label className="zk-co-field zk-co-span-2">
-                        <span>{t.zatcaBinaryToken}</span>
-                        <input
-                          className="zk-co-input mesa-ltr-nums"
-                          value={binaryToken}
-                          onChange={(e) => {
-                            markDirty()
-                            setBinaryToken(e.target.value)
-                          }}
-                          placeholder={hasBinaryToken ? '•••• stored on server — paste to replace' : ''}
-                          autoComplete="off"
-                        />
-                        <small className="zk-co-hint">{t.zatcaCredsHint}</small>
-                      </label>
-                    </>
+                    </div>
                   ) : null}
                 </>
               )}

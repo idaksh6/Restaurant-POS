@@ -171,6 +171,36 @@ export class DeliveryChannelsService {
     return { menu, result }
   }
 
+  /** Lightweight live/stub probe — uses pushMenu with current menu preview. */
+  async testConnection(companyId: string, branchId: string, channelId: string) {
+    const adapter = adapterFor(channelId)
+    if (!adapter) throw new BadRequestException(`No adapter for ${channelId}`)
+    const row = await this.getConfig(companyId, branchId, channelId)
+    const cfg = rowToConfig(row)
+    if (!cfg.apiKey?.trim()) {
+      return {
+        ok: true,
+        mode: 'stub' as const,
+        message: 'Demo mode — add API key and enable channel for live partner calls',
+      }
+    }
+    try {
+      const menu = await this.previewMenu(companyId, branchId, channelId)
+      const result = await adapter.pushMenu(cfg, menu)
+      return {
+        ok: result.ok !== false,
+        mode: result.mode ?? 'live',
+        message: result.message || 'Connection OK',
+      }
+    } catch (err) {
+      return {
+        ok: false,
+        mode: 'live' as const,
+        message: err instanceof Error ? err.message : String(err),
+      }
+    }
+  }
+
   private async ticketPayload(ticketId: string, companyId: string) {
     const ticket = await this.prisma.ticket.findFirst({ where: { id: ticketId, companyId } })
     if (!ticket) throw new NotFoundException('Ticket not found')

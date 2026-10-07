@@ -1,0 +1,36 @@
+/* Channel honesty badges (Demo / Needs API key / Live) */
+.ol-honesty {
+  display: inline-flex;
+  align-items: center;
+  margin-inline-start: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.ol-honesty-demo {
+  color: var(--muted);
+  background: color-mix(in srgb, var(--line) 55%, #fff);
+  border: 1px solid var(--line);
+}
+
+.ol-honesty-needs_key {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
+}
+
+.ol-honesty-live {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--line));
+}
+
+.ol-channel-tab .ol-honesty {
+  margin: 0.15rem 0 0;
+}

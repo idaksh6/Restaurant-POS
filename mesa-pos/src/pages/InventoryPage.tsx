@@ -18,7 +18,7 @@ import {
 } from '../data/stockLocations'
 import { buildRecipeUsage } from '../lib/recipeUsage'
 import { settingsHubPath } from '../lib/settingsHub'
-import { useI18n } from '../locale/i18n'
+import { useI18n, type Dict } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
 import { useBranch } from '../state/BranchContext'
 import { useMasters } from '../state/MastersContext'
@@ -30,12 +30,21 @@ type SortKey = 'name' | 'onHand' | 'status' | 'vendor'
 
 const PAGE_SIZE = 8
 
-const SORT_OPTIONS = [
-  { value: 'status', label: 'Sort: status' },
-  { value: 'name', label: 'Sort: name' },
-  { value: 'vendor', label: 'Sort: preferred vendor' },
-  { value: 'onHand', label: 'Sort: on hand' },
-]
+function sortOptions(t: Dict) {
+  return [
+    { value: 'status', label: t.invSortStatus },
+    { value: 'name', label: t.invSortName },
+    { value: 'vendor', label: t.invSortVendor },
+    { value: 'onHand', label: t.invSortOnHand },
+  ]
+}
+
+function poStatusLabel(status: string, t: Dict) {
+  if (status === 'draft') return t.invPoStatusDraft
+  if (status === 'ordered') return t.invPoStatusOrdered
+  if (status === 'partial') return t.invPoStatusPartial
+  return status
+}
 
 function InvIcon({ children }: { children: ReactNode }) {
   return (
@@ -170,10 +179,10 @@ function categoryTone(category: string) {
 }
 
 export default function InventoryPage() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { user } = useAuth()
   const canManage = user ? getPermissions(user.role).canManageStock : false
-  const { stock, adjustStock, flash, ingredients } = usePos()
+  const { stock, adjustStock, flash, ingredients, saveIngredient, upsertStockItem } = usePos()
   const { dishes } = useMasters()
   const { activeBranch } = useBranch()
   const { purchaseOrders, suppliers } = usePurchasing()
@@ -191,7 +200,20 @@ export default function InventoryPage() {
   const [page, setPage] = useState(1)
   const [adjustId, setAdjustId] = useState<string | null>(null)
   const [adjustDelta, setAdjustDelta] = useState('')
-  const [adjustReason, setAdjustReason] = useState('Manual adjust')
+  const [adjustReason, setAdjustReason] = useState('')
+  const [reorderId, setReorderId] = useState<string | null>(null)
+  const [reorderValue, setReorderValue] = useState('')
+
+  const reasonChips = useMemo(
+    () => [
+      t.invReasonMistake,
+      t.invReasonVariance,
+      t.invReasonCount,
+      t.invReasonWaste,
+      t.invReasonSpoil,
+    ],
+    [t],
+  )
 
   useEffect(() => {
     const el = focus === 'recipes' ? recipesRef.current : stockRef.current
@@ -285,7 +307,9 @@ export default function InventoryPage() {
   )
 
   const adjusting = adjustId ? stock.find((s) => s.id === adjustId) : null
+  const reordering = reorderId ? stock.find((s) => s.id === reorderId) : null
   const deltaNum = Number(adjustDelta)
+  const reorderNum = Number(reorderValue)
   const previewOnHand =
     adjusting && Number.isFinite(deltaNum)
       ? Math.max(0, Math.round((adjusting.onHand + deltaNum) * 100) / 100)
@@ -293,26 +317,54 @@ export default function InventoryPage() {
 
   function openAdjust(item: StockItem) {
     if (!canManage) {
-      flash('No permission to adjust stock')
+      flash(t.invNoPermAdjust)
       return
     }
     setAdjustId(item.id)
     setAdjustDelta('')
-    setAdjustReason('Manual adjust')
+    setAdjustReason(t.invManualAdjust)
+  }
+
+  function openReorder(item: StockItem) {
+    if (!canManage) {
+      flash(t.invNoPermReorder)
+      return
+    }
+    setReorderId(item.id)
+    setReorderValue(String(item.reorderAt ?? 0))
+  }
+
+  function applyReorder() {
+    if (!reordering || !canManage) return
+    if (!Number.isFinite(reorderNum) || reorderNum < 0) {
+      flash(t.invInvalidReorder)
+      return
+    }
+    const next = Math.round(reorderNum * 100) / 100
+    const ing = ingredients.find(
+      (r) => r.id === reordering.ingredientId || r.id === reordering.id,
+    )
+    if (ing) {
+      saveIngredient({ ...ing, reorderAt: next })
+    } else {
+      upsertStockItem({ ...reordering, reorderAt: next })
+    }
+    setReorderId(null)
+    flash(t.invReorderUpdated.replace('{name}', reordering.name))
   }
 
   function applyAdjust() {
     if (!adjusting || !canManage) return
     const delta = Number(adjustDelta)
     if (!Number.isFinite(delta) || delta === 0) {
-      flash('Enter a non-zero delta')
+      flash(t.invEnterDelta)
       return
     }
     if (adjusting.onHand + delta < 0) {
-      flash('On hand cannot go below zero')
+      flash(t.invOnHandBelowZero)
       return
     }
-    adjustStock(adjusting.id, delta, adjustReason.trim() || 'Manual adjust')
+    adjustStock(adjusting.id, delta, adjustReason.trim() || t.invManualAdjust)
     setAdjustId(null)
   }
 
@@ -340,8 +392,9 @@ export default function InventoryPage() {
           <div>
             <h1>{pageTitle}</h1>
             <p>
-              {stock.length} SKUs · {lowItems.length} need reorder
-              {!canManage ? ' · view only' : ''}
+              <span className="mesa-ltr-nums">{stock.length}</span> {t.invSkus} ·{' '}
+              <span className="mesa-ltr-nums">{lowItems.length}</span> {t.invNeedReorder}
+              {!canManage ? ` · ${t.invViewOnly}` : ''}
             </p>
           </div>
         </div>
@@ -349,33 +402,33 @@ export default function InventoryPage() {
           <span className="stk-stat">
             <IconBox />
             <strong className="mesa-ltr-nums">{rows.length}</strong>
-            <em>SKUs</em>
+            <em>{t.invSkus}</em>
           </span>
           <span className={`stk-stat${lowItems.length ? ' warn' : ''}`}>
             <IconWarn />
             <strong className="mesa-ltr-nums">{lowItems.length}</strong>
-            <em>Low</em>
+            <em>{t.invLow}</em>
           </span>
           <span className="stk-stat">
             <IconCoin />
-            <strong className="mesa-ltr-nums">{money(value)}</strong>
-            <em>Value</em>
+            <strong className="mesa-ltr-nums">{money(value, lang)}</strong>
+            <em>{t.invValue}</em>
           </span>
           <span className="stk-stat">
             <IconDoc />
             <strong className="mesa-ltr-nums">{openPOs.length}</strong>
-            <em>POs</em>
+            <em>{t.navPurchaseOrders}</em>
           </span>
         </div>
         <div className="stk-hero-actions">
           <Link to="/settings/inventory/receiving" className="stk-link-btn">
-            <IconTruck /> Receiving
+            <IconTruck /> {t.stockReceiving}
           </Link>
           <Link to="/settings/inventory/transfer" className="stk-link-btn">
-            <IconTransfer /> Transfer
+            <IconTransfer /> {t.stockTransfer}
           </Link>
           <Link to="/purchase-orders" className="stk-link-btn primary">
-            <IconDoc /> Purchase orders
+            <IconDoc /> {t.invPurchaseOrders}
           </Link>
         </div>
       </header>
@@ -391,16 +444,16 @@ export default function InventoryPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search name, SKU, category, or preferred vendor"
-                aria-label="Search stock"
+                placeholder={t.invSearchPlaceholder}
+                aria-label={t.invSearchAria}
               />
             </label>
             <div className="stk-filters" role="tablist">
               {(
                 [
-                  ['all', 'All', rows.length],
-                  ['low', 'Low', lowItems.length],
-                  ['ok', 'Healthy', okCount],
+                  ['all', t.all, rows.length],
+                  ['low', t.invLow, lowItems.length],
+                  ['ok', t.invFilterHealthy, okCount],
                 ] as const
               ).map(([id, label, count]) => (
                 <button
@@ -417,10 +470,10 @@ export default function InventoryPage() {
             <div className="stk-sort">
               <IconSliders />
               <MesaSelect
-                aria-label="Sort stock"
+                aria-label={t.invSortAria}
                 value={sortKey}
                 onChange={(v) => setSortKey(v as SortKey)}
-                options={SORT_OPTIONS}
+                options={sortOptions(t)}
               />
             </div>
           </div>
@@ -431,10 +484,10 @@ export default function InventoryPage() {
                 <span className="stk-empty-ico">
                   <IconBox />
                 </span>
-                <strong>No stock items match</strong>
-                <p>Try another search or clear the filter.</p>
+                <strong>{t.invEmptyTitle}</strong>
+                <p>{t.invEmptyHint}</p>
                 <button type="button" className="btn btn-ghost" onClick={() => { setQuery(''); setFilter('all') }}>
-                  Reset filters
+                  {t.invResetFilters}
                 </button>
               </div>
             </div>
@@ -445,16 +498,16 @@ export default function InventoryPage() {
                   <table className="stk-table">
                 <thead>
                   <tr>
-                    <th>Item</th>
-                    <th>Category</th>
+                    <th>{t.invColItem}</th>
+                    <th>{t.invColCategory}</th>
                     <th>{t.preferredVendor}</th>
-                    <th>Level</th>
-                    <th>On hand</th>
-                    <th>Locations</th>
-                    <th>Reorder</th>
-                    <th>Status</th>
-                    <th>Cost</th>
-                    {canManage ? <th>Action</th> : null}
+                    <th>{t.invColLevel}</th>
+                    <th>{t.invColOnHand}</th>
+                    <th>{t.invColLocations}</th>
+                    <th>{t.invColReorder}</th>
+                    <th>{t.status}</th>
+                    <th>{t.invColCost}</th>
+                    {canManage ? <th>{t.invColAction}</th> : null}
                   </tr>
                 </thead>
                 <tbody>
@@ -486,7 +539,10 @@ export default function InventoryPage() {
                         <td className="stk-vendor-col">
                           <div className="stk-vendor-cell">
                             {vendorRows.length ? (
-                              <ul className="stk-vendor-stack" aria-label={`Vendors for ${item.name}`}>
+                              <ul
+                                className="stk-vendor-stack"
+                                aria-label={t.invVendorsFor.replace('{name}', item.name)}
+                              >
                                 {vendorRows.map((row) => (
                                   <li
                                     key={row.vendorId || row.vendor}
@@ -499,7 +555,7 @@ export default function InventoryPage() {
                                       ) : null}
                                     </span>
                                     <span className="stk-vendor-price mesa-ltr-nums">
-                                      {row.unitPrice != null ? money(row.unitPrice) : '—'}
+                                      {row.unitPrice != null ? money(row.unitPrice, lang) : '—'}
                                     </span>
                                   </li>
                                 ))}
@@ -519,7 +575,10 @@ export default function InventoryPage() {
                           </div>
                         </td>
                         <td>
-                          <div className="stk-level" title={`${pct}% of target`}>
+                          <div
+                            className="stk-level"
+                            title={t.invLevelPct.replace('{pct}', String(pct))}
+                          >
                             <span className={`stk-level-bar${low ? ' low' : ''}`} style={{ width: `${pct}%` }} />
                           </div>
                         </td>
@@ -545,13 +604,14 @@ export default function InventoryPage() {
                               {item.reorderAt} {item.unit}
                             </span>
                             {canManage ? (
-                              <Link
-                                to={ingredientEditPath(item)}
+                              <button
+                                type="button"
                                 className="stk-vendor-edit"
                                 title={t.editReorderLevel}
+                                onClick={() => openReorder(item)}
                               >
                                 {t.edit}
-                              </Link>
+                              </button>
                             ) : null}
                           </div>
                         </td>
@@ -559,16 +619,16 @@ export default function InventoryPage() {
                           <span className={`stk-badge ${low ? 'low' : 'ok'}`}>
                             {low ? (
                               <>
-                                <IconWarn /> Reorder
+                                <IconWarn /> {t.invStatusReorder}
                               </>
                             ) : (
                               <>
-                                <IconCheck /> OK
+                                <IconCheck /> {t.ok}
                               </>
                             )}
                           </span>
                         </td>
-                        <td className="mesa-ltr-nums">{money(item.cost)}</td>
+                        <td className="mesa-ltr-nums">{money(item.cost, lang)}</td>
                         {canManage ? (
                           <td>
                             <button
@@ -576,7 +636,7 @@ export default function InventoryPage() {
                               className="stk-adjust-btn"
                               onClick={() => openAdjust(item)}
                             >
-                              <IconSliders /> Adjust
+                              <IconSliders /> {t.invAdjust}
                             </button>
                           </td>
                         ) : null}
@@ -590,7 +650,8 @@ export default function InventoryPage() {
 
             <div className="stk-pager">
               <span className="mesa-ltr-nums">
-                {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, items.length)} of {items.length}
+                {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, items.length)}{' '}
+                {t.expensePagerOf} {items.length}
               </span>
               <div className="stk-pager-actions">
                 <button
@@ -599,7 +660,7 @@ export default function InventoryPage() {
                   disabled={safePage <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
-                  Prev
+                  {t.expensePagerPrev}
                 </button>
                 {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
                   <button
@@ -618,7 +679,7 @@ export default function InventoryPage() {
                   disabled={safePage >= pageCount}
                   onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                 >
-                  Next
+                  {t.expensePagerNext}
                 </button>
               </div>
             </div>
@@ -630,7 +691,7 @@ export default function InventoryPage() {
           <section className="stk-panel alerts">
             <header>
               <h2>
-                <IconWarn /> Alerts
+                <IconWarn /> {t.invAlerts}
               </h2>
               <em className="mesa-ltr-nums">{lowItems.length}</em>
             </header>
@@ -639,8 +700,8 @@ export default function InventoryPage() {
                 <div className="stk-side-empty ok">
                   <IconCheck />
                   <div>
-                    <strong>All healthy</strong>
-                    <span>No items below reorder point</span>
+                    <strong>{t.invAllHealthy}</strong>
+                    <span>{t.invNoBelowReorder}</span>
                   </div>
                 </div>
               ) : (
@@ -657,7 +718,10 @@ export default function InventoryPage() {
                   >
                     <strong>{item.name}</strong>
                     <span className="mesa-ltr-nums">
-                      {item.onHand} {item.unit} left · reorder at {item.reorderAt}
+                      {t.invLeftReorderAt
+                        .replace('{onHand}', String(item.onHand))
+                        .replace('{unit}', item.unit)
+                        .replace('{reorder}', String(item.reorderAt))}
                     </span>
                   </button>
                 ))
@@ -668,15 +732,15 @@ export default function InventoryPage() {
           <section className="stk-panel">
             <header>
               <h2>
-                <IconDoc /> Open POs
+                <IconDoc /> {t.invOpenPos}
               </h2>
               <em className="mesa-ltr-nums">{openPOs.length}</em>
             </header>
             <div className="stk-po-list">
               {openPOs.length === 0 ? (
                 <div className="stk-side-empty">
-                  <strong>No open POs</strong>
-                  <Link to="/purchase-orders">Create a purchase order</Link>
+                  <strong>{t.invNoOpenPos}</strong>
+                  <Link to="/purchase-orders">{t.invCreatePo}</Link>
                 </div>
               ) : (
                 <>
@@ -684,12 +748,14 @@ export default function InventoryPage() {
                     <Link key={po.id} to="/purchase-orders" className="stk-po">
                       <strong className="mesa-ltr-nums">{po.id}</strong>
                       <span>
-                        {po.status} · {po.lines.length} lines
+                        {t.invPoLines
+                          .replace('{status}', poStatusLabel(po.status, t))
+                          .replace('{count}', String(po.lines.length))}
                       </span>
                     </Link>
                   ))}
                   <Link to="/purchase-orders" className="btn btn-teal stk-po-cta">
-                    Receive goods
+                    {t.invReceiveGoods}
                   </Link>
                 </>
               )}
@@ -703,15 +769,15 @@ export default function InventoryPage() {
           >
             <header>
               <h2>
-                <IconBox /> Recipe usage
+                <IconBox /> {t.setRecipeUsage}
               </h2>
             </header>
             <div className="stk-recipe-list">
               {recipeUsage.length === 0 ? (
                 <div className="stk-side-empty">
-                  <strong>No recipes linked</strong>
-                  <Link to="/settings/ingredients/usage">View recipe usage</Link>
-                  <Link to="/masters?tab=dishes">Edit menu item recipes</Link>
+                  <strong>{t.invNoRecipes}</strong>
+                  <Link to="/settings/ingredients/usage">{t.invViewRecipeUsage}</Link>
+                  <Link to="/masters?tab=dishes">{t.invEditMenuRecipes}</Link>
                 </div>
               ) : (
                 (focus === 'recipes' ? recipeUsage : recipeUsage.slice(0, 8)).map((r) => (
@@ -738,13 +804,13 @@ export default function InventoryPage() {
         >
           <div className="modal-card stk-modal">
             <div className="section-head">
-              <h2>Adjust {adjusting.name}</h2>
+              <h2>{t.invAdjustTitle.replace('{name}', adjusting.name)}</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setAdjustId(null)}>
-                Close
+                {t.close}
               </button>
             </div>
             <p className="modal-lead mesa-ltr-nums">
-              On hand <strong>{adjusting.onHand}</strong> {adjusting.unit}
+              {t.invOnHandLabel} <strong>{adjusting.onHand}</strong> {adjusting.unit}
               {previewOnHand != null ? (
                 <>
                   {' '}
@@ -754,10 +820,10 @@ export default function InventoryPage() {
             </p>
 
             <div className="stk-delta-row">
-              <button type="button" className="stk-delta-btn" onClick={() => bumpDelta(-1)} aria-label="Minus 1">
+              <button type="button" className="stk-delta-btn" onClick={() => bumpDelta(-1)} aria-label={t.invMinus1}>
                 <IconMinus />
               </button>
-              <button type="button" className="stk-delta-btn" onClick={() => bumpDelta(-0.5)} aria-label="Minus 0.5">
+              <button type="button" className="stk-delta-btn" onClick={() => bumpDelta(-0.5)} aria-label={t.invMinus05}>
                 −0.5
               </button>
               <input
@@ -766,27 +832,27 @@ export default function InventoryPage() {
                 step="0.01"
                 value={adjustDelta}
                 onChange={(e) => setAdjustDelta(e.target.value)}
-                placeholder="e.g. 2 or -0.5"
+                placeholder={t.invDeltaPlaceholder}
                 autoFocus
               />
-              <button type="button" className="stk-delta-btn" onClick={() => bumpDelta(0.5)} aria-label="Plus 0.5">
+              <button type="button" className="stk-delta-btn" onClick={() => bumpDelta(0.5)} aria-label={t.invPlus05}>
                 +0.5
               </button>
-              <button type="button" className="stk-delta-btn" onClick={() => bumpDelta(1)} aria-label="Plus 1">
+              <button type="button" className="stk-delta-btn" onClick={() => bumpDelta(1)} aria-label={t.invPlus1}>
                 <IconPlus />
               </button>
             </div>
 
-            <label className="field-label">Reason</label>
+            <label className="field-label">{t.invReason}</label>
             <input
               className="search"
               value={adjustReason}
               onChange={(e) => setAdjustReason(e.target.value)}
-              placeholder="Count correction, waste, receive…"
+              placeholder={t.invReasonPlaceholder}
             />
 
             <div className="stk-reason-chips">
-              {['Entry mistake', 'Variance correction', 'Count correction', 'Waste', 'Spoilage'].map((r) => (
+              {reasonChips.map((r) => (
                 <button
                   key={r}
                   type="button"
@@ -804,8 +870,60 @@ export default function InventoryPage() {
               disabled={!Number.isFinite(deltaNum) || deltaNum === 0}
               onClick={applyAdjust}
             >
-              Apply adjust
+              {t.invApplyAdjust}
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {reordering && canManage ? (
+        <div
+          className="modal-backdrop stk-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="stk-reorder-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setReorderId(null)
+          }}
+        >
+          <div className="modal-card stk-modal">
+            <div className="section-head">
+              <h2 id="stk-reorder-title">
+                {t.invReorderTitle.replace('{name}', reordering.name)}
+              </h2>
+              <button type="button" className="btn btn-ghost" onClick={() => setReorderId(null)}>
+                {t.close}
+              </button>
+            </div>
+            <p className="modal-lead mesa-ltr-nums">
+              {t.reorderLevelHint} ({reordering.unit})
+            </p>
+            <label className="field-label" htmlFor="stk-reorder-input">
+              {t.reorderLevel}
+            </label>
+            <input
+              id="stk-reorder-input"
+              className="search"
+              type="number"
+              min={0}
+              step="0.01"
+              value={reorderValue}
+              onChange={(e) => setReorderValue(e.target.value)}
+              autoFocus
+            />
+            <div className="stk-modal-actions" style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setReorderId(null)}>
+                {t.cancel}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!Number.isFinite(reorderNum) || reorderNum < 0}
+                onClick={applyReorder}
+              >
+                {t.update}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

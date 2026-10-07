@@ -1,7 +1,7 @@
-export type TableStatus = 'free' | 'occupied' | 'billing' | 'reserved'
+export type TableStatus = 'free' | 'occupied' | 'billing' | 'reserved' | 'merged'
 export type OrderType = 'dine-in' | 'takeaway' | 'delivery' | 'online'
 export type KitchenPriority = 'high' | 'normal' | 'low'
-export type KitchenTicketStatus = 'queued' | 'cooking' | 'ready'
+export type KitchenTicketStatus = 'queued' | 'cooking' | 'ready' | 'done'
 
 export type Table = {
   id: string
@@ -13,22 +13,33 @@ export type Table = {
   guests?: number
   openedAt?: string
   amount?: number
+  /** Source table after merge — settle on the target instead. */
+  mergedIntoId?: string
+  mergedIntoLabel?: string
+  /** Host table: ids/labels of tables merged into this check. */
+  mergedFromIds?: string[]
+  mergedFromLabels?: string[]
 }
 
 export type MenuItem = {
   id: string
   name: string
+  /** Arabic product alias (bilingual receipts) */
+  alias?: string
   category: string
   price: number
   code: string
   popular?: boolean
   active?: boolean
+  requiresKitchen?: boolean
 }
 
 export type OrderLine = {
   id: string
   itemId: string
   name: string
+  /** Arabic product alias stamped when the line is added (for bilingual slips). */
+  nameAr?: string
   qty: number
   price: number
   note?: string
@@ -91,12 +102,14 @@ export type OpenTicket = {
   channelAcceptStatus?: 'pending' | 'accepted' | 'rejected'
   openedAt: string
   lines: OrderLine[]
+  /** Order / ticket note (kitchen + staff) — synced across devices. */
+  note?: string
   channel?: string
   /** Operating branch — tickets are scoped per branch. */
   branchId?: string
   tableId?: string
   guests?: number
-  checkStatus?: 'open' | 'billing' | 'settled'
+  checkStatus?: 'open' | 'billing' | 'settled' | 'merged'
   kitchenStatus?: KitchenTicketStatus
   kitchenPriority?: KitchenPriority
   /** Kitchen pressed Done — keep off KOT board until a new KOT is sent */
@@ -107,8 +120,20 @@ export type OpenTicket = {
   discountPct?: number
   chargeIds?: string[]
   amount?: number
+  /** Source stub: this check was merged into another table (still physically occupied). */
+  mergedIntoTableId?: string
+  /** Target check: floor table ids whose tickets were absorbed into this one. */
+  mergedFromTableIds?: string[]
+  /** Shared settle id when target + merged sources close together. */
+  masterTxnId?: string
   /** Client/server millis — used to keep the newest ticket when two POS terminals edit the same check. */
   updatedAt?: number
+}
+
+/** Dine check that was merged away — balance lives on the target table. */
+export function isMergedCheck(ticket: Pick<OpenTicket, 'checkStatus' | 'mergedIntoTableId'> | null | undefined) {
+  if (!ticket) return false
+  return ticket.checkStatus === 'merged' || Boolean(ticket.mergedIntoTableId)
 }
 
 export type KitchenTicket = {
@@ -117,7 +142,15 @@ export type KitchenTicket = {
   priority: KitchenPriority
   status: KitchenTicketStatus
   createdAt: string
-  lines: Array<{ name: string; qty: number; itemId?: string }>
+  lines: Array<{
+    name: string
+    qty: number
+    itemId?: string
+    /** Per-line bump status (defaults to ticket status). */
+    status?: KitchenTicketStatus
+    /** KDS / KOT station id from print routing. */
+    stationId?: string
+  }>
   branchId?: string
 }
 
@@ -165,8 +198,8 @@ export const menu: MenuItem[] = [
   { id: 'm26', code: '404', name: 'Fresh Orange Juice', category: 'Drinks', price: 18.75 },
   { id: 'm27', code: '405', name: 'Iced Tea', category: 'Drinks', price: 13.12 },
   { id: 'm28', code: '406', name: 'Cappuccino', category: 'Drinks', price: 15.0, popular: true },
-  { id: 'm29', code: '407', name: 'Soft Drink', category: 'Drinks', price: 9.38 },
-  { id: 'm30', code: '408', name: 'Still Water', category: 'Drinks', price: 7.5 },
+  { id: 'm29', code: '407', name: 'Soft Drink', category: 'Drinks', price: 9.38, requiresKitchen: false },
+  { id: 'm30', code: '408', name: 'Still Water', category: 'Drinks', price: 7.5, requiresKitchen: false },
   { id: 'm12', code: '501', name: 'Chocolate Fondant', category: 'Dessert', price: 31.88, popular: true },
   { id: 'm13', code: '502', name: 'Citrus Panna Cotta', category: 'Dessert', price: 28.12 },
   { id: 'm31', code: '503', name: 'Tiramisu', category: 'Dessert', price: 30.0, popular: true },

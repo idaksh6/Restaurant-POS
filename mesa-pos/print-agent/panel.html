@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:" />
+<title>Isarva POS Print Agent</title>
+<style>
+  :root { --g: #007a5e; --gd: #004d3a; --bg: #f5f8f6; --ink: #13221c; --soft: #5d6f67; --line: #dde5e1; --red: #c8372d; --amber: #d18a12; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 13px/1.4 "Segoe UI", Tahoma, Arial, sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--gd); color: #fff; padding: 14px 16px; display: flex; align-items: center; gap: 10px; }
+  header img { width: 30px; height: 30px; border-radius: 7px; background: #fff; }
+  header h1 { font-size: 14px; margin: 0; letter-spacing: .04em; }
+  header small { opacity: .75; font-size: 11px; }
+  main { padding: 12px; display: grid; gap: 10px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px; box-shadow: 0 4px 12px rgba(0,0,0,.04); }
+  .card h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--soft); margin: 0 0 8px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+  .row + .row { border-top: 1px solid #eef2f0; }
+  .name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sub { color: var(--soft); font-size: 11px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 12px; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #9aa7a0; }
+  .ok .dot { background: var(--g); box-shadow: 0 0 0 3px rgba(0,122,94,.18); } .ok { color: var(--g); }
+  .warn .dot { background: var(--amber); } .warn { color: #94600a; }
+  .bad .dot { background: var(--red); box-shadow: 0 0 0 3px rgba(200,55,45,.16); } .bad { color: var(--red); }
+  .idle { color: var(--soft); }
+  button { font: inherit; font-weight: 600; border-radius: 9px; border: 1px solid var(--line); background: #fff; color: var(--ink); padding: 7px 12px; cursor: pointer; }
+  button.primary { background: var(--g); border-color: var(--g); color: #fff; }
+  button:disabled { opacity: .55; cursor: progress; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+  .empty { color: var(--soft); padding: 6px 0; }
+  textarea { width: 100%; min-height: 70px; font: 12px Consolas, monospace; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+  label.check { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .msg { font-size: 12px; margin-top: 6px; }
+  .err { color: var(--red); }
+</style>
+</head>
+<body>
+<header>
+  <img src="assets/icon.png" alt="" />
+  <div><h1>ISARVA POS PRINT AGENT</h1><small id="version"></small></div>
+</header>
+<main>
+  <section class="card">
+    <div class="row"><span>Agent</span><span id="agentState" class="pill idle"><span class="dot"></span>…</span></div>
+    <div class="row"><span>POS connection</span><span id="posState" class="pill idle"><span class="dot"></span>…</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Printers</h2>
+    <div id="printers"></div>
+    <div class="actions" style="margin-top:8px">
+      <button class="primary" id="testAll">Test all printers</button>
+      <button id="refresh">Check now</button>
+    </div>
+    <div id="testMsg" class="msg"></div>
+  </section>
+
+  <section class="card">
+    <h2>Last print job</h2>
+    <div id="lastJob" class="empty">No jobs yet</div>
+    <div id="failed"></div>
+  </section>
+
+  <section class="card">
+    <h2>Settings</h2>
+    <label class="check"><input type="checkbox" id="autostart" /> Start with Windows</label>
+    <div class="sub" style="margin:6px 0 4px">Websites allowed to print through this agent (one per line)</div>
+    <textarea id="origins" spellcheck="false"></textarea>
+    <div class="actions" style="margin-top:6px"><button id="saveOrigins">Save</button></div>
+    <div id="originsMsg" class="msg"></div>
+    <div class="actions" style="margin-top:10px">
+      <button id="logs">View logs</button>
+      <button id="updates">Check for updates</button>
+      <button id="restart">Restart agent</button>
+    </div>
+    <div class="sub" id="port" style="margin-top:8px"></div>
+  </section>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id)
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  const STATE = {
+    online: ['ok', 'Online'], offline: ['bad', 'Offline'], error: ['bad', 'Error'], 'paper-out': ['bad', 'Paper out'],
+    'cover-open': ['bad', 'Cover open'], connecting: ['warn', 'Connecting'], unknown: ['idle', 'Unknown'], disabled: ['idle', 'Disabled'],
+  }
+  const pill = (cls, label) => `<span class="pill ${cls}"><span class="dot"></span>${esc(label)}</span>`
+  const time = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')
+  let originsDirty = false
+
+  function render(s) {
+    $('version').textContent = `v${s.version}`
+    $('agentState').outerHTML = s.serverError
+      ? `<span id="agentState" class="pill bad"><span class="dot"></span>Not running</span>`
+      : `<span id="agentState" class="pill ok"><span class="dot"></span>Running</span>`
+    $('posState').outerHTML = s.posConnected
+      ? `<span id="posState" class="pill ok"><span class="dot"></span>Connected</span>`
+      : `<span id="posState" class="pill idle"><span class="dot"></span>Waiting for POS</span>`
+    $('printers').innerHTML = s.printers.length
+      ? s.printers.map((p) => {
+          const [cls, label] = STATE[p.active ? p.state : 'disabled'] || STATE.unknown
+          return `<div class="row"><div style="min-width:0"><div class="name">${esc(p.name)}</div><div class="sub">${esc(p.connection.toUpperCase())} · ${esc(p.device || '')}${p.detail ? ` · ${esc(p.detail)}` : ''}</div></div>${pill(cls, label)}</div>`
+        }).join('')
+      : '<div class="empty">No printers yet. Add printers in the POS: Settings → Printers.</div>'
+    $('testAll').disabled = !s.printers.some((p) => p.active)
+    const j = s.lastJob
+    $('lastJob').innerHTML = j
+      ? `<div class="row"><div><div class="name">${esc(j.docRef || j.docType.toUpperCase())}</div><div class="sub">${esc(j.printerName)} · ${time(j.printedAt || j.requestedAt)}</div></div>${j.status === 'printed' ? pill('ok', 'Success') : pill('bad', 'Failed')}</div>${j.error ? `<div class="sub err">${esc(j.error.message)}</div>` : ''}`
+      : 'No jobs yet'
+    $('lastJob').className = j ? '' : 'empty'
+    $('failed').innerHTML = s.failedJobs ? `<div class="sub" style="margin-top:6px">${s.failedJobs} failed job(s) kept for retry — open Print Queue in the POS.</div>` : ''
+    $('autostart').checked = Boolean(s.startWithWindows)
+    if (!originsDirty) $('origins').value = (s.allowedOrigins || []).join('\n')
+    $('port').textContent = `Listening on 127.0.0.1:${s.port}`
+  }
+
+  window.agent.state().then(render)
+  window.agent.onChange(render)
+
+  $('refresh').onclick = async () => { $('refresh').disabled = true; render(await window.agent.refresh()); $('refresh').disabled = false }
+  $('testAll').onclick = async () => {
+    $('testAll').disabled = true
+    $('testMsg').textContent = 'Sending test prints…'
+    const res = await window.agent.testAll()
+    const bad = res.filter((r) => !r.ok)
+    $('testMsg').innerHTML = bad.length
+      ? bad.map((r) => `<div class="err">✕ ${esc(r.name)}: ${esc(r.error || 'failed')}</div>`).join('')
+      : `<span class="ok">✓ Test print sent to ${res.length} printer(s)</span>`
+    $('testAll').disabled = false
+  }
+  $('autostart').onchange = (e) => window.agent.setAutostart(e.target.checked)
+  $('origins').oninput = () => { originsDirty = true }
+  $('saveOrigins').onclick = async () => {
+    try {
+      render(await window.agent.saveOrigins($('origins').value.split(/\r?\n/)))
+      originsDirty = false
+      $('originsMsg').innerHTML = '<span class="ok">Saved</span>'
+    } catch (e) {
+      $('originsMsg').innerHTML = `<span class="err">${esc(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))}</span>`
+    }
+  }
+  $('logs').onclick = () => window.agent.openLogs()
+  $('updates').onclick = () => window.agent.checkUpdates()
+  $('restart').onclick = () => window.agent.restart()
+</script>
+</body>
+</html>

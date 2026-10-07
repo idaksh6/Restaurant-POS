@@ -22,13 +22,6 @@ type StatusFilter = 'all' | 'active' | 'inactive'
 type PoFilter = 'all' | 'with' | 'none'
 type SortKey = 'name' | 'city' | 'pos' | 'status'
 
-const SORT_OPTIONS = [
-  { value: 'name', label: 'Name A–Z' },
-  { value: 'city', label: 'City' },
-  { value: 'pos', label: 'Most orders' },
-  { value: 'status', label: 'Status' },
-]
-
 function VndIcon({ children }: { children: ReactNode }) {
   return (
     <svg
@@ -183,15 +176,22 @@ export default function SuppliersPage() {
       a.localeCompare(b),
     )
     return [
-      { value: 'all', label: 'All cities' },
+      { value: 'all', label: t.venAllCities },
       ...cities.map((c) => ({ value: c, label: c })),
     ]
-  }, [suppliers])
+  }, [suppliers, t.venAllCities])
 
   const poOptions = [
-    { value: 'all', label: 'All orders' },
-    { value: 'with', label: `With orders (${withPoCount})` },
-    { value: 'none', label: `No orders (${noPoCount})` },
+    { value: 'all', label: t.venAllOrders },
+    { value: 'with', label: t.venWithOrders.replace('{count}', String(withPoCount)) },
+    { value: 'none', label: t.venNoOrders.replace('{count}', String(noPoCount)) },
+  ]
+
+  const sortOptions = [
+    { value: 'name', label: t.venSortName },
+    { value: 'city', label: t.venSortCity },
+    { value: 'pos', label: t.venSortOrders },
+    { value: 'status', label: t.status },
   ]
 
   const filtered = useMemo(() => {
@@ -285,7 +285,9 @@ export default function SuppliersPage() {
     }
     saveSupplier(next)
     setEditing(null)
-    flash(isNew ? `Vendor “${next.name}” added` : `Vendor “${next.name}” saved`)
+    flash(
+      (isNew ? t.venAddedFlash : t.venSavedFlash).replace('{name}', next.name),
+    )
   }
 
   function removeVendor(s: Supplier) {
@@ -293,7 +295,7 @@ export default function SuppliersPage() {
       name: s.name,
       onConfirm: () => {
         deleteSupplier(s.id)
-        flash(`Vendor “${s.name}” removed`)
+        flash(t.venRemovedFlash.replace('{name}', s.name))
       },
     })
   }
@@ -307,8 +309,8 @@ export default function SuppliersPage() {
             <span className="vnd-empty-ico">
               <IconVendors />
             </span>
-            <strong>Vendors locked</strong>
-            <p>Only Admin / stock roles can manage vendors.</p>
+            <strong>{t.vendorLocked}</strong>
+            <p>{t.vendorLockedHint}</p>
           </div>
         </div>
         <HubFooter backTo="/" backLabel={t.home} />
@@ -327,10 +329,16 @@ export default function SuppliersPage() {
               <IconVendors />
             </span>
             <div>
-              <h1>Vendors</h1>
+              <h1>{t.vendors}</h1>
               <p>
-                {activeCount} active · {suppliers.length} total
-                {cityCount ? ` · ${cityCount} cities` : ''}
+                {(cityCount
+                  ? t.venHeroMetaCities
+                      .replace('{active}', String(activeCount))
+                      .replace('{total}', String(suppliers.length))
+                      .replace('{cities}', String(cityCount))
+                  : t.venHeroMeta
+                      .replace('{active}', String(activeCount))
+                      .replace('{total}', String(suppliers.length)))}
               </p>
             </div>
           </div>
@@ -338,28 +346,28 @@ export default function SuppliersPage() {
             <span className="vnd-stat">
               <IconVendors />
               <strong className="mesa-ltr-nums">{suppliers.length}</strong>
-              <em>Vendors</em>
+              <em>{t.vendors}</em>
             </span>
             <span className={`vnd-stat${activeCount ? '' : ' warn'}`}>
               <IconActive />
               <strong className="mesa-ltr-nums">{activeCount}</strong>
-              <em>Active</em>
+              <em>{t.venActive}</em>
             </span>
             <span className="vnd-stat">
               <IconCity />
               <strong className="mesa-ltr-nums">{cityCount}</strong>
-              <em>Cities</em>
+              <em>{t.venCities}</em>
             </span>
           </div>
           <div className="vnd-hero-actions">
             <Link to="/inventory" className="vnd-link-btn">
-              <IconBox /> Stock
+              <IconBox /> {t.navStock}
             </Link>
             <Link to="/purchase-orders" className="vnd-link-btn">
-              <IconDoc /> Purchase orders
+              <IconDoc /> {t.invPurchaseOrders}
             </Link>
             <button type="button" className="vnd-link-btn primary" onClick={() => setEditing(emptyVendor())}>
-              <IconPlus /> New vendor
+              <IconPlus /> {t.newVendor}
             </button>
           </div>
         </header>
@@ -371,16 +379,16 @@ export default function SuppliersPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search name, phone, city, or email"
-                aria-label="Search vendors"
+                placeholder={t.venSearchPlaceholder}
+                aria-label={t.venSearchAria}
               />
             </label>
             <div className="vnd-filters" role="tablist">
               {(
                 [
-                  ['all', 'All', suppliers.length],
-                  ['active', 'Active', activeCount],
-                  ['inactive', 'Inactive', inactiveCount],
+                  ['all', t.all, suppliers.length],
+                  ['active', t.venActive, activeCount],
+                  ['inactive', t.inactive, inactiveCount],
                 ] as const
               ).map(([id, label, count]) => (
                 <button
@@ -396,7 +404,7 @@ export default function SuppliersPage() {
             </div>
             <div className="vnd-pick">
               <MesaSelect
-                aria-label="Filter by city"
+                aria-label={t.venFilterCityAria}
                 value={cityFilter}
                 onChange={setCityFilter}
                 options={cityOptions}
@@ -404,7 +412,7 @@ export default function SuppliersPage() {
             </div>
             <div className="vnd-pick">
               <MesaSelect
-                aria-label="Filter by purchase orders"
+                aria-label={t.venFilterPoAria}
                 value={poFilter}
                 onChange={(v) => setPoFilter(v as PoFilter)}
                 options={poOptions}
@@ -413,15 +421,15 @@ export default function SuppliersPage() {
             <div className="vnd-pick vnd-sort">
               <IconSliders />
               <MesaSelect
-                aria-label="Sort vendors"
+                aria-label={t.venSortAria}
                 value={sortKey}
                 onChange={(v) => setSortKey(v as SortKey)}
-                options={SORT_OPTIONS}
+                options={sortOptions}
               />
             </div>
             {filtersActive ? (
               <button type="button" className="vnd-reset" onClick={resetFilters}>
-                Clear
+                {t.clear}
               </button>
             ) : null}
           </div>
@@ -431,20 +439,18 @@ export default function SuppliersPage() {
               <span className="vnd-empty-ico">
                 <IconVendors />
               </span>
-              <strong>No vendors found</strong>
+              <strong>{t.venEmptyTitle}</strong>
               <p>
-                {suppliers.length === 0
-                  ? 'Add your first vendor to create purchase orders.'
-                  : 'Try another search or clear the filters.'}
+                {suppliers.length === 0 ? t.venEmptyHintNew : t.venEmptyHintFilter}
               </p>
               <div className="vnd-empty-actions">
                 {filtersActive ? (
                   <button type="button" className="btn btn-ghost" onClick={resetFilters}>
-                    Reset filters
+                    {t.invResetFilters}
                   </button>
                 ) : null}
                 <button type="button" className="btn btn-primary" onClick={() => setEditing(emptyVendor())}>
-                  <IconPlus /> New vendor
+                  <IconPlus /> {t.newVendor}
                 </button>
               </div>
             </div>
@@ -462,12 +468,12 @@ export default function SuppliersPage() {
                   </colgroup>
                   <thead>
                     <tr>
-                      <th>Vendor</th>
-                      <th>Phone</th>
-                      <th>City</th>
-                      <th>Orders</th>
-                      <th>Status</th>
-                      <th aria-label="Actions" />
+                      <th>{t.vendorTitle}</th>
+                      <th>{t.phone}</th>
+                      <th>{t.venCity}</th>
+                      <th>{t.venColOrders}</th>
+                      <th>{t.status}</th>
+                      <th aria-label={t.actions} />
                     </tr>
                   </thead>
                   <tbody>
@@ -496,14 +502,14 @@ export default function SuppliersPage() {
                             <Link
                               to="/purchase-orders"
                               className={`vnd-po-chip${poCount ? '' : ' empty'}`}
-                              title="Open purchase orders"
+                              title={t.venOpenPosTitle}
                             >
                               <span className="mesa-ltr-nums">{poCount}</span>
                             </Link>
                           </td>
                           <td>
                             <span className={`vnd-badge ${s.active ? 'ok' : 'off'}`}>
-                              {s.active ? 'Active' : 'Inactive'}
+                              {s.active ? t.venActive : t.inactive}
                             </span>
                           </td>
                           <td>
@@ -511,8 +517,8 @@ export default function SuppliersPage() {
                               <button
                                 type="button"
                                 className="vnd-icon-btn"
-                                title="Edit"
-                                aria-label={`Edit ${s.name}`}
+                                title={t.edit}
+                                aria-label={t.venEditNamed.replace('{name}', s.name)}
                                 onClick={() => setEditing({ ...s })}
                               >
                                 <IconEdit />
@@ -520,8 +526,8 @@ export default function SuppliersPage() {
                               <button
                                 type="button"
                                 className="vnd-icon-btn danger"
-                                title="Delete"
-                                aria-label={`Delete ${s.name}`}
+                                title={t.delete}
+                                aria-label={t.venDeleteNamed.replace('{name}', s.name)}
                                 onClick={() => removeVendor(s)}
                               >
                                 <IconTrash />
@@ -537,8 +543,8 @@ export default function SuppliersPage() {
 
               <div className="vnd-pager">
                 <span className="mesa-ltr-nums">
-                  {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of{' '}
-                  {filtered.length}
+                  {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)}{' '}
+                  {t.expensePagerOf} {filtered.length}
                 </span>
                 <div className="vnd-pager-actions">
                   <button
@@ -547,7 +553,7 @@ export default function SuppliersPage() {
                     disabled={safePage <= 1}
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                   >
-                    Prev
+                    {t.expensePagerPrev}
                   </button>
                   {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
                     <button
@@ -566,7 +572,7 @@ export default function SuppliersPage() {
                     disabled={safePage >= pageCount}
                     onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                   >
-                    Next
+                    {t.expensePagerNext}
                   </button>
                 </div>
               </div>
@@ -586,39 +592,39 @@ export default function SuppliersPage() {
         >
           <div className="modal-card vnd-modal">
             <div className="section-head">
-              <h2>{suppliers.some((s) => s.id === editing.id) ? 'Edit vendor' : 'New vendor'}</h2>
+              <h2>{suppliers.some((s) => s.id === editing.id) ? t.editVendor : t.newVendor}</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setEditing(null)}>
-                Close
+                {t.close}
               </button>
             </div>
             <label className="field-label">
-              Name <Req />
+              {t.name} <Req />
             </label>
             <input
               className="search"
-              placeholder="Vendor name"
+              placeholder={t.venNamePlaceholder}
               value={editing.name}
               onChange={(e) => setEditing({ ...editing, name: e.target.value })}
               autoFocus
             />
-            <label className="field-label">Phone</label>
+            <label className="field-label">{t.phone}</label>
             <input
               className="search"
-              placeholder="+966 …"
+              placeholder={t.venPhonePlaceholder}
               value={editing.phone}
               onChange={(e) => setEditing({ ...editing, phone: e.target.value })}
             />
-            <label className="field-label">City</label>
+            <label className="field-label">{t.venCity}</label>
             <input
               className="search"
-              placeholder="City"
+              placeholder={t.venCity}
               value={editing.city}
               onChange={(e) => setEditing({ ...editing, city: e.target.value })}
             />
-            <label className="field-label">Email</label>
+            <label className="field-label">{t.emailId}</label>
             <input
               className="search"
-              placeholder="Optional"
+              placeholder={t.venOptional}
               value={editing.email ?? ''}
               onChange={(e) => setEditing({ ...editing, email: e.target.value })}
             />
@@ -628,7 +634,7 @@ export default function SuppliersPage() {
                 checked={editing.active}
                 onChange={(e) => setEditing({ ...editing, active: e.target.checked })}
               />
-              Active vendor
+              {t.venActiveVendor}
             </label>
             <div className="vnd-modal-actions">
               <button
@@ -637,7 +643,7 @@ export default function SuppliersPage() {
                 disabled={!editing.name.trim()}
                 onClick={saveEditing}
               >
-                Save vendor
+                {t.venSaveVendor}
               </button>
             </div>
           </div>

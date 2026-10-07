@@ -113,11 +113,11 @@ export default function GiftCardsPage() {
   function save() {
     if (!editing) return
     if (editing.number.trim().length < 5) {
-      flash('Gift card number must be at least 5 characters')
+      flash(t.gcNumberMinFlash)
       return
     }
     if (!(editing.issueAmount > 0)) {
-      flash('Enter issue amount')
+      flash(t.gcIssueAmountRequired)
       return
     }
     const row: GiftCard = {
@@ -142,7 +142,7 @@ export default function GiftCardsPage() {
       onConfirm: () => {
         deleteGiftCard(editing.id)
         setEditing(null)
-        flash('Gift card deleted')
+        flash(t.gcDeleted)
       },
     })
   }
@@ -151,10 +151,10 @@ export default function GiftCardsPage() {
     return (
       <div className="panel floor-panel">
         <div className="ticket-empty">
-          <strong>Gift cards locked</strong>
+          <strong>{t.gcLocked}</strong>
           <div style={{ marginTop: '1rem' }}>
             <Link to="/settings" className="btn btn-ghost">
-              Back to Settings
+              {t.backToSettings}
             </Link>
           </div>
         </div>
@@ -167,30 +167,30 @@ export default function GiftCardsPage() {
       <HubHeader />
 
       <div className="zk-gift-bar">
-        <h1>Customer Gift Card</h1>
-        <button type="button" className="zk-gift-add" onClick={startAdd} title="Add gift card">
+        <h1>{t.gcPageTitle}</h1>
+        <button type="button" className="zk-gift-add" onClick={startAdd} title={t.gcAddTitle}>
           +
         </button>
       </div>
 
       <div className="zk-gift-search">
         <label>
-          Search
+          {t.search}
           <input
             className="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Name, card no, phone…"
+            placeholder={t.gcSearchPh}
           />
         </label>
-        <span className="chip">{filtered.length} cards</span>
+        <span className="chip">{t.gcCardsCount.replace('{count}', String(filtered.length))}</span>
       </div>
 
       <div className="zk-gift-body">
         {filtered.length === 0 ? (
           <div className="zk-gift-empty">
-            <strong>No gift cards</strong>
-            <span>Tap + to issue one.</span>
+            <strong>{t.gcEmpty}</strong>
+            <span>{t.gcEmptyHint}</span>
           </div>
         ) : (
           <div className="zk-gift-grid">
@@ -203,9 +203,9 @@ export default function GiftCardsPage() {
                     <path d="M14 28h10" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
                   </svg>
                 </span>
-                <strong>{g.customerName || 'Gift card'}</strong>
+                <strong>{g.customerName || t.gcFallbackName}</strong>
                 <span>{g.number}</span>
-                <em>{money(giftBalance(g))} left</em>
+                <em>{t.gcBalanceLeft.replace('{amount}', money(giftBalance(g)))}</em>
               </button>
             ))}
           </div>
@@ -224,7 +224,7 @@ export default function GiftCardsPage() {
         <div className="zk-vendors-modal" role="dialog" aria-modal="true">
           <div className="zk-gift-sheet">
             <div className="zk-vendors-sheet-head">
-              <h2>{isNew ? 'Issue gift card' : 'Edit gift card'}</h2>
+              <h2>{isNew ? t.gcIssueTitle : t.gcEditTitle}</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setEditing(null)}>
                 ✕
               </button>
@@ -234,7 +234,7 @@ export default function GiftCardsPage() {
               <div className="zk-gift-col">
                 <label>
                   <span>
-                    Gift card number <i>*</i>
+                    {t.gcNumberLabel} <i>*</i>
                   </span>
                   <input
                     className="search"
@@ -242,11 +242,11 @@ export default function GiftCardsPage() {
                     onChange={(e) => setEditing({ ...editing, number: e.target.value })}
                   />
                   <small className={editing.number.trim().length >= 5 ? 'ok' : ''}>
-                    Min length 5
+                    {t.gcMinLength}
                   </small>
                 </label>
                 <label>
-                  <span>Expiry date</span>
+                  <span>{t.gcExpiry}</span>
                   <input
                     className="search"
                     type="date"
@@ -257,7 +257,7 @@ export default function GiftCardsPage() {
                 <div className="zk-gift-durations">
                   {[1, 3, 6, 12].map((m) => (
                     <button key={m} type="button" onClick={() => setDuration(m)}>
-                      {m} Month{m === 1 ? '' : 's'}
+                      {m} {m === 1 ? t.voucherMonth : t.voucherMonths}
                     </button>
                   ))}
                 </div>
@@ -265,16 +265,16 @@ export default function GiftCardsPage() {
 
               <div className="zk-gift-col">
                 <label>
-                  <span>Customer</span>
+                  <span>{t.customer}</span>
                   <div className="zk-gift-customer-row">
-                    <input className="search" readOnly value={editing.customerName} placeholder="Select…" />
+                    <input className="search" readOnly value={editing.customerName} placeholder={t.gcSelectPh} />
                     <button type="button" className="zk-gift-pick" onClick={() => setCustomerOpen(true)}>
                       …
                     </button>
                   </div>
                 </label>
                 <label>
-                  <span>Phone no.</span>
+                  <span>{t.gcPhoneNo}</span>
                   <input
                     className="search"
                     value={editing.phone}
@@ -282,7 +282,7 @@ export default function GiftCardsPage() {
                   />
                 </label>
                 <label>
-                  <span>Description</span>
+                  <span>{t.description}</span>
                   <textarea
                     className="search zk-gift-desc"
                     rows={3}
@@ -294,10 +294,12 @@ export default function GiftCardsPage() {
             </div>
 
             <div className="zk-gift-pay">
-              <h3>Payment information</h3>
+              <h3>{t.gcPaymentInfo}</h3>
               <div className="zk-gift-pay-grid">
                 <label>
-                  <span>Issue amount *</span>
+                  <span>
+                    {t.gcIssueAmount} *
+                  </span>
                   <input
                     className="search"
                     type="number"
@@ -309,11 +311,11 @@ export default function GiftCardsPage() {
                   />
                 </label>
                 <label>
-                  <span>Bill amount</span>
+                  <span>{t.gcBillAmount}</span>
                   <input className="search" readOnly value={totals.bill.toFixed(2)} />
                 </label>
                 <label>
-                  <span>Extra charges</span>
+                  <span>{t.gcExtraCharges}</span>
                   <input
                     className="search"
                     type="number"
@@ -325,15 +327,15 @@ export default function GiftCardsPage() {
                   />
                 </label>
                 <label>
-                  <span>Payment amount</span>
+                  <span>{t.gcPaymentAmount}</span>
                   <input className="search" readOnly value={totals.bill.toFixed(2)} />
                 </label>
                 <label>
-                  <span>Total issue amount</span>
+                  <span>{t.gcTotalIssue}</span>
                   <input className="search" readOnly value={totals.issue.toFixed(2)} />
                 </label>
                 <label>
-                  <span>Used amount</span>
+                  <span>{t.gcUsedAmount}</span>
                   <input
                     className="search"
                     type="number"
@@ -345,11 +347,11 @@ export default function GiftCardsPage() {
                   />
                 </label>
                 <label>
-                  <span>Total extra charges</span>
+                  <span>{t.gcTotalExtra}</span>
                   <input className="search" readOnly value={totals.extra.toFixed(2)} />
                 </label>
                 <label>
-                  <span>Remaining balance</span>
+                  <span>{t.gcRemaining}</span>
                   <input className="search zk-gift-balance" readOnly value={totals.remaining.toFixed(2)} />
                 </label>
               </div>
@@ -357,7 +359,7 @@ export default function GiftCardsPage() {
 
             <div className="zk-vendors-actions">
               <button type="button" className="zk-vendors-action" onClick={() => setEditing(null)}>
-                Cancel
+                {t.cancel}
               </button>
               {!isNew ? (
                 <button
@@ -365,11 +367,11 @@ export default function GiftCardsPage() {
                   className="zk-vendors-action danger"
                   onClick={remove}
                 >
-                  Delete
+                  {t.delete}
                 </button>
               ) : null}
               <button type="button" className="zk-vendors-action primary" onClick={save}>
-                Save
+                {t.save}
               </button>
             </div>
           </div>
@@ -380,7 +382,7 @@ export default function GiftCardsPage() {
         <div className="zk-vendors-modal" role="dialog" aria-modal="true">
           <div className="zk-gift-customer-modal">
             <div className="zk-vendors-sheet-head">
-              <h2>Customer search</h2>
+              <h2>{t.gcCustomerSearch}</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setCustomerOpen(false)}>
                 ✕
               </button>
@@ -388,7 +390,7 @@ export default function GiftCardsPage() {
             <input
               className="search"
               autoFocus
-              placeholder="Name, phone…"
+              placeholder={t.gcCustomerSearchPh}
               value={customerQuery}
               onChange={(e) => setCustomerQuery(e.target.value)}
             />
@@ -396,9 +398,9 @@ export default function GiftCardsPage() {
               <table className="zk-tax-table">
                 <thead>
                   <tr>
-                    <th>Customer name</th>
-                    <th>Phone</th>
-                    <th>Points</th>
+                    <th>{t.gcCustomerName}</th>
+                    <th>{t.phone}</th>
+                    <th>{t.points}</th>
                     <th />
                   </tr>
                 </thead>
@@ -412,7 +414,7 @@ export default function GiftCardsPage() {
                       <td>{c.points}</td>
                       <td>
                         <button type="button" className="btn btn-secondary" onClick={() => pickCustomer(c.id)}>
-                          Select
+                          {t.gcSelect}
                         </button>
                       </td>
                     </tr>
@@ -427,7 +429,7 @@ export default function GiftCardsPage() {
       {successOpen ? (
         <SuccessModal
           title={t.successTitle}
-          message="Gift card saved successfully"
+          message={t.gcSavedOk}
           okLabel={t.ok}
           onClose={() => setSuccessOpen(false)}
         />

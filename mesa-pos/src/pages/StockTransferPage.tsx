@@ -14,6 +14,7 @@ import {
   patchTransfer,
   pendingBranchDispatch,
   saveAllTransfers,
+  transferItemName,
   transfersForBranch,
   upsertTransfer,
   type StockTransfer,
@@ -118,7 +119,8 @@ function IconCloud() {
 
 export default function StockTransferPage() {
   const { user } = useAuth()
-  const { flash, stock, ingredients, adjustStock, transferStockLocation } = usePos()
+  const { flash, stock, ingredients, adjustStock, transferStockLocation, saveIngredient, upsertStockItem } =
+    usePos()
   const { t } = useI18n()
   const { activeBranchId, branches, activeBranch } = useBranch()
   const { syncEpoch, connectivity, outbox, queued } = useSync()
@@ -192,6 +194,10 @@ export default function StockTransferPage() {
   const incoming = useMemo(() => incomingBranchTransfers(activeBranchId), [rows, activeBranchId])
   const pendingDispatch = useMemo(() => pendingBranchDispatch(activeBranchId), [rows, activeBranchId])
   const myRequests = useMemo(() => outgoingBranchRequests(activeBranchId), [rows, activeBranchId])
+
+  useEffect(() => {
+    if (incoming.length || pendingDispatch.length) setMode('branch')
+  }, [incoming.length, pendingDispatch.length, activeBranchId])
 
   const locationOptions = useMemo(
     () => stockLocations.map((l) => ({ value: l.id, label: l.label })),
@@ -517,17 +523,52 @@ export default function StockTransferPage() {
 
   function approveIncoming(row: StockTransfer) {
     if (busy) return
-    const match = stock.find((s) => s.sku === row.fromSku && s.unit === row.unit)
-    if (!match) {
-      flash(`No matching SKU (${row.fromSku}) at this branch — create stock first`, 'err')
+    const sku = String(row.fromSku || row.toSku || '').trim()
+    if (!sku) {
+      flash('Transfer missing SKU — cannot receive', 'err')
       return
     }
     if (row.fromSku && row.toSku && row.fromSku !== row.toSku) {
       flash('Branch transfer requires the same SKU at both branches', 'err')
       return
     }
+    const unit = String(row.unit || 'pcs')
+    const name = transferItemName(row)
+    const branchId = getActiveBranchId()
+    let match = stock.find((s) => s.sku === sku && s.unit === unit)
     setBusy(true)
     try {
+      if (!match) {
+        // Destination may have no catalog yet — create ingredient + stock, then receive qty.
+        const existingIng = ingredients.find((r) => r.sku === sku)
+        const ingredientId = existingIng?.id ?? `ing-xfer-${Date.now()}`
+        if (!existingIng) {
+          saveIngredient({
+            id: ingredientId,
+            name,
+            sku,
+            category: 'General',
+            unit,
+            active: true,
+            branchId,
+            reorderAt: 0,
+          })
+        }
+        match = upsertStockItem({
+          id: `stk-${ingredientId}`,
+          ingredientId,
+          name: existingIng?.name || name,
+          sku,
+          category: existingIng?.category || 'General',
+          unit,
+          onHand: 0,
+          reorderAt: existingIng?.reorderAt ?? 0,
+          cost: 0,
+          branchId,
+          vendorId: existingIng?.vendorId,
+          vendor: existingIng?.vendor,
+        })
+      }
       adjustStock(match.id, row.qty, `Branch transfer from ${row.fromBranchName ?? 'peer'}`, {
         quiet: true,
       })
@@ -536,12 +577,13 @@ export default function StockTransferPage() {
         status: 'received',
         receivedAt: new Date().toISOString(),
         toStockId: match.id,
+        toSku: sku,
         toName: `${activeBranch.code} · ${match.name}`,
       }
       patchTransfer(row.id, updated)
       pushTransfer(updated)
       refreshRows()
-      flash(`Received ${row.qty} ${row.unit} · ${match.name}`)
+      flash(`Received ${row.qty} ${row.unit} · ${match.name} at ${activeBranch.name}`)
     } finally {
       setBusy(false)
     }
@@ -991,7 +1033,11 @@ export default function StockTransferPage() {
 
                 {incoming.length ? (
                   <div className="xfer-incoming">
-                    <h3>Incoming — approve receipt</h3>
+                    <h3>Incoming — approve receipt ({incoming.length})</h3>
+                    <p className="xfer-mode-lead" style={{ marginTop: 0 }}>
+                      Stock left the sending branch and is waiting here. Approve to add it to this
+                      branch’s stock master (SKU is created automatically if missing).
+                    </p>
                     <ul>
                       {incoming.map((row) => (
                         <li key={row.id}>
@@ -999,10 +1045,18 @@ export default function StockTransferPage() {
                             <strong className="mesa-ltr-nums">
                               {row.qty} {row.unit}
                             </strong>{' '}
-                            {row.fromName}
-                            <em> from {row.fromBranchName}</em>
+                            {transferItemName(row)}
+                            <em>
+                              {' '}
+                              · {row.fromSku} from {row.fromBranchName}
+                            </em>
                           </div>
-                          <button type="button" className="btn btn-teal" onClick={() => approveIncoming(row)}>
+                          <button
+                            type="button"
+                            className="btn btn-teal"
+                            disabled={busy}
+                            onClick={() => approveIncoming(row)}
+                          >
                             Approve receive
                           </button>
                         </li>
@@ -1012,8 +1066,9 @@ export default function StockTransferPage() {
                 ) : null}
 
                 <p className="xfer-mode-foot">
-                  Wrong SKU entry? Use <Link to="/inventory">Stock → Adjust</Link> with reason{' '}
-                  <strong>Entry mistake</strong> — not transfer.
+                  Flow: <strong>Send</strong> at source → status <strong>In transit</strong> → switch
+                  to destination branch → <strong>Approve receive</strong>. Until received, Stock
+                  Master at the destination stays empty for that SKU.
                 </p>
               </>
             ) : (
@@ -1149,6 +1204,15 @@ export default function StockTransferPage() {
                     <tbody>
                       {pageItems.map((row) => {
                         const pending = pendingTransferIds.has(row.id)
+                        const canReceive =
+                          row.kind === 'branch' &&
+                          row.status === 'in_transit' &&
+                          row.toBranchId === activeBranchId
+                        const awaitingElsewhere =
+                          row.kind === 'branch' &&
+                          row.status === 'in_transit' &&
+                          row.toBranchId &&
+                          row.toBranchId !== activeBranchId
                         return (
                           <tr key={row.id}>
                             <td className="mesa-ltr-nums">
@@ -1172,11 +1236,27 @@ export default function StockTransferPage() {
                               {row.status === 'requested' ? (
                                 <em className="xfer-note">Requested</em>
                               ) : row.status === 'in_transit' ? (
-                                <em className="xfer-note">In transit</em>
+                                <em className="xfer-note">
+                                  {awaitingElsewhere
+                                    ? `In transit · await receive at ${row.toBranchName || 'destination'}`
+                                    : 'In transit'}
+                                </em>
                               ) : row.status === 'received' ? (
                                 <em className="xfer-note">Received</em>
                               ) : null}
                               {row.note ? <em className="xfer-note">{row.note}</em> : null}
+                              {canReceive ? (
+                                <div style={{ marginTop: '0.35rem' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-teal"
+                                    disabled={busy}
+                                    onClick={() => approveIncoming(row)}
+                                  >
+                                    Approve receive
+                                  </button>
+                                </div>
+                              ) : null}
                             </td>
                             <td>
                               <span className="xfer-when">

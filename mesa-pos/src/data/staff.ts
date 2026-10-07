@@ -7,6 +7,8 @@ export type StaffAccount = {
   roleLabel: string
   pin: string
   initials: string
+  /** Assigned branch; null/undefined = all branches. */
+  branchId?: string | null
   /** Set when signed in as a delivery rider (not a staff user). */
   riderId?: string
 }

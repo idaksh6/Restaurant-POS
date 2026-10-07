@@ -16,6 +16,7 @@ import {
   type StockLocationType,
 } from '../data/stockLocations'
 import { settingsHubPath } from '../lib/settingsHub'
+import { pushCatalogDelete, pushCatalogRow } from '../lib/catalogPush'
 import { useI18n } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
 import { usePos } from '../state/PosContext'
@@ -65,6 +66,14 @@ export default function StorageLocationsMasterPage() {
     setRows(loadStockLocations())
   }
 
+  function pushLocation(row: StockLocation) {
+    pushCatalogRow('stockLocation', row)
+  }
+
+  function pushLocationDelete(id: string) {
+    pushCatalogDelete('stockLocation', id)
+  }
+
   function startAdd() {
     setIsNew(true)
     setEditing(emptyRow(rows))
@@ -95,6 +104,7 @@ export default function StorageLocationsMasterPage() {
       sortOrder: Number(editing.sortOrder) || nextLocationSortOrder(rows),
     }
     persist([doc, ...rows.filter((r) => r.id !== id)])
+    pushLocation(doc)
     setEditing(null)
     flash(isNew ? `Location “${label}” added` : `Location “${label}” saved`)
   }
@@ -108,7 +118,9 @@ export default function StorageLocationsMasterPage() {
     askDelete({
       name: editing.label,
       onConfirm: () => {
-        persist(rows.filter((r) => r.id !== editing.id))
+        const id = editing.id
+        persist(rows.filter((r) => r.id !== id))
+        pushLocationDelete(id)
         setEditing(null)
         flash('Location deleted')
       },

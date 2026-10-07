@@ -12,11 +12,15 @@ import { systemRoleTemplates } from '../access/roleTemplates'
 import { TenantDbService } from '../../tenant/tenant-db.service'
 import { runWithCompanyId } from '../../tenant/tenant-context'
 import { SeedService } from '../../seed.service'
+import { addMonths, defaultExpiryFrom, licenseSnapshot } from '../auth/license'
 
 export type RegisterCompanyInput = {
   companyName: string
   aliasName?: string
-  taxId: string
+  /** Optional. Leave blank for small companies without VAT — POS activates with companyCode. */
+  taxId?: string
+  /** Optional short activation code (e.g. SARFA). Auto C001… if omitted. */
+  companyCode?: string
   hqPhone?: string
   currency?: string
   enableTax?: boolean
@@ -35,7 +39,7 @@ export type RegisterCompanyInput = {
 export type UpdateCompanyInput = {
   companyName: string
   aliasName?: string
-  taxId: string
+  taxId?: string
   hqPhone?: string
   branches?: Array<{
     id: string
@@ -67,6 +71,23 @@ function slugId(prefix: string, raw: string) {
     .replace(/^-|-$/g, '')
     .slice(0, 24)
   return `${prefix}-${clean || Date.now().toString(36)}`
+}
+
+function normalizeCompanyCode(raw: string) {
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 12)
+}
+
+function resolveTaxId(raw: string | undefined, companyCode: string) {
+  const taxId = raw?.trim() || ''
+  if (!taxId) return `NOVAT-${companyCode}`
+  if (!/^NOVAT-/i.test(taxId) && taxId.length < 10) {
+    throw new BadRequestException('VAT / tax ID must be at least 10 characters (or leave blank)')
+  }
+  return taxId
 }
 
 @Injectable()
@@ -129,12 +150,19 @@ export class DevService {
             id: reg.id,
             companyName: reg.companyName,
             taxId: reg.taxId,
+            companyCode: reg.companyCode,
             databaseName: reg.databaseName,
             branches: [],
             users: [],
+            license: licenseSnapshot(reg),
           }
         }
-        return { ...company, databaseName: reg.databaseName }
+        return {
+          ...company,
+          databaseName: reg.databaseName,
+          companyCode: reg.companyCode,
+          license: licenseSnapshot(reg),
+        }
       }),
     )
     return rows
@@ -162,12 +190,82 @@ export class DevService {
       },
     })
     if (!company) throw new BadRequestException('Company not found')
-    return { ...company, databaseName: reg.databaseName }
+    return {
+      ...company,
+      databaseName: reg.databaseName,
+      companyCode: reg.companyCode,
+      license: licenseSnapshot(reg),
+    }
+  }
+
+  async updateLicense(
+    id: string,
+    body: {
+      expiresAt?: string | null
+      /** Add N months from now (or from activatedAt if still pending). */
+      extendMonths?: number
+      /** pending | active | suspended */
+      licenseStatus?: string
+      /** Manual first-activate from developer (same as first POS device). */
+      activateNow?: boolean
+    },
+  ) {
+    const reg = await this.tenants.getRegistry(id)
+    if (!reg) throw new BadRequestException('Company not found')
+
+    let licenseStatus = reg.licenseStatus || 'pending'
+    let activatedAt = reg.activatedAt
+    let expiresAt = reg.expiresAt
+
+    if (body.activateNow) {
+      activatedAt = activatedAt ?? new Date()
+      licenseStatus = 'active'
+      if (!expiresAt || expiresAt.getTime() <= Date.now()) {
+        expiresAt = defaultExpiryFrom(activatedAt)
+      }
+    }
+
+    if (typeof body.extendMonths === 'number' && Number.isFinite(body.extendMonths)) {
+      const months = Math.max(0, Math.min(120, Math.floor(body.extendMonths)))
+      const base =
+        expiresAt && expiresAt.getTime() > Date.now() ? expiresAt : activatedAt ?? new Date()
+      expiresAt = addMonths(base, months)
+      if (!activatedAt) activatedAt = new Date()
+      if (licenseStatus === 'pending') licenseStatus = 'active'
+    }
+
+    if (body.expiresAt !== undefined) {
+      if (body.expiresAt == null || body.expiresAt === '') {
+        expiresAt = null
+      } else {
+        const d = new Date(body.expiresAt)
+        if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid expiresAt')
+        expiresAt = d
+      }
+    }
+
+    if (body.licenseStatus) {
+      const s = body.licenseStatus.trim().toLowerCase()
+      if (!['pending', 'active', 'suspended'].includes(s)) {
+        throw new BadRequestException('licenseStatus must be pending | active | suspended')
+      }
+      licenseStatus = s
+      if (s === 'active' && !activatedAt) {
+        activatedAt = new Date()
+        expiresAt = expiresAt ?? defaultExpiryFrom(activatedAt)
+      }
+    }
+
+    const updated = await this.tenants.updateLicense(id, {
+      licenseStatus,
+      activatedAt,
+      expiresAt,
+    })
+    return { id, license: licenseSnapshot(updated) }
   }
 
   async register(input: RegisterCompanyInput) {
     const companyName = input.companyName?.trim()
-    const taxId = input.taxId?.trim()
     const branchName = input.branchName?.trim()
     const branchCode = input.branchCode?.trim().toUpperCase()
     const adminUsername = input.adminUsername?.trim().toLowerCase()
@@ -175,9 +273,6 @@ export class DevService {
     const adminName = input.adminName?.trim() || 'Admin'
 
     if (!companyName) throw new BadRequestException('companyName required')
-    if (!taxId || taxId.length < 10) {
-      throw new BadRequestException('Valid KSA VAT / taxId required')
-    }
     if (!branchName || !branchCode) {
       throw new BadRequestException('branchName and branchCode required')
     }
@@ -186,6 +281,24 @@ export class DevService {
     }
     if (!adminPassword || adminPassword.length < 4) {
       throw new BadRequestException('adminPassword required (min 4)')
+    }
+
+    let companyCode = normalizeCompanyCode(input.companyCode || '')
+    if (companyCode) {
+      if (companyCode.length < 3) {
+        throw new BadRequestException('companyCode must be 3–12 letters/digits')
+      }
+      const codeTaken = await this.tenants.getRegistryByCompanyCode(companyCode)
+      if (codeTaken) throw new ConflictException(`Company code ${companyCode} already exists`)
+    } else {
+      companyCode = await this.tenants.nextCompanyCode()
+    }
+
+    let taxId: string
+    try {
+      taxId = resolveTaxId(input.taxId, companyCode)
+    } catch (err) {
+      throw err
     }
 
     const companyId = slugId('co', companyName)
@@ -250,6 +363,7 @@ export class DevService {
         companyId,
         companyName,
         taxId,
+        companyCode,
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -346,22 +460,20 @@ export class DevService {
       provisioned: true,
       seeded: true,
       databaseName: reg?.databaseName,
-      message: `Company provisioned in ${reg?.databaseName} with starter menu, floor, stock, payments, and VAT.`,
+      companyCode: reg?.companyCode ?? companyCode,
+      message: `Company provisioned in ${reg?.databaseName}. Activate POS with company code ${reg?.companyCode ?? companyCode}.`,
       ...result,
     }
   }
 
   async update(id: string, input: UpdateCompanyInput) {
     const companyName = input.companyName?.trim()
-    const taxId = input.taxId?.trim()
     if (!companyName) throw new BadRequestException('companyName required')
-    if (!taxId || taxId.length < 10) {
-      throw new BadRequestException('Valid KSA VAT / taxId required')
-    }
 
     const reg = await this.tenants.getRegistry(id)
     if (!reg) throw new BadRequestException('Company not found')
 
+    const taxId = resolveTaxId(input.taxId, reg.companyCode)
     const taxTaken = await this.tenants.getRegistryByTaxId(taxId)
     if (taxTaken && taxTaken.id !== id) {
       throw new ConflictException('Company with this VAT/taxId already exists')

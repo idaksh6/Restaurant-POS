@@ -61,6 +61,16 @@ export class DeliveryChannelsController {
     const bid = branchId ?? req.user?.branchId ?? ''
     return this.channels.syncMenu(requireCompany(req.user), bid, channelId)
   }
+
+  @Post(':channelId/test')
+  testConnection(
+    @Req() req: { user?: JwtUser },
+    @Param('channelId') channelId: string,
+    @Query('branchId') branchId?: string,
+  ) {
+    const bid = branchId ?? req.user?.branchId ?? ''
+    return this.channels.testConnection(requireCompany(req.user), bid, channelId)
+  }
 }
 
 @Controller('delivery/orders')

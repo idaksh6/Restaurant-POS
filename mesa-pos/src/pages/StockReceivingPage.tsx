@@ -18,6 +18,7 @@ import {
   pushCostHistory,
   receiptsForBranch,
   saveAllReceipts,
+  uniqueReceiveNumber,
   type StockReceipt,
   type StockReceiptLine,
 } from '../data/stockReceiving'
@@ -128,8 +129,10 @@ export default function StockReceivingPage() {
   const online = connectivity === 'online' || connectivity === 'syncing'
 
   const [query, setQuery] = useState('')
-  const [receipts, setReceipts] = useState(loadReceipts)
-  const [receiveNumber, setReceiveNumber] = useState(() => nextReceiveNumber(loadReceipts()))
+  const [receipts, setReceipts] = useState(() => loadReceipts(getActiveBranchId()))
+  const [receiveNumber, setReceiveNumber] = useState(() =>
+    nextReceiveNumber(loadReceipts(getActiveBranchId())),
+  )
   const [receivingDate, setReceivingDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -144,6 +147,8 @@ export default function StockReceivingPage() {
   const [selectedLine, setSelectedLine] = useState<number | null>(null)
   const [barcodeMode, setBarcodeMode] = useState(false)
   const [busy, setBusy] = useState(false)
+  /** When set, form shows a past posted receipt — posting again is blocked. */
+  const [viewingReceiptId, setViewingReceiptId] = useState<string | null>(null)
 
   const activeSuppliers = useMemo(() => suppliers.filter((s) => s.active), [suppliers])
 
@@ -310,10 +315,15 @@ export default function StockReceivingPage() {
     setLines([])
     setSelectedLine(null)
     setSupplierId(activeSuppliers[0]?.id ?? '')
+    setViewingReceiptId(null)
   }
 
   function saveReceipt() {
     if (busy) return
+    if (viewingReceiptId) {
+      flash('This receipt is already posted — tap Copy as new first', 'err')
+      return
+    }
     if (!supplierId) {
       flash('Select a vendor', 'err')
       setVendorOpen(true)
@@ -336,12 +346,16 @@ export default function StockReceivingPage() {
 
     setBusy(true)
     try {
+      const assignedNumber = uniqueReceiveNumber(receipts, receiveNumber)
+      if (assignedNumber !== receiveNumber.trim()) {
+        setReceiveNumber(assignedNumber)
+      }
       const receipt: StockReceipt = {
         id: `rcpt-${Date.now()}`,
         branchId: getActiveBranchId(),
-        receiveNumber,
+        receiveNumber: assignedNumber,
         receivingDate,
-        invoiceNumber: invoiceNumber.trim() || receiveNumber,
+        invoiceNumber: invoiceNumber.trim() || assignedNumber,
         invoiceDate,
         supplierId,
         receivingPerson: user?.name ?? 'Admin',
@@ -366,7 +380,7 @@ export default function StockReceivingPage() {
       if (goods > 0) {
         addVendorLedgerEntry({
           supplierId,
-          description: `Stock receiving #${receiveNumber}${invoiceNumber ? ` · Inv ${invoiceNumber}` : ''}`,
+          description: `Stock receiving #${assignedNumber}${invoiceNumber ? ` · Inv ${invoiceNumber}` : ''}`,
           debit: goods,
           credit: 0,
           kind: 'invoice',
@@ -391,6 +405,7 @@ export default function StockReceivingPage() {
   }
 
   function loadReceipt(r: StockReceipt) {
+    setViewingReceiptId(r.id)
     setReceiveNumber(r.receiveNumber)
     setReceivingDate(r.receivingDate)
     setInvoiceNumber(r.invoiceNumber)
@@ -400,7 +415,17 @@ export default function StockReceivingPage() {
     setLines(r.lines.map((l) => ({ ...l })))
     setSelectedLine(r.lines.length ? 0 : null)
     setRetrieveOpen(false)
-    flash(`Loaded receive #${r.receiveNumber}`)
+    flash(`Opened #${r.receiveNumber} for review only — inventory unchanged`)
+  }
+
+  /** Copy lines into a fresh draft so posting will receive stock again on purpose. */
+  function copyAsNew() {
+    setViewingReceiptId(null)
+    setReceiveNumber(nextReceiveNumber(receipts))
+    setReceivingDate(new Date().toISOString().slice(0, 10))
+    setInvoiceDate(new Date().toISOString().slice(0, 10))
+    setInvoiceNumber('')
+    flash('Draft ready — edit lines and Post receive to add stock')
   }
 
   if (!canAccess) {
@@ -434,8 +459,18 @@ export default function StockReceivingPage() {
             <div>
               <h1>Stock receiving</h1>
               <p>
-                Receive #{receiveNumber} · {lines.length} line{lines.length === 1 ? '' : 's'}
-                {vendor ? ` · ${vendor.name}` : ''}
+                {viewingReceiptId ? (
+                  <>
+                    Viewing posted #{receiveNumber} · {lines.length} line
+                    {lines.length === 1 ? '' : 's'}
+                    {vendor ? ` · ${vendor.name}` : ''}
+                  </>
+                ) : (
+                  <>
+                    Receive #{receiveNumber} · {lines.length} line{lines.length === 1 ? '' : 's'}
+                    {vendor ? ` · ${vendor.name}` : ''}
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -472,12 +507,26 @@ export default function StockReceivingPage() {
           <section className="recv-card recv-meta-card">
             <div className="recv-card-head">
               <h2>Receipt details</h2>
-              {!online ? (
+              {viewingReceiptId ? (
+                <span className="recv-pill offline">Posted</span>
+              ) : !online ? (
                 <span className="recv-pill offline">Offline</span>
               ) : (
                 <span className="recv-pill online">Ready</span>
               )}
             </div>
+
+            {viewingReceiptId ? (
+              <div className="recv-view-banner" role="status">
+                <p>
+                  This receipt is already posted to stock. Posting again is blocked so inventory is
+                  not doubled.
+                </p>
+                <button type="button" className="recv-chip-btn accent" onClick={copyAsNew}>
+                  Copy as new
+                </button>
+              </div>
+            ) : null}
 
             <div className="recv-fields">
               <label className="recv-field">
@@ -594,7 +643,7 @@ export default function StockReceivingPage() {
                   {barcodeMode ? 'Barcode on' : 'Barcode'}
                 </button>
                 <button type="button" className="recv-chip-btn" onClick={() => setRetrieveOpen(true)}>
-                  Retrieve
+                  History
                 </button>
                 <button type="button" className="recv-chip-btn accent" onClick={openAddItem}>
                   <IconPlus /> Add item
@@ -720,10 +769,16 @@ export default function StockReceivingPage() {
                 <button
                   type="button"
                   className="recv-act primary"
-                  disabled={busy || lines.length === 0}
+                  disabled={busy || lines.length === 0 || Boolean(viewingReceiptId)}
                   onClick={saveReceipt}
                 >
-                  {busy ? 'Posting…' : online ? 'Post receive' : 'Save offline'}
+                  {busy
+                    ? 'Posting…'
+                    : viewingReceiptId
+                      ? 'Already posted'
+                      : online
+                        ? 'Post receive'
+                        : 'Save offline'}
                 </button>
               </div>
             </div>
@@ -845,11 +900,15 @@ export default function StockReceivingPage() {
         >
           <div className="recv-modal recv-modal-wide">
             <div className="recv-modal-head">
-              <h2>Retrieve receipts</h2>
+              <h2>Receipt history</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setRetrieveOpen(false)}>
                 Close
               </button>
             </div>
+            <p className="recv-modal-lead">
+              Posted receives for this branch. Opening one is review only — it does not add stock
+              again. Use Copy as new if you need to receive the same lines once more.
+            </p>
             <div className="recv-modal-list">
               {receipts.length === 0 ? (
                 <p className="recv-empty-inline">No saved receipts yet</p>
@@ -864,8 +923,18 @@ export default function StockReceivingPage() {
                     <div>
                       <strong>#{r.receiveNumber}</strong>
                       <span>
-                        {r.receivingDate} ·{' '}
+                        {r.receivingDate}
+                        {r.createdAt
+                          ? ` · ${new Date(r.createdAt).toLocaleString(undefined, {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              day: '2-digit',
+                              month: 'short',
+                            })}`
+                          : ''}
+                        {' · '}
                         {suppliers.find((s) => s.id === r.supplierId)?.name ?? r.supplierId}
+                        {' · posted'}
                       </span>
                     </div>
                     <em className="mesa-ltr-nums">

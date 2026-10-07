@@ -20,6 +20,7 @@ import { apiDeleteCatalog, apiMastersReady, apiPutCatalog } from '../lib/apiMast
 import { settingsHubPath } from '../lib/settingsHub'
 import { useI18n, type Dict } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
+import { useBranch } from '../state/BranchContext'
 import { usePos } from '../state/PosContext'
 import { getDeviceId } from '../sync/deviceId'
 import { dropPendingUpsertsFor, enqueueOutbox } from '../sync/outbox'
@@ -153,6 +154,7 @@ function emptyTable(defaultArea: string, rows: { label: string }[]): TableDraft 
 
 export default function FloorTablesMasterPage() {
   const { user } = useAuth()
+  const { activeBranchId } = useBranch()
   const { tables, flash, saveFloorTable, deleteFloorTable } = usePos()
   const { t } = useI18n()
   const canAccess = user ? getPermissions(user.role).canMasters || user.role === 'admin' : false
@@ -161,7 +163,7 @@ export default function FloorTablesMasterPage() {
   const initialTab = searchParams.get('tab') === 'tables' ? 'tables' : 'areas'
 
   const [tab, setTab] = useState<Tab>(initialTab)
-  const [areas, setAreas] = useState<TableArea[]>(() => loadTableAreas())
+  const [areas, setAreas] = useState<TableArea[]>(() => loadTableAreas(activeBranchId))
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [editingArea, setEditingArea] = useState<TableArea | null>(null)
@@ -193,13 +195,13 @@ export default function FloorTablesMasterPage() {
   useEffect(() => {
     const sync = () => {
       const names = tables.map((tbl) => tbl.area)
-      setAreas(ensureAreasFromTables(names))
+      setAreas(ensureAreasFromTables(names, loadTableAreas(activeBranchId), activeBranchId))
     }
     sync()
-    const onAreas = () => setAreas(loadTableAreas())
+    const onAreas = () => setAreas(loadTableAreas(activeBranchId))
     window.addEventListener('mesa:table-areas-changed', onAreas)
     return () => window.removeEventListener('mesa:table-areas-changed', onAreas)
-  }, [tables])
+  }, [tables, activeBranchId])
 
   const areaOptions = useMemo(
     () =>
@@ -249,6 +251,7 @@ export default function FloorTablesMasterPage() {
         return (
           row.label.toLowerCase().includes(q) ||
           row.area.toLowerCase().includes(q) ||
+          (row.note ?? '').toLowerCase().includes(q) ||
           String(row.seats).includes(q)
         )
       })
@@ -286,9 +289,9 @@ export default function FloorTablesMasterPage() {
   }
 
   function persistAreas(next: TableArea[]) {
-    setAreas(saveTableAreas(next))
+    setAreas(saveTableAreas(next, activeBranchId))
     for (const area of next) {
-      pushTableArea(area)
+      pushTableArea({ ...area, branchId: area.branchId ?? activeBranchId })
     }
   }
 
@@ -339,8 +342,21 @@ export default function FloorTablesMasterPage() {
       return
     }
 
+    const prev = areas.find((a) => a.id === editingArea.id)
+    const prevName = prev?.name
+
+    // Block deactivating an area that still has live floor tables
+    if (!editingArea.active) {
+      const areaKey = (prevName ?? name).trim()
+      const busy = tables.filter((tbl) => tbl.area === areaKey && isTableLocked(tbl.status))
+      if (busy.length > 0) {
+        flash(t.ftmAreaInactiveBusy, 'err')
+        return
+      }
+    }
+
     if (areaIsNew) {
-      const doc = createTableArea(name, areas)
+      const doc = createTableArea(name, areas, activeBranchId)
       persistAreas([
         { ...doc, sortOrder: Number(editingArea.sortOrder) || doc.sortOrder, active: editingArea.active },
         ...areas,
@@ -350,7 +366,6 @@ export default function FloorTablesMasterPage() {
       return
     }
 
-    const prevName = areas.find((a) => a.id === editingArea.id)?.name
     const nextAreas = areas.map((a) =>
       a.id === editingArea.id
         ? {
@@ -358,6 +373,7 @@ export default function FloorTablesMasterPage() {
             name,
             sortOrder: Number(editingArea.sortOrder) || a.sortOrder,
             active: editingArea.active,
+            branchId: a.branchId ?? activeBranchId,
           }
         : a,
     )

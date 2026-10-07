@@ -26,10 +26,12 @@ import {
   stockLocationLabel,
   type StockLocationType,
 } from '../data/stockLocations'
+import { nextUnitCode, type MeasureUnit } from '../data/units'
 import { useStockLocations } from '../hooks/useStockLocations'
 import { settingsHubPath } from '../lib/settingsHub'
 import { useI18n } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
+import { useCatalog } from '../state/CatalogContext'
 import { useMasters } from '../state/MastersContext'
 import { usePos } from '../state/PosContext'
 import { usePurchasing } from '../state/PurchasingContext'
@@ -43,12 +45,12 @@ function categoryBadgeClass(category: string, active: boolean) {
   return `zk-ing-badge cat-${key || 'general'}`
 }
 
-const emptyRow = (sku: string): Ingredient => ({
+const emptyRow = (sku: string, unit = ''): Ingredient => ({
   id: `ing-${Date.now()}`,
   name: '',
   sku,
   category: 'General',
-  unit: 'kg',
+  unit,
   active: true,
 })
 
@@ -62,6 +64,7 @@ export default function IngredientMasterPage() {
   const { t } = useI18n()
   const { dishes } = useMasters()
   const { ingredients, saveIngredient, deleteIngredient } = usePos()
+  const { units, saveUnit } = useCatalog()
   const { suppliers } = usePurchasing()
   const stockLocations = useStockLocations()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -96,6 +99,11 @@ export default function IngredientMasterPage() {
   const [quickLocation, setQuickLocation] = useState<{
     name: string
     type: StockLocationType
+  } | null>(null)
+  const [quickUnit, setQuickUnit] = useState<{
+    name: string
+    kind: MeasureUnit['kind']
+    quantity: number
   } | null>(null)
   const { askDelete, deleteConfirmDialog } = useDeleteConfirm()
 
@@ -162,6 +170,58 @@ export default function IngredientMasterPage() {
     return all.map((c) => ({ value: c, label: c }))
   }, [ingredients, editing?.category, categoryTick])
 
+  const unitSelectOptions = useMemo(() => {
+    const opts = units
+      .map((u) => ({ value: u.name, label: u.name }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+    const current = editing?.unit?.trim() ?? ''
+    if (
+      current &&
+      !opts.some((o) => o.value.toLowerCase() === current.toLowerCase())
+    ) {
+      opts.push({ value: current, label: `${current} (not in master)` })
+    }
+    return opts
+  }, [units, editing?.unit])
+
+  function resolveMasterUnitName(raw: string): string | null {
+    const name = raw.trim()
+    if (!name) return null
+    const hit = units.find((u) => u.name.toLowerCase() === name.toLowerCase())
+    return hit?.name ?? null
+  }
+
+  function openQuickUnit() {
+    setQuickUnit({ name: '', kind: 'generic', quantity: 1 })
+  }
+
+  function saveQuickUnit() {
+    if (!quickUnit || !editing) return
+    const name = quickUnit.name.trim()
+    if (!name) {
+      flash('Enter unit name')
+      return
+    }
+    const existing = units.find((u) => u.name.toLowerCase() === name.toLowerCase())
+    if (existing) {
+      setEditing({ ...editing, unit: existing.name })
+      setQuickUnit(null)
+      flash(`Using existing unit “${existing.name}”`)
+      return
+    }
+    const row: MeasureUnit = {
+      id: `u-${Date.now()}`,
+      code: nextUnitCode(units),
+      name,
+      quantity: Number(quickUnit.quantity) || 1,
+      kind: quickUnit.kind,
+    }
+    saveUnit(row)
+    setEditing({ ...editing, unit: row.name })
+    setQuickUnit(null)
+    flash(`Unit “${name}” added`)
+  }
+
   function openQuickCategory() {
     setQuickCategory({ name: '' })
   }
@@ -202,14 +262,18 @@ export default function IngredientMasterPage() {
 
   function startAdd() {
     setIsNew(true)
-    setEditing(emptyRow(nextIngredientSku(ingredients)))
+    setEditing(emptyRow(nextIngredientSku(ingredients), units[0]?.name ?? ''))
   }
 
   function startEdit(row: Ingredient) {
     setIsNew(false)
+    const unit =
+      units.find((u) => u.name.toLowerCase() === row.unit.trim().toLowerCase())?.name ??
+      row.unit
     setEditing(
       normalizeIngredient({
         ...row,
+        unit,
         category: canonicalizeIngredientCategory(row.category),
       }),
     )
@@ -321,6 +385,11 @@ export default function IngredientMasterPage() {
       flash('Ingredient name is required')
       return
     }
+    const unitName = resolveMasterUnitName(editing.unit)
+    if (!unitName) {
+      flash(units.length ? 'Select a unit from Unit Master' : 'Add a unit first (tap +)')
+      return
+    }
     const sku = editing.sku.trim() || nextIngredientSku(ingredients.filter((i) => i.id !== editing.id))
     if (isIngredientNameTaken(ingredients, name, editing.id)) {
       flash('Ingredient name already exists')
@@ -335,6 +404,7 @@ export default function IngredientMasterPage() {
         ...editing,
         name,
         sku,
+        unit: unitName,
         category: canonicalizeIngredientCategory(editing.category) || 'General',
       }),
     )
@@ -532,13 +602,41 @@ export default function IngredientMasterPage() {
                 />
               </label>
               <label>
-                <span>Unit</span>
-                <input
-                  className="search"
-                  value={editing.unit}
-                  onChange={(e) => setEditing({ ...editing, unit: e.target.value })}
-                  placeholder="kg, L, pcs…"
-                />
+                <span>
+                  Unit <Req />
+                </span>
+                <div className="zk-ing-select-add">
+                  <MesaSelect
+                    value={
+                      resolveMasterUnitName(editing.unit) ??
+                      (editing.unit.trim() &&
+                      unitSelectOptions.some((o) => o.value === editing.unit.trim())
+                        ? editing.unit.trim()
+                        : '')
+                    }
+                    onChange={(v) => setEditing({ ...editing, unit: v })}
+                    options={
+                      unitSelectOptions.length
+                        ? unitSelectOptions
+                        : [{ value: '', label: 'No units — tap +' }]
+                    }
+                    placeholder="Select unit"
+                  />
+                  <button
+                    type="button"
+                    className="zk-ing-quick-add"
+                    title="Add unit"
+                    aria-label="Add unit"
+                    onClick={openQuickUnit}
+                  >
+                    +
+                  </button>
+                </div>
+                <small className="zk-ing-hint">
+                  From{' '}
+                  <Link to="/settings/units">Unit Master</Link>
+                  {' — '}no free typing
+                </small>
               </label>
               <label>
                 <span>{t.reorderLevel}</span>
@@ -780,6 +878,82 @@ export default function IngredientMasterPage() {
               </button>
               <button type="button" className="btn btn-teal" onClick={saveQuickCategory}>
                 Add category
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {quickUnit ? (
+        <div
+          className="zk-products-quick-modal zk-ing-quick-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Add unit"
+        >
+          <div className="zk-products-quick-sheet">
+            <div className="zk-products-quick-head">
+              <strong>New unit</strong>
+              <button type="button" className="btn btn-ghost" onClick={() => setQuickUnit(null)}>
+                ×
+              </button>
+            </div>
+            <div className="zk-products-quick-body">
+              <label>
+                <span>Unit name</span>
+                <input
+                  className="search"
+                  autoFocus
+                  value={quickUnit.name}
+                  placeholder="e.g. KG, PCS, Liter"
+                  onChange={(e) => setQuickUnit({ ...quickUnit, name: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      saveQuickUnit()
+                    }
+                  }}
+                />
+                <small className="zk-ing-hint">Saved to Unit Master for reuse.</small>
+              </label>
+              <label>
+                <span>Type</span>
+                <MesaSelect
+                  value={quickUnit.kind}
+                  onChange={(v) =>
+                    setQuickUnit({ ...quickUnit, kind: v as MeasureUnit['kind'] })
+                  }
+                  options={[
+                    { value: 'generic', label: 'Generic' },
+                    { value: 'count', label: 'Count (PCS)' },
+                    { value: 'weight', label: 'Weight' },
+                    { value: 'volume', label: 'Volume' },
+                  ]}
+                />
+              </label>
+              <label>
+                <span>Quantity</span>
+                <input
+                  className="search mesa-ltr-nums"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  value={quickUnit.quantity}
+                  onChange={(e) =>
+                    setQuickUnit({
+                      ...quickUnit,
+                      quantity: Number(e.target.value) || 0,
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <div className="zk-products-quick-actions">
+              <button type="button" className="btn btn-ghost" onClick={() => setQuickUnit(null)}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-teal" onClick={saveQuickUnit}>
+                Add unit
               </button>
             </div>
           </div>

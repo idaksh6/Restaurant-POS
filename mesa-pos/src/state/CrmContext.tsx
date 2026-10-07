@@ -18,6 +18,7 @@ import {
 import { enqueueOutbox, dropPendingUpsertsFor } from '../sync/outbox'
 import { getDeviceId } from '../sync/deviceId'
 import { getActiveBranchId } from '../data/company'
+import { applyLoyaltyCampaigns } from '../data/loyaltyCampaigns'
 import { useAuth } from './AuthContext'
 import { useBranch } from './BranchContext'
 import { useSync } from '../sync/SyncContext'
@@ -30,6 +31,11 @@ export type CrmCustomer = {
   phone: string
   address?: string
   email?: string
+  /** ISO date or MM-DD for birthday campaigns. */
+  birthDate?: string
+  lastBirthdayBonusYear?: number
+  punchProgress?: number
+  lastPunchRewardAt?: string
   visits: number
   spent: number
   points: number
@@ -47,6 +53,7 @@ type CrmContextValue = {
     phone: string
     address?: string
     email?: string
+    birthDate?: string
   }) => CrmCustomer
 }
 
@@ -117,16 +124,36 @@ export function CrmProvider({ children }: { children: ReactNode }) {
   }, [cid, token, syncEpoch, activeBranchId])
 
   const earnPoints = useCallback((customerId: string, totalSar: number) => {
-    const pts = Math.floor(totalSar * POINTS_PER_SAR)
+    let awarded = 0
     setCustomers((prev) => {
+      const cust = prev.find((c) => c.id === customerId)
+      if (!cust) return prev
+      const basePts = Math.floor(totalSar * POINTS_PER_SAR)
+      const visitsAfter = cust.visits + 1
+      const camp = applyLoyaltyCampaigns({
+        name: cust.name,
+        phone: cust.phone,
+        visitsAfter,
+        state: {
+          birthDate: cust.birthDate,
+          lastBirthdayBonusYear: cust.lastBirthdayBonusYear,
+          punchProgress: cust.punchProgress,
+          lastPunchRewardAt: cust.lastPunchRewardAt,
+        },
+      })
+      awarded = basePts + camp.bonusPts
       const next = prev.map((c) =>
         c.id === customerId
           ? {
               ...c,
-              points: c.points + pts,
+              points: c.points + awarded,
               spent: c.spent + totalSar,
-              visits: c.visits + 1,
+              visits: visitsAfter,
               lastVisit: new Date().toISOString(),
+              birthDate: camp.patch.birthDate ?? c.birthDate,
+              lastBirthdayBonusYear: camp.patch.lastBirthdayBonusYear ?? c.lastBirthdayBonusYear,
+              punchProgress: camp.patch.punchProgress ?? c.punchProgress,
+              lastPunchRewardAt: camp.patch.lastPunchRewardAt ?? c.lastPunchRewardAt,
             }
           : c,
       )
@@ -135,7 +162,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
       if (row) pushCustomer(row)
       return next
     })
-    return pts
+    return awarded
   }, [cid])
 
   const redeemPoints = useCallback((customerId: string, points: number) => {
@@ -172,11 +199,19 @@ export function CrmProvider({ children }: { children: ReactNode }) {
   }, [cid])
 
   const upsertCustomer = useCallback(
-    (input: { id?: string; name: string; phone: string; address?: string; email?: string }) => {
+    (input: {
+      id?: string
+      name: string
+      phone: string
+      address?: string
+      email?: string
+      birthDate?: string
+    }) => {
       const name = input.name.trim()
       const phone = input.phone.trim()
       const email = input.email?.trim() || undefined
       const address = input.address?.trim() || undefined
+      const birthDate = input.birthDate?.trim() || undefined
       let saved: CrmCustomer = {
         id: input.id ?? `c-${Date.now()}`,
         companyId: cid,
@@ -185,6 +220,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
         phone,
         address,
         email,
+        birthDate,
         visits: 0,
         spent: 0,
         points: 0,
@@ -209,6 +245,7 @@ export function CrmProvider({ children }: { children: ReactNode }) {
               phone: phone || c.phone,
               address: address ?? c.address,
               email: email ?? c.email,
+              birthDate: birthDate ?? c.birthDate,
             }
             return saved
           })

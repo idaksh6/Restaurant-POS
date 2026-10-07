@@ -55,7 +55,8 @@ function mergeLines(a: OrderLine[], b: OrderLine[]): OrderLine[] {
       ...line,
       qty: Math.max(Number(prev.qty) || 0, Number(line.qty) || 0),
       sent: Boolean(prev.sent || line.sent),
-      note: line.note || prev.note,
+      // Prefer explicit note from either side (including clearing via empty string on newer merge).
+      note: line.note !== undefined ? line.note || undefined : prev.note,
     })
   }
   return collapseOpenLines([...byId.values()], 'max')
@@ -88,11 +89,26 @@ export function collapseOpenLines(lines: OrderLine[], qtyMode: 'sum' | 'max' = '
 /** Combine two copies of the same check so Chrome and desktop adds both survive. */
 export function mergeTicketPair(a: OpenTicket, b: OpenTicket): OpenTicket {
   const winner = preferTicket(a, b)
+  const loser = winner === a ? b : a
   const lines = mergeLines(a.lines, b.lines)
+  // Prefer explicit discount / charges from the newer stamp; fall back to the other copy.
+  const discountPct =
+    winner.discountPct != null ? winner.discountPct : loser.discountPct
+  const chargeIds =
+    winner.chargeIds != null
+      ? winner.chargeIds
+      : loser.chargeIds
+  const note =
+    winner.note !== undefined
+      ? winner.note
+      : loser.note
   return {
     ...winner,
     lines,
     amount: lineTotal(lines),
+    discountPct,
+    chargeIds,
+    note,
     updatedAt: Math.max(ticketStamp(a), ticketStamp(b)) || undefined,
   }
 }

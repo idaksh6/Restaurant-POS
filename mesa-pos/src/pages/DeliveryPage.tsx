@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { getPermissions } from '../auth/roles'
 import ConfirmModal from '../components/ConfirmModal'
 import CustomerSearchPanel from '../components/CustomerSearchPanel'
 import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
 import MenuPicker from '../components/MenuPicker'
+import QtyStepper from '../components/QtyStepper'
 import MesaSelect from '../components/MesaSelect'
 import ReceiptModal, { type ReceiptData } from '../components/ReceiptModal'
 import SendOrdersModal from '../components/SendOrdersModal'
@@ -13,13 +14,24 @@ import SettleModal, { type SettleResult } from '../components/SettleModal'
 import TextPromptModal from '../components/TextPromptModal'
 import { seedRiders } from '../data/deliveryRiders'
 import { redeemFoodVoucher } from '../data/foodVouchers'
+import { ITEM_NOTE_SUGGESTIONS } from '../data/itemNotes'
 import { lineTotal, money, nowTime, type OpenTicket } from '../data/mock'
 import { hydrateSequencesFromApi, nextSeq } from '../data/sequences'
-import { calcBill, cashFromSettle, recipesFromDishes } from '../lib/bill'
+import { calcBill, calcBillWithFoodVoucher, cashFromSettle, recipesFromDishes, settleAfterFoodVoucher } from '../lib/bill'
+import { floorDiscountPercents } from '../data/discount'
+import {
+  companyDefaultTaxPercent,
+  dishTaxPercent,
+  normalizeTaxIds,
+  orderTaxBillOptions,
+  taxBreakdownForOrder,
+  vatDisplayLabel,
+  vatRateLabel,
+} from '../data/tax'
+import { localizedLineName } from '../lib/branding'
 import { resolveDeliveryColumn, type DeliveryColumn } from '../lib/deliveryBoard'
 import { deliveryBill, deliveryNo, makeDeliveryOtp, settleMethodForDelivery } from '../lib/deliverySettle'
 import {
-  channelDeliverActionLabel,
   channelIsPrepaid,
   channelNeedsOwnRider,
   KSA_DELIVERY_CHANNELS,
@@ -33,8 +45,9 @@ import {
   pushChannelStatusQuiet,
 } from '../lib/apiDeliveryChannels'
 import { notifyCustomerDelivery } from '../data/deliveryNotify'
+import { lineNameWithoutOptions, parseOrderLineNote } from '../lib/orderLineOptions'
+import { useI18n } from '../locale/i18n'
 import { ticketFromServer } from '../sync/applyIncoming'
-import { SAUDI } from '../locale/saudi'
 import { useAuth } from '../state/AuthContext'
 import { useBranch } from '../state/BranchContext'
 import { useCatalog } from '../state/CatalogContext'
@@ -42,19 +55,12 @@ import { useCrm, type CrmCustomer } from '../state/CrmContext'
 import { useMasters } from '../state/MastersContext'
 import { usePos } from '../state/PosContext'
 import { attachZatcaToReceipt } from '../hardware/zatca'
+import { buildReceiptIdentity } from '../lib/receiptIds'
 import { useShift } from '../state/ShiftContext'
 import { useSync } from '../sync/SyncContext'
 
 type CustomerMode = 'create' | 'change'
 type RiderModalMode = 'assign' | 'dispatch'
-
-const COLUMNS: Array<{ id: DeliveryColumn; label: string; hint: string }> = [
-  { id: 'new', label: 'New', hint: 'Build & send KOT' },
-  { id: 'preparing', label: 'Preparing', hint: 'Kitchen in progress' },
-  { id: 'ready', label: 'Ready', hint: 'Assign & dispatch' },
-  { id: 'dispatched', label: 'Out', hint: 'Deliver & auto-settle' },
-  { id: 'delivered', label: 'Delivered', hint: 'Rare · settle if stuck' },
-]
 
 function DlIcon({ children }: { children: ReactNode }) {
   return (
@@ -137,6 +143,14 @@ function IconBack() {
     </DlIcon>
   )
 }
+function IconNote() {
+  return (
+    <DlIcon>
+      <path d="M7 4.5h7.5L17.5 7.5V19.5H7V4.5Z" />
+      <path d="M14.5 4.5V7.5H17.5M9 11h6M9 14.5h4" />
+    </DlIcon>
+  )
+}
 
 function nextDeliveryNo() {
   return nextSeq('delivery')
@@ -177,12 +191,26 @@ function columnTone(col: DeliveryColumn) {
 
 export default function DeliveryPage() {
   const { user } = useAuth()
+  const { t, lang } = useI18n()
   const perms = user ? getPermissions(user.role) : getPermissions('cashier')
+  const columns: Array<{ id: DeliveryColumn; label: string; hint: string }> = useMemo(
+    () => [
+      { id: 'new', label: t.taStatusNew, hint: t.dlColNewHint },
+      { id: 'preparing', label: t.dlColPreparing, hint: t.dlColPreparingHint },
+      { id: 'ready', label: t.dlReady, hint: t.dlColReadyHint },
+      { id: 'dispatched', label: t.dlColOut, hint: t.dlColOutHint },
+      { id: 'delivered', label: t.dlColDelivered, hint: t.dlColDeliveredHint },
+    ],
+    [t],
+  )
+  function deliverActionLabel(channel?: string) {
+    return channelNeedsOwnRider(channel) ? t.dlDeliverAndSettle : t.dlHandToCourierSettle
+  }
   const { customers, earnPoints, redeemPoints } = useCrm()
   const { dishes } = useMasters()
-  const { redeemGiftCard, deliveryRiders } = useCatalog()
+  const { redeemGiftCard, deliveryRiders, taxes, discounts } = useCatalog()
   const { addCashIn } = useShift()
-  const { activeBranchId } = useBranch()
+  const { activeBranchId, company } = useBranch()
   const { syncEpoch, runSync } = useSync()
   const {
     tickets,
@@ -190,6 +218,12 @@ export default function DeliveryPage() {
     updateTicket,
     addToTicket,
     changeTicketQty,
+    setTicketLineNote,
+    voidTicketLine,
+    setTicketDiscount,
+    toggleTicketCharge,
+    getTicketChargeLines,
+    chargeCatalog,
     sendTicketOrders,
     settleTicket,
     cancelTicket,
@@ -197,6 +231,8 @@ export default function DeliveryPage() {
     flash,
     dayIsClosed,
   } = usePos()
+
+  const discountPicks = useMemo(() => floorDiscountPercents(discounts), [discounts])
 
   useEffect(() => {
     void hydrateSequencesFromApi().catch(() => undefined)
@@ -228,10 +264,12 @@ export default function DeliveryPage() {
     return riders.find((r) => r.id === id) ?? riders.find((r) => r.id.startsWith(`${id}__`))
   }
 
+  const [searchParams] = useSearchParams()
+  const deepTicketId = searchParams.get('ticket')
   const [search, setSearch] = useState('')
   const [orderChannel, setOrderChannel] = useState('Direct')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [deskOpen, setDeskOpen] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(() => deepTicketId)
+  const [deskOpen, setDeskOpen] = useState(() => Boolean(deepTicketId))
   const [ticketNote, setTicketNote] = useState('')
   const [linkedCustomerId, setLinkedCustomerId] = useState<string | null>(null)
   const [showCustomer, setShowCustomer] = useState(false)
@@ -248,18 +286,95 @@ export default function DeliveryPage() {
   const [otpTicketId, setOtpTicketId] = useState<string | null>(null)
   const [otpError, setOtpError] = useState('')
   const [ingestBusy, setIngestBusy] = useState(false)
+  const [voidTarget, setVoidTarget] = useState<{
+    ticketId: string
+    lineId: string
+    name: string
+  } | null>(null)
+  const [noteTarget, setNoteTarget] = useState<{
+    ticketId: string
+    lineId: string
+    name: string
+    note: string
+  } | null>(null)
 
   const selected = delivery.find((t) => t.id === selectedId) ?? null
+
+  useEffect(() => {
+    if (deepTicketId && delivery.some((t) => t.id === deepTicketId)) {
+      setSelectedId(deepTicketId)
+      setDeskOpen(true)
+    }
+  }, [deepTicketId, delivery])
+
+  useEffect(() => {
+    setTicketNote(selected?.note?.trim() ?? '')
+  }, [selected?.id, selected?.note])
   const lines = selected?.lines ?? []
   const pending = lines.filter((l) => !l.sent).length
   const goods = lineTotal(lines)
   const fee = selected?.deliveryFee ?? 0
-  const bill = useMemo(
-    () =>
-      calcBill(goods, 0, fee > 0 ? [{ id: 'delivery-fee', name: 'Delivery fee', amount: fee }] : []),
-    [goods, fee],
+  const discountPct = selected?.discountPct ?? 0
+  const chargeIdsKey = (selected?.chargeIds ?? []).join(',')
+  const taxEnabled = company.enableTax !== false
+  const extraChargeLines = useMemo(
+    () => (selected ? getTicketChargeLines(selected.id, goods) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selected?.id, chargeIdsKey, goods, getTicketChargeLines],
   )
-  const { tax, total, taxable } = bill
+  const feeCharges = useMemo(
+    () => (fee > 0 ? [{ id: 'delivery-fee', name: t.dlDeliveryFee, amount: fee }] : []),
+    [fee, t.dlDeliveryFee],
+  )
+  const chargeLines = useMemo(
+    () => [...extraChargeLines, ...feeCharges],
+    [extraChargeLines, feeCharges],
+  )
+  const taxOpts = useMemo(
+    () => orderTaxBillOptions(lines, dishes, taxes, taxEnabled),
+    [lines, dishes, taxes, taxEnabled],
+  )
+  const bill = useMemo(
+    () => calcBill(goods, discountPct, chargeLines, taxOpts),
+    [goods, discountPct, chargeLines, taxOpts],
+  )
+  const { tax, total, taxByRate, discountAmt } = bill
+  const vatDetailRows = useMemo(
+    () =>
+      taxBreakdownForOrder({
+        lines,
+        dishes,
+        taxes,
+        discountPct,
+        charges: chargeLines,
+        enableTax: taxEnabled,
+        taxByRate,
+      }),
+    [lines, dishes, taxes, discountPct, chargeLines, taxEnabled, taxByRate],
+  )
+  const vatLabel = useMemo(
+    () =>
+      vatDisplayLabel(
+        companyDefaultTaxPercent(taxes),
+        taxByRate.length > 1 ||
+          lines.some((l) => {
+            const dish = dishes.find((d) => d.id === l.itemId)
+            return dishTaxPercent(dish?.taxIds, taxes) !== companyDefaultTaxPercent(taxes)
+          }),
+      ),
+    [taxes, taxByRate.length, lines, dishes],
+  )
+  const handleMenuAdd = useCallback(
+    (item: Parameters<typeof addToTicket>[1], note?: string) => {
+      if (!selectedId) return
+      if (dayIsClosed) {
+        flash(t.dayClosed)
+        return
+      }
+      addToTicket(selectedId, item, note)
+    },
+    [selectedId, dayIsClosed, flash, t.dayClosed, addToTicket],
+  )
   const rider = findRider(selected?.deliveryBoyId)
   const laneNo = selected ? deliveryNo(selected) : 0
   const selectedCol = selected ? resolveDeliveryColumn(selected) : null
@@ -311,7 +426,16 @@ export default function DeliveryPage() {
   function ticketAmount(t: OpenTicket) {
     const g = lineTotal(t.lines)
     const f = t.deliveryFee ?? 0
-    return calcBill(g, 0, f > 0 ? [{ id: 'f', name: 'fee', amount: f }] : []).total
+    const extras = getTicketChargeLines(t.id, g)
+    return calcBill(
+      g,
+      t.discountPct ?? 0,
+      [
+        ...extras,
+        ...(f > 0 ? [{ id: 'f', name: 'fee', amount: f }] : []),
+      ],
+      orderTaxBillOptions(t.lines, dishes, taxes, company.enableTax !== false),
+    ).total
   }
 
   function selectTicket(ticket: OpenTicket, openDesk = true) {
@@ -326,7 +450,7 @@ export default function DeliveryPage() {
 
   function startAddDelivery() {
     if (dayIsClosed) {
-      flash('Day is closed')
+      flash(t.dayClosed)
       return
     }
     setCustomerMode('create')
@@ -335,7 +459,7 @@ export default function DeliveryPage() {
 
   function createFromCustomer(c: CrmCustomer | null) {
     if (!c) {
-      flash('Select a customer for delivery')
+      flash(t.dlSelectCustomerFlash)
       return
     }
     const n = nextDeliveryNo()
@@ -344,7 +468,7 @@ export default function DeliveryPage() {
       type: 'delivery',
       customer: c.name,
       phone: c.phone,
-      address: c.address || 'Address TBD',
+      address: c.address || t.dlAddressTbd,
       deliveryFee: channelNeedsOwnRider(orderChannel) ? 15 : 0,
       deliveryStatus: 'new',
       channel: orderChannel,
@@ -354,13 +478,13 @@ export default function DeliveryPage() {
     addTicket(ticket)
     setShowCustomer(false)
     selectTicket(ticket, true)
-    flash(`Delivery D-${n} · ${orderChannel} · ${c.name}`)
+    flash(`${t.navDelivery} D-${n} · ${orderChannel} · ${c.name}`)
   }
 
   function applyCustomerChange(c: CrmCustomer | null) {
     if (!selected) return
     if (!c) {
-      flash('Customer required for delivery')
+      flash(t.dlCustomerRequired)
       return
     }
     updateTicket(selected.id, {
@@ -370,7 +494,7 @@ export default function DeliveryPage() {
     })
     setLinkedCustomerId(c.id)
     setShowCustomer(false)
-    flash(`Customer · ${c.name}`)
+    flash(`${t.dlCustomer} · ${c.name}`)
   }
 
   function openRiderModal(mode: RiderModalMode = 'assign', ticket?: OpenTicket) {
@@ -384,16 +508,16 @@ export default function DeliveryPage() {
   }
 
   function confirmRider() {
-    const t = delivery.find((x) => x.id === selectedId) ?? selected
-    if (!t) return
+    const tkt = delivery.find((x) => x.id === selectedId) ?? selected
+    if (!tkt) return
     if (!riderPick) {
-      flash('Select a delivery boy')
+      flash(t.dlSelectRiderFlash)
       return
     }
     const feeVal = Math.max(0, Number(feeDraft) || 0)
     if (riderModalMode === 'dispatch') {
       const otp = makeDeliveryOtp()
-      updateTicket(t.id, {
+      updateTicket(tkt.id, {
         deliveryBoyId: riderPick,
         deliveryFee: feeVal,
         deliveryStatus: 'dispatched',
@@ -402,29 +526,29 @@ export default function DeliveryPage() {
       })
       setShowRider(false)
       const n = notifyCustomerDelivery(
-        { ...t, deliveryBoyId: riderPick, deliveryFee: feeVal, deliveryStatus: 'dispatched', deliveryOtp: otp },
+        { ...tkt, deliveryBoyId: riderPick, deliveryFee: feeVal, deliveryStatus: 'dispatched', deliveryOtp: otp },
         'otp',
       )
       flash(
-        `Dispatched · ${findRider(riderPick)?.name ?? 'Rider'} · OTP ${otp}${
+        `${t.dlDispatched} · ${findRider(riderPick)?.name ?? t.dlRiderFallback} · ${t.dlOtp} ${otp}${
           n.sent ? ` · ${n.message}` : ''
         }`,
       )
       return
     }
-    updateTicket(t.id, {
+    updateTicket(tkt.id, {
       deliveryBoyId: riderPick,
       deliveryFee: feeVal,
     })
     setShowRider(false)
-    flash(`Rider · ${findRider(riderPick)?.name ?? 'Assigned'}`)
+    flash(`${t.dlRider} · ${findRider(riderPick)?.name ?? t.dlAssigned}`)
   }
 
   function markReady() {
     if (!selected) return
     updateTicket(selected.id, { deliveryStatus: 'ready', kitchenStatus: 'ready' })
     pushChannelStatusQuiet(selected.id, 'ready')
-    flash(`Ready · D-${laneNo}`)
+    flash(`${t.dlReady} · D-${laneNo}`)
   }
 
   async function acceptExternalOrder(ticket: OpenTicket) {
@@ -435,9 +559,9 @@ export default function DeliveryPage() {
       } else {
         updateTicket(ticket.id, { channelAcceptStatus: 'accepted' })
       }
-      flash(`Accepted · ${resolveDeliveryChannel(ticket.channel).label} #${ticket.externalOrderId ?? ''}`)
+      flash(`${t.dlAccepted} · ${resolveDeliveryChannel(ticket.channel).label} #${ticket.externalOrderId ?? ''}`)
     } catch (err) {
-      flash(err instanceof Error ? err.message : 'Accept failed', 'err')
+      flash(err instanceof Error ? err.message : t.dlAcceptFailed, 'err')
     }
   }
 
@@ -449,81 +573,98 @@ export default function DeliveryPage() {
       } else {
         cancelTicket(ticket.id, reason ?? 'Rejected at POS')
       }
-      flash(`Rejected · D-${deliveryNo(ticket)}`)
+      flash(`${t.dlRejected} · D-${deliveryNo(ticket)}`)
       if (selectedId === ticket.id) {
         setSelectedId(null)
         setDeskOpen(false)
       }
     } catch (err) {
-      flash(err instanceof Error ? err.message : 'Reject failed', 'err')
+      flash(err instanceof Error ? err.message : t.dlRejectFailed, 'err')
     }
   }
 
   function markDelivered(ticket?: OpenTicket) {
-    const t = ticket ?? selected
-    if (!t) return
-    if (!t.lines.length) {
-      flash('Add items before deliver & settle')
+    const tkt = ticket ?? selected
+    if (!tkt) return
+    if (!tkt.lines.length) {
+      flash(t.dlAddBeforeDeliver)
       return
     }
-    if (channelNeedsOwnRider(t.channel) && !t.deliveryBoyId) {
-      openRiderModal('assign', t)
-      flash('Assign own-fleet rider first')
+    if (channelNeedsOwnRider(tkt.channel) && !tkt.deliveryBoyId) {
+      openRiderModal('assign', tkt)
+      flash(t.dlAssignOwnRider)
       return
     }
-    if (channelNeedsOwnRider(t.channel) && t.deliveryOtp) {
-      setOtpTicketId(t.id)
+    if (channelNeedsOwnRider(tkt.channel) && tkt.deliveryOtp) {
+      setOtpTicketId(tkt.id)
       setOtpError('')
       return
     }
-    finishDeliverAndSettle(t)
+    finishDeliverAndSettle(tkt)
   }
 
-  function finishDeliverAndSettle(t: OpenTicket) {
-    const no = deliveryNo(t)
-    const bill = deliveryBill(t)
-    const feeAmt = t.deliveryFee ?? 0
-    const method = settleMethodForDelivery(t)
-    const ch = resolveDeliveryChannel(t.channel)
+  function finishDeliverAndSettle(tkt: OpenTicket) {
+    const no = deliveryNo(tkt)
+    const bill = deliveryBill(tkt, t.dlDeliveryFee)
+    const g = lineTotal(tkt.lines)
+    const feeAmt = tkt.deliveryFee ?? 0
+    const extras = getTicketChargeLines(tkt.id, g)
+    const allCharges = [
+      ...extras,
+      ...(feeAmt > 0 ? [{ id: 'delivery-fee', name: t.dlDeliveryFee, amount: feeAmt }] : []),
+    ]
+    const method = settleMethodForDelivery(tkt)
+    const ch = resolveDeliveryChannel(tkt.channel)
     const match = customers.find(
-      (c) => c.name === t.customer || (t.phone && c.phone === t.phone),
+      (c) => c.name === tkt.customer || (tkt.phone && c.phone === tkt.phone),
     )
-    updateTicket(t.id, {
+    updateTicket(tkt.id, {
       deliveryStatus: 'delivered',
       deliveredAt: nowTime(),
     })
     if (match) earnPoints(match.id, bill.total)
-    settleTicket(t.id, {
+    const ids = buildReceiptIdentity({ ticketId: tkt.id, staff: user })
+    settleTicket(tkt.id, {
       method,
-      source: `Delivery D-${no} · ${t.customer} · ${ch.label} · auto on deliver`,
+      source: `${t.navDelivery} D-${no} · ${tkt.customer} · ${ch.label} · ${t.dlAutoOnDeliver}`,
       staff: user?.name,
+      staffUsername: ids.user,
+      billNo: ids.billNo,
+      orderId: ids.orderId,
       subtotal: bill.taxable,
       tax: bill.tax,
       total: bill.total,
-      lines: t.lines,
+      lines: tkt.lines,
       customerId: match?.id,
-      charges:
-        feeAmt > 0 ? [{ id: 'delivery-fee', name: 'Delivery fee', amount: feeAmt }] : undefined,
+      charges: allCharges.length ? allCharges : undefined,
     })
-    deductRecipeStock(t.lines, recipesFromDishes(dishes))
+    deductRecipeStock(tkt.lines, recipesFromDishes(dishes))
     addCashIn(cashFromSettle(method, bill.total))
     setReceipt(attachZatcaToReceipt({
-      title: `Delivery D-${no}`,
-      method: channelIsPrepaid(t.channel) ? `${method} · prepaid` : `${method} · COD`,
-      lines: t.lines,
-      subtotal: bill.taxable,
+      title: `${t.navDelivery} D-${no}`,
+      method: channelIsPrepaid(tkt.channel) ? `${method} · ${t.dlPrepaidSuffix}` : `${method} · ${t.dlCod}`,
+      lines: tkt.lines,
+      subtotal: g,
+      discountAmt: bill.discountAmt || undefined,
+      discountPct: (tkt.discountPct ?? 0) || undefined,
       tax: bill.tax,
       total: bill.total,
-      charges: feeAmt > 0 ? [{ name: 'Delivery fee', amount: feeAmt }] : undefined,
+      charges: allCharges.length
+        ? allCharges.map((c) => ({ name: c.name, amount: c.amount }))
+        : undefined,
       staff: user?.name,
+      staffUsername: ids.user,
+      billNo: ids.billNo,
+      orderId: ids.orderId,
       time: nowTime(),
-      customerName: t.customer,
+      customerName: tkt.customer,
       kind: 'paid',
+      orderType: tkt.type,
     }))
-    flash(`Delivered & settled · D-${no} · ${method}`)
-    pushChannelStatusQuiet(t.id, 'delivered')
+    flash(`${t.dlDeliveredSettled} · D-${no} · ${method}`)
+    pushChannelStatusQuiet(tkt.id, 'delivered')
     setOtpTicketId(null)
-    if (selectedId === t.id) {
+    if (selectedId === tkt.id) {
       setSelectedId(null)
       setLinkedCustomerId(null)
       setTicketNote('')
@@ -549,8 +690,8 @@ export default function DeliveryPage() {
     )
     flash(
       channelNeedsOwnRider(selected.channel)
-        ? `Out for delivery · D-${laneNo}${otp ? ` · OTP ${otp}` : ''}${n.sent ? ` · ${n.message}` : ''}`
-        : `Awaiting ${resolveDeliveryChannel(selected.channel).label} courier · D-${laneNo}`,
+        ? `${t.dlOutForDelivery} · D-${laneNo}${otp ? ` · ${t.dlOtp} ${otp}` : ''}${n.sent ? ` · ${n.message}` : ''}`
+        : `${t.dlAwaiting} ${resolveDeliveryChannel(selected.channel).label} ${t.dlCourier} · D-${laneNo}`,
     )
     pushChannelStatusQuiet(selected.id, 'dispatched')
   }
@@ -579,7 +720,7 @@ export default function DeliveryPage() {
         const mapped = ticketFromServer(row)
         if (mapped) addTicket(mapped)
         void runSync({ quiet: true }).catch(() => undefined)
-        flash(`Incoming · ${channel} #${externalOrderId}`)
+        flash(`${t.dlIncoming} · ${channel} #${externalOrderId}`)
       } else {
         const n = nextDeliveryNo()
         addTicket({
@@ -604,10 +745,10 @@ export default function DeliveryPage() {
           })),
           branchId: activeBranchId,
         })
-        flash(`Incoming (offline) · ${channel} #${externalOrderId}`)
+        flash(`${t.dlIncomingOffline} · ${channel} #${externalOrderId}`)
       }
     } catch (err) {
-      flash(err instanceof Error ? err.message : 'Ingest failed')
+      flash(err instanceof Error ? err.message : t.dlIngestFailed)
     } finally {
       setIngestBusy(false)
     }
@@ -616,12 +757,12 @@ export default function DeliveryPage() {
   function openSettleFor(ticket: OpenTicket) {
     selectTicket(ticket, true)
     if (channelNeedsOwnRider(ticket.channel) && !ticket.deliveryBoyId) {
-      flash('Assign delivery boy first')
+      flash(t.dlAssignRiderFirst)
       openRiderModal('assign', ticket)
       return
     }
     if (perms.canSettle) setShowSettle(true)
-    else flash('Ask cashier to settle')
+    else flash(t.dlAskCashier)
   }
 
   function requestCancel() {
@@ -644,7 +785,7 @@ export default function DeliveryPage() {
     if (!selected) return
     if (channelNeedsOwnRider(selected.channel) && !selected.deliveryBoyId) {
       openRiderModal('assign')
-      flash('Assign delivery boy first')
+      flash(t.dlAssignRiderFirst)
       return
     }
     const redeemSar = result.loyaltyRedeemSar ?? 0
@@ -657,38 +798,67 @@ export default function DeliveryPage() {
     if (result.foodVoucherId) {
       redeemFoodVoucher(result.foodVoucherId)
     }
-    const payable = Math.max(0, Math.round((total - redeemSar) * 100) / 100)
+    const roundOff = Math.round((result.roundOff ?? 0) * 100) / 100
+    const { bill: settledBill, payable, voucherSar } = settleAfterFoodVoucher({
+      goods,
+      discountPct,
+      charges: chargeLines,
+      taxOptions: taxOpts,
+      baseBill: bill,
+      foodVoucherSar: result.foodVoucherAmount,
+      loyaltySar: redeemSar,
+      roundOff,
+    })
     if (result.customerId) earnPoints(result.customerId, payable)
+    const paySplits = (result.splitPayments ?? []).filter((p) => !/^Food voucher/i.test(p.method))
+    const ids = buildReceiptIdentity({ ticketId: selected.id, staff: user })
     settleTicket(selected.id, {
       method: result.method,
-      source: `Delivery D-${laneNo} · ${selected.customer}`,
+      source: `${t.navDelivery} D-${laneNo} · ${selected.customer}`,
       staff: user?.name,
-      subtotal: taxable,
-      tax,
+      staffUsername: ids.user,
+      billNo: ids.billNo,
+      orderId: ids.orderId,
+      subtotal: settledBill.taxable,
+      tax: settledBill.tax,
       total: payable,
+      roundOff: roundOff || undefined,
+      tendered: result.tendered,
+      change: result.change,
       lines,
-      splitPayments: result.splitPayments,
+      splitPayments: paySplits.length ? paySplits : undefined,
       customerId: result.customerId ?? linkedCustomerId ?? undefined,
       loyaltyRedeem: redeemSar || undefined,
-      charges: fee > 0 ? [{ id: 'delivery-fee', name: 'Delivery fee', amount: fee }] : undefined,
+      charges: chargeLines.length ? chargeLines : undefined,
     })
     deductRecipeStock(lines, recipesFromDishes(dishes))
-    addCashIn(cashFromSettle(result.method, payable, result.splitPayments))
+    addCashIn(cashFromSettle(result.method, payable, paySplits.length ? paySplits : undefined))
     setShowSettle(false)
     setReceipt(attachZatcaToReceipt({
-      title: `Delivery D-${laneNo}`,
+      title: `${t.navDelivery} D-${laneNo}`,
       method: result.method,
       lines,
-      subtotal: taxable,
-      tax,
+      subtotal: goods,
+      discountAmt: settledBill.discountAmt || undefined,
+      discountPct: discountPct || undefined,
+      tax: settledBill.tax,
       total: payable,
-      charges: fee > 0 ? [{ name: 'Delivery fee', amount: fee }] : undefined,
+      charges: chargeLines.length
+        ? chargeLines.map((c) => ({ name: c.name, amount: c.amount }))
+        : undefined,
+      foodVoucherAmt: voucherSar || undefined,
+      foodVoucherCode: result.foodVoucherCode,
+      splitPayments: paySplits.length ? paySplits : undefined,
       staff: user?.name,
+      staffUsername: ids.user,
+      billNo: ids.billNo,
+      orderId: ids.orderId,
       time: nowTime(),
       customerName: selected.customer,
       kind: 'paid',
+      orderType: selected.type,
     }))
-    flash(`Paid · D-${laneNo} · ${result.method}`)
+    flash(`${t.dlPaid} · D-${laneNo} · ${result.method}`)
     setSelectedId(null)
     setLinkedCustomerId(null)
     setTicketNote('')
@@ -698,14 +868,14 @@ export default function DeliveryPage() {
   function cardPrimaryAction(ticket: OpenTicket) {
     if (needsChannelAccept(ticket)) {
       return {
-        label: 'Accept',
+        label: t.dlAccept,
         run: () => void acceptExternalOrder(ticket),
       }
     }
     const col = resolveDeliveryColumn(ticket)
     if (col === 'new') {
       return {
-        label: pendingFor(ticket) ? 'Send KOT' : 'Build',
+        label: pendingFor(ticket) ? t.dlSendKot : t.dlBuild,
         run: () => {
           selectTicket(ticket, true)
           if (pendingFor(ticket) && perms.canSendOrders && !needsChannelAccept(ticket)) setShowSend(true)
@@ -714,12 +884,12 @@ export default function DeliveryPage() {
     }
     if (col === 'preparing') {
       return {
-        label: 'Mark ready',
+        label: t.dlMarkReady,
         run: () => {
           selectTicket(ticket, false)
           updateTicket(ticket.id, { deliveryStatus: 'ready', kitchenStatus: 'ready' })
           pushChannelStatusQuiet(ticket.id, 'ready')
-          flash(`Ready · D-${deliveryNo(ticket)}`)
+          flash(`${t.dlReady} · D-${deliveryNo(ticket)}`)
         },
       }
     }
@@ -727,9 +897,9 @@ export default function DeliveryPage() {
       return {
         label: channelNeedsOwnRider(ticket.channel)
           ? ticket.deliveryBoyId
-            ? 'Dispatch'
-            : 'Assign & go'
-          : 'Release to courier',
+            ? t.dlDispatch
+            : t.dlAssignAndGo
+          : t.dlReleaseCourier,
         run: () => {
           selectTicket(ticket, false)
           if (channelNeedsOwnRider(ticket.channel) && !ticket.deliveryBoyId) {
@@ -753,10 +923,10 @@ export default function DeliveryPage() {
             : { sent: false as const }
           flash(
             channelNeedsOwnRider(ticket.channel)
-              ? `Out for delivery · D-${deliveryNo(ticket)}${otp ? ` · OTP ${otp}` : ''}${
+              ? `${t.dlOutForDelivery} · D-${deliveryNo(ticket)}${otp ? ` · ${t.dlOtp} ${otp}` : ''}${
                   n.sent ? ` · ${n.message}` : ''
                 }`
-              : `${resolveDeliveryChannel(ticket.channel).label} courier · pickup ${platformOtp ?? '—'} · D-${deliveryNo(ticket)}`,
+              : `${resolveDeliveryChannel(ticket.channel).label} ${t.dlCourier} · pickup ${platformOtp ?? '—'} · D-${deliveryNo(ticket)}`,
           )
           pushChannelStatusQuiet(ticket.id, 'dispatched')
         },
@@ -764,7 +934,7 @@ export default function DeliveryPage() {
     }
     if (col === 'dispatched') {
       return {
-        label: channelDeliverActionLabel(ticket.channel),
+        label: deliverActionLabel(ticket.channel),
         run: () => {
           selectTicket(ticket, false)
           markDelivered(ticket)
@@ -772,7 +942,7 @@ export default function DeliveryPage() {
       }
     }
     return {
-      label: 'Settle unpaid',
+      label: t.dlSettleUnpaid,
       run: () => openSettleFor(ticket),
     }
   }
@@ -792,34 +962,34 @@ export default function DeliveryPage() {
               <IconTruck />
             </span>
             <div>
-              <h1>Delivery</h1>
+              <h1>{t.navDelivery}</h1>
               <p>
-                {delivery.length} open · {stats.ridersAvail} riders free
-                {dayIsClosed ? ' · day closed' : ''}
+                {delivery.length} {t.taOpenWord} · {stats.ridersAvail} {t.dlRidersFree}
+                {dayIsClosed ? ` · ${t.dayClosed}` : ''}
               </p>
             </div>
           </div>
           <div className="dl-toolbar-stats">
             <span>
-              <strong>{stats.new}</strong> new
+              <strong>{stats.new}</strong> {t.taStatusNew.toLowerCase()}
             </span>
             <span>
-              <strong>{stats.preparing}</strong> prep
+              <strong>{stats.preparing}</strong> {t.dlStatPrep}
             </span>
             <span>
-              <strong>{stats.ready}</strong> ready
+              <strong>{stats.ready}</strong> {t.taReadyWord}
             </span>
             <span>
-              <strong>{stats.out}</strong> out
+              <strong>{stats.out}</strong> {t.dlStatOut}
             </span>
             <span className={stats.unpaid ? 'warn' : undefined}>
-              <strong>{stats.unpaid}</strong> unpaid
+              <strong>{stats.unpaid}</strong> {t.dlStatUnpaid}
             </span>
           </div>
           <div className="dl-hero-actions">
-            {dayIsClosed ? <span className="dl-pill closed">Day closed</span> : null}
+            {dayIsClosed ? <span className="dl-pill closed">{t.dayClosed}</span> : null}
             <label className="dl-channel-pick">
-              <span>Channel</span>
+              <span>{t.dlChannel}</span>
               <MesaSelect
                 value={orderChannel}
                 onChange={setOrderChannel}
@@ -834,21 +1004,21 @@ export default function DeliveryPage() {
               className="dl-link-btn"
               disabled={dayIsClosed || ingestBusy}
               onClick={() => void simulateChannelOrder()}
-              title="Simulate HungerStation / Jahez style incoming order"
+              title={t.dlSimulateTitle}
             >
-              {ingestBusy ? 'Importing…' : 'Simulate app order'}
+              {ingestBusy ? t.dlImporting : t.dlSimulateOrder}
             </button>
             <Link to="/courier" className="dl-link-btn">
-              Courier pickup
+              {t.dlCourierPickup}
             </Link>
             <Link to="/settings/delivery-integrations" className="dl-link-btn">
-              APIs
+              {t.dlApis}
             </Link>
             <Link to="/settings/delivery-riders" className="dl-link-btn">
-              Riders
+              {t.dlRiders}
             </Link>
             <Link to="/rider" className="dl-link-btn">
-              Rider app
+              {t.dlRiderApp}
             </Link>
             <button
               type="button"
@@ -856,19 +1026,19 @@ export default function DeliveryPage() {
               disabled={dayIsClosed}
               onClick={startAddDelivery}
             >
-              <IconPlus /> Add Delivery
+              <IconPlus /> {t.dlAddDelivery}
             </button>
           </div>
         </header>
 
-        <section className="dl-rider-strip" aria-label="Rider availability">
+        <section className="dl-rider-strip" aria-label={t.dlRiderAvailability}>
           {riders.length === 0 ? (
-            <span className="dl-rider-empty">No riders — add them in Settings.</span>
+            <span className="dl-rider-empty">{t.dlNoRiders}</span>
           ) : (
             riders.map((r) => (
               <span key={r.id} className={`dl-rider-chip ${r.status}`}>
                 <strong>{r.name}</strong>
-                <em>{r.status === 'available' ? 'Free' : 'On route'}</em>
+                <em>{r.status === 'available' ? t.dlRiderFree : t.dlOnRoute}</em>
               </span>
             ))
           )}
@@ -876,7 +1046,7 @@ export default function DeliveryPage() {
 
         {!deskOpen || !selected ? (
           <section className="dl-kanban">
-            {COLUMNS.map((col) => {
+            {columns.map((col) => {
               const cards = byColumn[col.id]
               return (
                 <div key={col.id} className={`dl-col dl-col-${col.id}`}>
@@ -889,7 +1059,7 @@ export default function DeliveryPage() {
                   </header>
                   <div className="dl-col-body">
                     {cards.length === 0 ? (
-                      <div className="dl-col-empty">No orders</div>
+                      <div className="dl-col-empty">{t.dlNoOrders}</div>
                     ) : (
                       cards.map((ticket) => {
                         const no = deliveryNo(ticket)
@@ -915,16 +1085,16 @@ export default function DeliveryPage() {
                               </div>
                               <span className="dl-order-name">{ticket.customer}</span>
                               <span className="dl-order-meta">
-                                {ticket.phone || 'No phone'} · {age}
+                                {ticket.phone || t.dlNoPhone} · {age}
                               </span>
                               <span className="dl-order-addr">
-                                {ticket.address || 'Address TBD'}
+                                {ticket.address || t.dlAddressTbd}
                               </span>
                               <div className="dl-order-foot">
-                                <span>{money(ticketAmount(ticket))}</span>
+                                <span>{money(ticketAmount(ticket), lang)}</span>
                                 {unpaid ? (
                                   <span className={`dl-pay ${channelIsPrepaid(ticket.channel) ? 'prepaid' : 'unpaid'}`}>
-                                    {channelIsPrepaid(ticket.channel) ? 'Prepaid' : 'COD'}
+                                    {channelIsPrepaid(ticket.channel) ? t.dlPrepaid : t.dlCod}
                                   </span>
                                 ) : (
                                   <span className={`dl-channel tone-${ch.tone}`}>{ch.id}</span>
@@ -936,18 +1106,18 @@ export default function DeliveryPage() {
                               ) : (
                                 <span className="dl-order-rider muted">
                                   {channelNeedsOwnRider(ticket.channel)
-                                    ? 'Unassigned'
-                                    : `${ch.label} courier`}
+                                    ? t.dlUnassigned
+                                    : `${ch.label} ${t.dlCourier}`}
                                 </span>
                               )}
                               {ticket.deliveryOtp && channelNeedsOwnRider(ticket.channel) ? (
-                                <span className="dl-otp">OTP {ticket.deliveryOtp}</span>
+                                <span className="dl-otp">{t.dlOtp} {ticket.deliveryOtp}</span>
                               ) : null}
                               {ticket.externalOrderId ? (
                                 <span className="dl-ext-id">#{ticket.externalOrderId}</span>
                               ) : null}
                               {needsChannelAccept(ticket) ? (
-                                <span className="dl-pending-accept">Awaiting accept</span>
+                                <span className="dl-pending-accept">{t.dlAwaitingAccept}</span>
                               ) : null}
                             </button>
                             {needsChannelAccept(ticket) ? (
@@ -960,7 +1130,7 @@ export default function DeliveryPage() {
                                     void acceptExternalOrder(ticket)
                                   }}
                                 >
-                                  Accept
+                                  {t.dlAccept}
                                 </button>
                                 <button
                                   type="button"
@@ -970,7 +1140,7 @@ export default function DeliveryPage() {
                                     void rejectExternalOrder(ticket)
                                   }}
                                 >
-                                  Reject
+                                  {t.dlReject}
                                 </button>
                               </div>
                             ) : (
@@ -998,7 +1168,7 @@ export default function DeliveryPage() {
         ) : (
           <section className="dl-work-panel has-ticket">
             <div className="dl-work-head">
-              <div>
+              <div className="dl-work-head-row">
                 <button
                   type="button"
                   className="dl-back"
@@ -1006,76 +1176,83 @@ export default function DeliveryPage() {
                     setDeskOpen(false)
                   }}
                 >
-                  <IconBack /> Board
+                  <IconBack /> {t.dlBoard}
                 </button>
-                <h2>
-                  D-{laneNo || '—'} <em>Delivery</em>
-                </h2>
-                <div className="dl-work-tags">
-                  {selectedCol ? (
-                    <span className={`dl-status ${columnTone(selectedCol)}`}>
-                      {COLUMNS.find((c) => c.id === selectedCol)?.label}
-                    </span>
-                  ) : null}
-                  {selectedCol === 'dispatched' || selectedCol === 'delivered' ? (
-                    <span
-                      className={`dl-pay ${channelIsPrepaid(selected.channel) ? 'prepaid' : 'unpaid'}`}
-                    >
-                      {channelIsPrepaid(selected.channel) ? 'Prepaid' : 'COD'}
-                    </span>
-                  ) : null}
-                  <span className="dl-chip soft">{selected.customer}</span>
-                  {rider ? <span className="dl-chip soft">{rider.name}</span> : null}
-                  {selected.deliveryOtp && channelNeedsOwnRider(selected.channel) ? (
-                    <span className="dl-otp">OTP {selected.deliveryOtp}</span>
-                  ) : null}
-                  {selected.externalOrderId ? (
-                    <span className="dl-chip soft">#{selected.externalOrderId}</span>
-                  ) : null}
-                  <label className="dl-channel-inline">
-                    Channel
-                    <MesaSelect
-                      value={selected.channel || 'Direct'}
-                      onChange={(v) => updateTicket(selected.id, { channel: v })}
-                      options={KSA_DELIVERY_CHANNELS.map((c) => ({
-                        value: c.id,
-                        label: c.label,
-                      }))}
-                    />
-                  </label>
+
+                <div className="dl-work-title-block">
+                  <h2>
+                    D-{laneNo || '—'} <em>{t.navDelivery}</em>
+                  </h2>
+                  <div className="dl-work-tags">
+                    {selectedCol ? (
+                      <span className={`dl-status ${columnTone(selectedCol)}`}>
+                        {columns.find((c) => c.id === selectedCol)?.label}
+                      </span>
+                    ) : null}
+                    {selectedCol === 'dispatched' || selectedCol === 'delivered' ? (
+                      <span
+                        className={`dl-pay ${channelIsPrepaid(selected.channel) ? 'prepaid' : 'unpaid'}`}
+                      >
+                        {channelIsPrepaid(selected.channel) ? t.dlPrepaid : t.dlCod}
+                      </span>
+                    ) : null}
+                    <span className="dl-chip soft">{selected.customer}</span>
+                    {rider ? <span className="dl-chip soft">{rider.name}</span> : null}
+                    {selected.deliveryOtp && channelNeedsOwnRider(selected.channel) ? (
+                      <span className="dl-otp">{t.dlOtp} {selected.deliveryOtp}</span>
+                    ) : null}
+                    {selected.externalOrderId ? (
+                      <span className="dl-chip soft">#{selected.externalOrderId}</span>
+                    ) : null}
+                  </div>
                 </div>
-                {selected.address ? <p className="dl-work-addr">{selected.address}</p> : null}
+
+                <label className="dl-channel-inline">
+                  <span>{t.dlChannel}</span>
+                  <MesaSelect
+                    className="dl-channel-select"
+                    value={selected.channel || 'Direct'}
+                    onChange={(v) => updateTicket(selected.id, { channel: v })}
+                    options={KSA_DELIVERY_CHANNELS.map((c) => ({
+                      value: c.id,
+                      label: c.label,
+                    }))}
+                  />
+                </label>
+
+                <div className="dl-work-tools">
+                  <button
+                    type="button"
+                    className="dl-tool"
+                    onClick={() => {
+                      setCustomerMode('change')
+                      setShowCustomer(true)
+                    }}
+                  >
+                    <IconUser /> {t.tileCustomer}
+                  </button>
+                  <button type="button" className="dl-tool" onClick={() => setShowNote(true)}>
+                    <IconNote /> {t.taNoteLabel}
+                  </button>
+                  <button type="button" className="dl-tool" onClick={() => openRiderModal('assign')}>
+                    <IconTruck /> {t.dlRider}
+                  </button>
+                  <button type="button" className="dl-tool danger" onClick={requestCancel}>
+                    <IconCancel /> {t.cancel}
+                  </button>
+                </div>
               </div>
-              <div className="dl-work-tools">
-                <button
-                  type="button"
-                  className="dl-tool"
-                  onClick={() => {
-                    setCustomerMode('change')
-                    setShowCustomer(true)
-                  }}
-                >
-                  <IconUser /> Customer
-                </button>
-                <button type="button" className="dl-tool" onClick={() => setShowNote(true)}>
-                  Note
-                </button>
-                <button type="button" className="dl-tool" onClick={() => openRiderModal('assign')}>
-                  <IconTruck /> Rider
-                </button>
-                <button type="button" className="dl-tool danger" onClick={requestCancel}>
-                  <IconCancel /> Cancel
-                </button>
-              </div>
+
+              {selected.address ? <p className="dl-work-addr">{selected.address}</p> : null}
             </div>
 
-            {ticketNote ? <p className="dl-note">Note: {ticketNote}</p> : null}
+            {ticketNote ? <p className="dl-note">{t.taNoteLabel}: {ticketNote}</p> : null}
 
             {selected && needsChannelAccept(selected) ? (
               <div className="dl-accept-banner">
                 <div>
                   <strong>
-                    {resolveDeliveryChannel(selected.channel).label} order · accept to start kitchen
+                    {resolveDeliveryChannel(selected.channel).label} {t.dlAcceptBanner}
                   </strong>
                   {selected.externalOrderId ? <span>#{selected.externalOrderId}</span> : null}
                 </div>
@@ -1085,14 +1262,14 @@ export default function DeliveryPage() {
                     className="btn btn-primary"
                     onClick={() => void acceptExternalOrder(selected)}
                   >
-                    Accept order
+                    {t.dlAcceptOrder}
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost"
                     onClick={() => void rejectExternalOrder(selected)}
                   >
-                    Reject
+                    {t.dlReject}
                   </button>
                 </div>
               </div>
@@ -1100,80 +1277,243 @@ export default function DeliveryPage() {
 
             <div className="dl-work-body">
               <div className="dl-menu">
-                <MenuPicker
-                  onAdd={(item, note) => {
-                    if (dayIsClosed) {
-                      flash('Day is closed')
-                      return
-                    }
-                    addToTicket(selected.id, item, note)
-                  }}
-                />
+                <MenuPicker onAdd={handleMenuAdd} />
               </div>
 
               <div className="dl-order">
                 <div className="dl-panel-head">
-                  <h2>Order</h2>
+                  <h2>{t.taOrder}</h2>
                   <span className="dl-chip">
-                    {lines.length} · {pending ? `${pending} unsent` : lines.length ? 'all sent' : 'empty'}
+                    {lines.length} · {pending ? `${pending} ${t.taUnsent}` : lines.length ? t.taAllSent : t.dlEmpty}
                   </span>
                 </div>
 
-                <div className="dl-lines">
+                <div className="dl-lines dine-order-cards">
                   {lines.length === 0 ? (
                     <div className="dl-empty-inline">
-                      <strong>No items yet</strong>
-                      <span>Tap products to build the delivery ticket.</span>
+                      <strong>{t.taNoItems}</strong>
+                      <span>{t.dlNoItemsHint}</span>
                     </div>
                   ) : (
-                    lines.map((line) => (
-                      <div key={line.id} className="order-line">
-                        <div className="name">{line.name}</div>
-                        <strong>{money(line.qty * line.price)}</strong>
-                        <div className="sub">
-                          {money(line.price)} · {line.sent ? 'Sent' : 'New'}
-                          {line.note ? ` · ${line.note}` : ''}
-                        </div>
-                        <div className="qty-controls">
-                          <button
-                            type="button"
-                            disabled={dayIsClosed || line.sent}
-                            onClick={() => changeTicketQty(selected.id, line.id, -1)}
-                          >
-                            −
-                          </button>
-                          <span>{line.qty}</span>
-                          <button
-                            type="button"
-                            disabled={dayIsClosed}
-                            onClick={() => changeTicketQty(selected.id, line.id, 1)}
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-                    ))
+                    lines.map((line) => {
+                      const noteText = line.note?.trim() ?? ''
+                      const itemName = localizedLineName(line, dishes, lang)
+                      const dish = dishes.find((d) => d.id === line.itemId)
+                      const opts = parseOrderLineNote(line.note, dish)
+                      const hasOptBadges = Boolean(opts.size || opts.addons.length)
+                      const displayName = hasOptBadges
+                        ? lineNameWithoutOptions(itemName, line.note)
+                        : itemName
+                      const thumb = dish?.imageDataUrl
+                      const thumbMark =
+                        dish?.code?.trim() ||
+                        (line.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 3) || '•').toUpperCase()
+                      const taxPct = dishTaxPercent(dish?.taxIds, taxes)
+                      const lineGoods = Math.round(line.qty * line.price * 100) / 100
+                      const lineShare = goods > 0 ? lineGoods / goods : 0
+                      const lineNet = lineGoods - discountAmt * lineShare
+                      const lineTax = !taxEnabled
+                        ? 0
+                        : Math.round(lineNet * (taxPct / 100) * 100) / 100
+                      const hasItemTax = Boolean(normalizeTaxIds(dish?.taxIds)[0])
+                      const taxRateName = (() => {
+                        const id = normalizeTaxIds(dish?.taxIds)[0]
+                        if (!id) return null
+                        return taxes.find((tx) => tx.id === id)?.name ?? null
+                      })()
+                      return (
+                        <article key={line.id} className="dine-order-item">
+                          <div className="dine-order-item-top">
+                            <span
+                              className={`dine-order-item-thumb${thumb ? ' has-photo' : ''}`}
+                              aria-hidden
+                            >
+                              {thumb ? <img src={thumb} alt="" /> : thumbMark}
+                            </span>
+                            <div className="dine-order-item-info">
+                              <strong className="dine-order-item-name">{displayName}</strong>
+                              {hasOptBadges ? (
+                                <div className="dine-order-item-opts" aria-label="Options">
+                                  {opts.size ? (
+                                    <span className="dine-opt-badge size">{opts.size}</span>
+                                  ) : null}
+                                  {opts.addons.map((addon) => (
+                                    <span key={addon} className="dine-opt-badge addon">
+                                      {addon}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                              <span className="dine-order-item-price mesa-ltr-nums">
+                                {money(line.price, lang)}
+                              </span>
+                              {taxEnabled ? (
+                                <span
+                                  className={`dine-order-item-tax${!hasItemTax ? ' is-default' : ''}`}
+                                  title={
+                                    hasItemTax
+                                      ? `Item tax${taxRateName ? `: ${taxRateName}` : ''}`
+                                      : 'Company default tax'
+                                  }
+                                >
+                                  Tax {Number.isInteger(taxPct) ? taxPct : taxPct.toFixed(2)}%
+                                  {hasItemTax ? '' : ' · default'}
+                                  <em className="mesa-ltr-nums"> · {money(lineTax, lang)}</em>
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          <div className="dine-order-item-mid">
+                            <QtyStepper
+                              className="dine-qty"
+                              value={line.qty}
+                              ariaLabel={displayName}
+                              disabled={dayIsClosed}
+                              minusDisabled={!!line.sent || dayIsClosed}
+                              inputDisabled={!!line.sent || dayIsClosed}
+                              onChange={(delta) => changeTicketQty(selected.id, line.id, delta)}
+                            />
+                            <strong className="dine-order-item-total mesa-ltr-nums">
+                              {money(line.qty * line.price, lang)}
+                            </strong>
+                            <button
+                              type="button"
+                              className="dine-void-btn"
+                              title={t.diVoidLine}
+                              disabled={dayIsClosed}
+                              onClick={() =>
+                                setVoidTarget({
+                                  ticketId: selected.id,
+                                  lineId: line.id,
+                                  name: displayName,
+                                })
+                              }
+                            >
+                              {t.diVoid}
+                            </button>
+                          </div>
+
+                          <div className="dine-order-item-meta">
+                            <span className={`dine-order-item-status${line.sent ? ' sent' : ''}`}>
+                              {line.sent ? t.taStatusSent : t.taStatusNew}
+                            </span>
+                            <button
+                              type="button"
+                              className="dine-line-note-btn"
+                              title={noteText ? t.diEditNote : t.diAddNote}
+                              disabled={dayIsClosed}
+                              onClick={() =>
+                                setNoteTarget({
+                                  ticketId: selected.id,
+                                  lineId: line.id,
+                                  name: displayName,
+                                  note: line.note ?? '',
+                                })
+                              }
+                            >
+                              {noteText ? t.diEditNote : t.diAddNote}
+                            </button>
+                          </div>
+
+                          {opts.kitchenNote ? (
+                            <p className="dine-order-item-note">{opts.kitchenNote}</p>
+                          ) : null}
+                        </article>
+                      )
+                    })
                   )}
                 </div>
 
                 <div className="dl-totals">
                   <div>
-                    <span>Subtotal</span>
-                    <span>{money(taxable)}</span>
+                    <span>{t.subtotal}</span>
+                    <span>{money(goods, lang)}</span>
                   </div>
                   <div>
-                    <span>Delivery fee</span>
-                    <span>{money(fee)}</span>
+                    <span>
+                      {t.discount} ({discountPct}%)
+                    </span>
+                    <span>-{money(discountAmt, lang)}</span>
                   </div>
+                  {extraChargeLines.map((c) => (
+                    <div key={c.id}>
+                      <span>{c.name}</span>
+                      <span>{money(c.amount, lang)}</span>
+                    </div>
+                  ))}
                   <div>
-                    <span>{SAUDI.vatLabel}</span>
-                    <span>{money(tax)}</span>
+                    <span>{t.dlDeliveryFee}</span>
+                    <span>{money(fee, lang)}</span>
                   </div>
+                  {vatDetailRows.length > 0
+                    ? vatDetailRows.map((row) => (
+                        <div
+                          key={`vat-${row.percent}`}
+                          className="totals-vat-row"
+                          title={
+                            row.items.length
+                              ? row.items.map((n) => `${n} · ${vatRateLabel(row.percent)}`).join('\n')
+                              : vatRateLabel(row.percent)
+                          }
+                        >
+                          <span>{vatRateLabel(row.percent)}</span>
+                          <span>{money(row.tax, lang)}</span>
+                        </div>
+                      ))
+                    : (
+                        <div key="vat-fallback" className="totals-vat-row" hidden={!(tax > 0)}>
+                          <span>{vatLabel}</span>
+                          <span>{money(tax, lang)}</span>
+                        </div>
+                      )}
                   <div className="grand">
-                    <span>Total</span>
-                    <span>{money(total)}</span>
+                    <span>{t.total}</span>
+                    <span>{money(total, lang)}</span>
                   </div>
                 </div>
+
+                <div className="discount-row dl-discount-row">
+                  <span className="field-label">{t.discount}</span>
+                  <div className="menu-tabs">
+                    {discountPicks.map((pct) => (
+                      <button
+                        key={pct}
+                        type="button"
+                        className={discountPct === pct ? 'active' : ''}
+                        disabled={dayIsClosed}
+                        onClick={() => setTicketDiscount(selected.id, pct)}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {chargeCatalog.some((c) => c.active) ? (
+                  <div className="discount-row dl-discount-row">
+                    <span className="field-label">{t.diExtraCharges}</span>
+                    <div className="menu-tabs">
+                      {chargeCatalog
+                        .filter((c) => c.active)
+                        .map((c) => {
+                          const on = (selected.chargeIds ?? []).includes(c.id)
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              className={on ? 'active' : ''}
+                              disabled={dayIsClosed}
+                              onClick={() => toggleTicketCharge(selected.id, c.id)}
+                            >
+                              {c.name}
+                              {' · '}
+                              {c.percent ? `${c.amount}%` : money(c.amount, lang)}
+                            </button>
+                          )
+                        })}
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="dl-actions-row">
                   {perms.canSendOrders ? (
@@ -1183,29 +1523,29 @@ export default function DeliveryPage() {
                       disabled={dayIsClosed}
                       onClick={() => {
                         if (!pending) {
-                          flash('Nothing new to send')
+                          flash(t.taNothingToSend)
                           return
                         }
                         setShowSend(true)
                       }}
                     >
-                      <IconSend /> Send{pending > 0 ? ` (${pending})` : ''}
+                      <IconSend /> {t.dlSend}{pending > 0 ? ` (${pending})` : ''}
                     </button>
                   ) : null}
                   {selectedCol === 'preparing' ? (
                     <button type="button" className="btn btn-secondary" onClick={markReady}>
-                      <IconCheck /> Mark ready
+                      <IconCheck /> {t.dlMarkReady}
                     </button>
                   ) : null}
                   {selectedCol === 'ready' ? (
                     <button type="button" className="btn btn-secondary" onClick={dispatchNow}>
                       <IconTruck />{' '}
-                      {channelNeedsOwnRider(selected.channel) ? 'Dispatch' : 'Release to courier'}
+                      {channelNeedsOwnRider(selected.channel) ? t.dlDispatch : t.dlReleaseCourier}
                     </button>
                   ) : null}
                   {selectedCol === 'dispatched' ? (
                     <button type="button" className="btn btn-secondary" onClick={() => markDelivered()}>
-                      <IconCheck /> {channelDeliverActionLabel(selected.channel)}
+                      <IconCheck /> {deliverActionLabel(selected.channel)}
                     </button>
                   ) : null}
                   {perms.canSettle ? (
@@ -1216,7 +1556,7 @@ export default function DeliveryPage() {
                       onClick={() => {
                         if (channelNeedsOwnRider(selected.channel) && !selected.deliveryBoyId) {
                           openRiderModal('assign')
-                          flash('Assign delivery boy first')
+                          flash(t.dlAssignRiderFirst)
                           return
                         }
                         setShowSettle(true)
@@ -1224,21 +1564,21 @@ export default function DeliveryPage() {
                     >
                       <IconPay />{' '}
                       {selectedCol === 'delivered' || selectedCol === 'dispatched'
-                        ? 'Settle unpaid'
-                        : 'Settle'}
+                        ? t.dlSettleUnpaid
+                        : t.settle}
                     </button>
                   ) : (
                     <button
                       type="button"
                       className="btn btn-secondary"
                       disabled={lines.length === 0}
-                      onClick={() => flash('Payment requested — cashier will settle')}
+                      onClick={() => flash(t.dlRequestPayFlash)}
                     >
-                      Request pay
+                      {t.requestPayment}
                     </button>
                   )}
                   <button type="button" className="btn btn-ghost dl-cancel-btn" onClick={requestCancel}>
-                    <IconCancel /> Cancel ticket
+                    <IconCancel /> {t.taCancelTicket}
                   </button>
                 </div>
               </div>
@@ -1247,7 +1587,7 @@ export default function DeliveryPage() {
         )}
       </div>
 
-      <HubFooter backTo="/" backLabel="Home" />
+      <HubFooter backTo="/" backLabel={t.home} />
 
       {showSend && selected ? (
         <SendOrdersModal
@@ -1257,17 +1597,27 @@ export default function DeliveryPage() {
             sendTicketOrders(selected.id, priority)
             pushChannelStatusQuiet(selected.id, 'preparing')
             setShowSend(false)
-            flash(`KOT sent · ${priority}`)
+            flash(`${t.dlKotSent} · ${priority}`)
           }}
         />
       ) : null}
 
       {showSettle && selected ? (
         <SettleModal
-          title={`Delivery D-${laneNo} · ${selected.customer}`}
+          title={`${t.navDelivery} D-${laneNo} · ${selected.customer}`}
           total={total}
           customers={customers}
           preselectCustomerId={linkedCustomerId ?? undefined}
+          computeDue={(voucherSar, loyaltySar) => {
+            const next = calcBillWithFoodVoucher(
+              goods,
+              discountPct,
+              chargeLines,
+              taxOpts,
+              voucherSar,
+            )
+            return Math.max(0, Math.round((next.total - loyaltySar) * 100) / 100)
+          }}
           onClose={() => setShowSettle(false)}
           onConfirm={completeSettle}
         />
@@ -1275,7 +1625,7 @@ export default function DeliveryPage() {
 
       {showCustomer ? (
         <CustomerSearchPanel
-          title={customerMode === 'create' ? 'Customer Search · Delivery' : 'Change customer'}
+          title={customerMode === 'create' ? t.dlCustomerSearch : t.dlChangeCustomer}
           selectedId={linkedCustomerId}
           onClose={() => setShowCustomer(false)}
           onSelect={(c) => {
@@ -1289,9 +1639,9 @@ export default function DeliveryPage() {
         <div className="modal-backdrop" role="dialog" aria-modal="true">
           <div className="modal-card dl-rider-modal">
             <div className="section-head">
-              <h2>{riderModalMode === 'dispatch' ? 'Assign & dispatch' : 'Select delivery boy'}</h2>
+              <h2>{riderModalMode === 'dispatch' ? t.dlAssignDispatch : t.dlSelectDeliveryBoy}</h2>
               <Link to="/settings/delivery-riders" className="btn btn-ghost">
-                Manage
+                {t.dlManage}
               </Link>
               <button type="button" className="btn btn-ghost" onClick={() => setShowRider(false)}>
                 ✕
@@ -1299,7 +1649,7 @@ export default function DeliveryPage() {
             </div>
             <div className="dl-rider-list">
               {riders.length === 0 ? (
-                <p className="modal-lead">No riders for this branch. Add them in Settings.</p>
+                <p className="modal-lead">{t.dlNoRidersBranch}</p>
               ) : (
                 riders.map((b) => (
                   <button
@@ -1310,14 +1660,14 @@ export default function DeliveryPage() {
                   >
                     <strong>{b.name}</strong>
                     <span>
-                      {b.phone} · {b.status}
+                      {b.phone} · {b.status === 'available' ? t.dlRiderFree : t.dlOnRoute}
                     </span>
                   </button>
                 ))
               )}
             </div>
             <label className="dl-fee-row">
-              Delivery fee
+              {t.dlDeliveryFee}
               <input
                 className="search"
                 inputMode="decimal"
@@ -1327,10 +1677,10 @@ export default function DeliveryPage() {
             </label>
             <div className="dl-rider-actions">
               <button type="button" className="btn btn-ghost" onClick={() => setShowRider(false)}>
-                Cancel
+                {t.cancel}
               </button>
               <button type="button" className="btn btn-primary" onClick={confirmRider}>
-                {riderModalMode === 'dispatch' ? 'Dispatch' : 'Ok'}
+                {riderModalMode === 'dispatch' ? t.dlDispatch : t.ok}
               </button>
             </div>
           </div>
@@ -1339,62 +1689,100 @@ export default function DeliveryPage() {
 
       {showNote ? (
         <TextPromptModal
-          title="Ticket note"
-          label="Note"
+          title={t.dlTicketNote}
+          label={t.taNoteLabel}
           initialValue={ticketNote}
-          placeholder="Gate code, landmark, call on arrival…"
-          confirmLabel="Save"
-          cancelLabel="Close"
+          placeholder={t.dlNotePlaceholder}
+          confirmLabel={t.save}
+          cancelLabel={t.printClose}
           onClose={() => setShowNote(false)}
           onConfirm={(value) => {
-            setTicketNote(value)
+            const cleaned = value.trim()
+            setTicketNote(cleaned)
             setShowNote(false)
-            if (value) flash('Note saved')
+            if (selected) updateTicket(selected.id, { note: cleaned || undefined })
+            if (cleaned) flash(t.dlNoteSaved)
           }}
         />
       ) : null}
 
       {otpTicketId ? (
         <TextPromptModal
-          title="Customer OTP"
-          label={otpError || 'Enter the 4-digit code from the customer'}
+          title={t.dlCustomerOtp}
+          label={otpError || t.dlOtpPrompt}
           initialValue=""
           placeholder="••••"
-          confirmLabel="Verify & settle"
-          cancelLabel="Back"
+          confirmLabel={t.dlVerifySettle}
+          cancelLabel={t.dlBack}
           onClose={() => {
             setOtpTicketId(null)
             setOtpError('')
           }}
           onConfirm={(value) => {
-            const t = delivery.find((x) => x.id === otpTicketId)
-            if (!t) {
+            const tkt = delivery.find((x) => x.id === otpTicketId)
+            if (!tkt) {
               setOtpTicketId(null)
               return
             }
-            if (value.replace(/\D/g, '') !== String(t.deliveryOtp ?? '')) {
-              setOtpError('Wrong OTP — ask customer again')
-              flash('Wrong OTP')
+            if (value.replace(/\D/g, '') !== String(tkt.deliveryOtp ?? '')) {
+              setOtpError(t.dlWrongOtp)
+              flash(t.dlWrongOtpFlash)
               return
             }
-            finishDeliverAndSettle(t)
+            finishDeliverAndSettle(tkt)
           }}
         />
       ) : null}
 
       {showCancel && selected ? (
         <ConfirmModal
-          title="Cancel delivery"
+          title={t.dlCancelDelivery}
           message={
             selected.lines.some((l) => l.sent)
-              ? `Cancel D-${laneNo} · ${selected.customer}? Kitchen may already have items.`
-              : `Cancel D-${laneNo} · ${selected.customer}? This removes it from the board.`
+              ? `${t.cancel} D-${laneNo} · ${selected.customer}? ${t.dlCancelKitchenWarn}`
+              : `${t.cancel} D-${laneNo} · ${selected.customer}? ${t.dlCancelRemoveWarn}`
           }
-          confirmLabel="Cancel ticket"
-          cancelLabel="Keep ticket"
+          confirmLabel={t.taCancelTicket}
+          cancelLabel={t.dlKeepTicket}
           danger
           onClose={() => setShowCancel(false)}
           onConfirm={confirmCancel}
+        />
+      ) : null}
+
+      {voidTarget ? (
+        <TextPromptModal
+          title={t.diVoidTitle.replace('{name}', voidTarget.name)}
+          label={t.diVoidReason}
+          initialValue={t.diVoidDefault}
+          placeholder={t.diReason}
+          confirmLabel={t.diVoidItem}
+          cancelLabel={t.cancel}
+          onClose={() => setVoidTarget(null)}
+          onConfirm={(reason) => {
+            const target = voidTarget
+            setVoidTarget(null)
+            voidTicketLine(target.ticketId, target.lineId, reason || t.diVoidDefault, user?.name)
+          }}
+        />
+      ) : null}
+
+      {noteTarget ? (
+        <TextPromptModal
+          title={t.diNoteTitle.replace('{name}', noteTarget.name)}
+          label={t.diItemNote}
+          initialValue={noteTarget.note}
+          placeholder={t.diNotePlaceholder}
+          confirmLabel={t.diSaveNote}
+          cancelLabel={t.cancel}
+          suggestions={ITEM_NOTE_SUGGESTIONS}
+          onClose={() => setNoteTarget(null)}
+          onConfirm={(note) => {
+            const target = noteTarget
+            setNoteTarget(null)
+            setTicketLineNote(target.ticketId, target.lineId, note)
+            flash(t.save)
+          }}
         />
       ) : null}
 

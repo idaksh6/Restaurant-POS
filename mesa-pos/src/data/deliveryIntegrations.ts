@@ -69,6 +69,22 @@ export function defaultDeliveryIntegrations(): DeliveryIntegrationsConfig {
   }
 }
 
+export function channelHonestyStatus(cfg?: ChannelIntegration | null): {
+  status: 'demo' | 'needs_key' | 'live'
+  label: string
+} {
+  if (!cfg || !cfg.enabled) return { status: 'demo', label: 'Demo' }
+  if (!cfg.apiKey?.trim()) return { status: 'needs_key', label: 'Needs API key' }
+  return { status: 'live', label: 'Live' }
+}
+
+export function channelConfigFor(
+  channelId: string,
+  config: DeliveryIntegrationsConfig = loadDeliveryIntegrations(),
+): ChannelIntegration | undefined {
+  return config.channels.find((c) => c.channelId === channelId)
+}
+
 export function loadDeliveryIntegrations(): DeliveryIntegrationsConfig {
   try {
     const raw = localStorage.getItem(DELIVERY_INTEGRATIONS_KEY)

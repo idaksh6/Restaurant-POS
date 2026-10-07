@@ -49,4 +49,20 @@ export class DevController {
     this.dev.assertDevToken(auth)
     return this.dev.update(id, body)
   }
+
+  @Put('companies/:id/license')
+  updateLicense(
+    @Headers('authorization') auth: string | undefined,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      expiresAt?: string | null
+      extendMonths?: number
+      licenseStatus?: string
+      activateNow?: boolean
+    },
+  ) {
+    this.dev.assertDevToken(auth)
+    return this.dev.updateLicense(id, body)
+  }
 }

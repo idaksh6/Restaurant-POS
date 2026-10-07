@@ -53,11 +53,9 @@ export function seedManagedUsers(): ManagedUser[] {
 
 const SEED_USER_IDS = new Set(staffAccounts.map((s) => s.id))
 
-/** Demo seed rows (Amina / Omar / …) — never show these once the API has real users. */
+/** Demo seed rows (Amina / Omar / …) — match by seed staff ids only, not usernames. */
 export function isSeedManagedUser(row: { id?: string; username?: string }) {
-  if (row.id && SEED_USER_IDS.has(row.id)) return true
-  const u = String(row.username ?? '').toLowerCase()
-  return u === 'admin' || u === 'cashier' || u === 'server' || u === 'kitchen' || u === 'custom'
+  return Boolean(row.id && SEED_USER_IDS.has(row.id))
 }
 
 function backfillSeedNameAr(rows: ManagedUser[]): ManagedUser[] {
@@ -144,6 +142,7 @@ export function toStaffAccount(row: ManagedUser): StaffAccount {
       .join('')
       .slice(0, 2)
       .toUpperCase(),
+    branchId: row.branchId ?? null,
   }
 }
 

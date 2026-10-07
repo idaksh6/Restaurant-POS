@@ -1,4 +1,4 @@
-import { useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import type { CompanyProfile } from '../data/company'
 import { branchDisplayName, companyDisplayName } from '../lib/branding'
@@ -10,6 +10,7 @@ import HubNotifications from './HubNotifications'
 import MesaSelect from './MesaSelect'
 import VirtualKeyboard from './VirtualKeyboard'
 import { useSync } from '../sync/SyncContext'
+import { pruneRedundantOutbox } from '../sync/outbox'
 
 export function HubHeader({
   closeTo = '/settings',
@@ -18,15 +19,26 @@ export function HubHeader({
   closeTo?: string | null
   company?: CompanyProfile
 }) {
-  const { company: ctxCompany, branches, activeBranch, switchBranch } = useBranch()
+  const { company: ctxCompany, allowedBranches, activeBranch, switchBranch } = useBranch()
   const company = companyOverride ?? ctxCompany
   const { lang, t } = useI18n()
-  const { connectivity, queued, outbox, runSync } = useSync()
+  const { connectivity, queued, outbox, runSync, refreshOutbox } = useSync()
   const brandName = companyDisplayName(company, lang)
   const poison = outbox.some((op) => op.status === 'poison')
+  const pendingOps = outbox.filter((op) => op.status === 'pending' || op.status === 'syncing')
   const lastErr = outbox.find(
     (op) => op.lastError && op.lastError !== 'retry',
   )?.lastError
+  const queueHint = pendingOps.length
+    ? Object.entries(
+        pendingOps.reduce<Record<string, number>>((acc, op) => {
+          acc[op.type] = (acc[op.type] ?? 0) + 1
+          return acc
+        }, {}),
+      )
+        .map(([type, n]) => `${type} × ${n}`)
+        .join(', ')
+    : ''
   const syncLabel =
     connectivity === 'offline'
       ? t.offline
@@ -37,18 +49,29 @@ export function HubHeader({
           : queued
             ? `${t.online} · ${queued} ${t.queuedCount}`
             : t.online
+  const syncTitle =
+    [queueHint ? `Pending: ${queueHint}` : '', lastErr].filter(Boolean).join(' — ') || syncLabel
+
+  useEffect(() => {
+    // Settings hub pages only mount HubHeader — clear online-redundant masters so the chip
+    // matches Catalog/Settings (which previously hid the same queue behind "Connected").
+    pruneRedundantOutbox()
+    refreshOutbox()
+    void runSync({ quiet: true, force: true })
+    // Mount-only: avoid re-entrancy when runSync identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const nowLabel = new Date().toLocaleDateString(localeTag(lang), {
     day: '2-digit',
     month: 'long',
     year: 'numeric',
   })
 
-  const branchOptions = branches
-    .filter((b) => b.active)
-    .map((b) => ({
-      value: b.id,
-      label: `${b.code} · ${branchDisplayName(b, lang)}`,
-    }))
+  const branchOptions = allowedBranches.map((b) => ({
+    value: b.id,
+    label: `${b.code} · ${branchDisplayName(b, lang)}`,
+  }))
 
   return (
     <header className="zk-hub-top">
@@ -78,8 +101,11 @@ export function HubHeader({
         <button
           type="button"
           className={`mesa-sync-chip ${poison ? 'poison' : connectivity}`}
-          onClick={() => void runSync({ force: true })}
-          title={lastErr ? `${syncLabel} — ${lastErr}` : syncLabel}
+          onClick={() => {
+            pruneRedundantOutbox()
+            void runSync({ force: true }).finally(() => refreshOutbox())
+          }}
+          title={syncTitle}
         >
           <span className="mesa-sync-dot" aria-hidden />
           {syncLabel}
@@ -153,9 +179,11 @@ export function HubFooter({
               {backLabel ?? t.settings}
             </Link>
           )}
-          {keyboardBtn}
         </div>
-        {actions}
+        <div className="zk-hub-foot-center">
+          {keyboardBtn}
+          {actions}
+        </div>
         {trailing !== undefined ? (
           trailing
         ) : (

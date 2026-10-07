@@ -38,30 +38,46 @@ export class SyncService {
     const branch =
       branches.find((b) => b.id === branchId) ?? branches.find((b) => b.active) ?? branches[0]
 
-    const [categories, products, tickets, customers, cursor, floorTables, stockItems, dayClose, shifts, receipts, purchaseOrders, ledger, roles, users, stockTransfers, audit, sequences] =
+    const resolvedBranchId = branch?.id
+    const [categories, products, tickets, customers, latestOp, floorTables, stockItems, dayClose, shifts, receipts, purchaseOrders, ledger, roles, users, stockTransfers, audit, sequences, ingredients, catalog, vendors, foodVouchers] =
       await Promise.all([
-      this.masters.listCategories(companyId, branch?.id),
-      this.masters.listProducts(companyId, branch?.id),
-      this.orders.listOpen(companyId, branch?.id),
-      this.masters.listCustomers(companyId, branch?.id),
-      this.prisma.syncOp.count({ where: { companyId } }),
-      this.masters.listFloorTables(companyId, branch?.id),
-      this.masters.listStockItems(companyId, branch?.id),
-      this.orders.latestDayClose(companyId, branch?.id),
-      this.orders.listShifts(companyId, branch?.id),
-      this.masters.listStockReceipts(companyId, branch?.id),
-      this.masters.listPurchaseOrders(companyId, branch?.id),
-      this.orders.listLedger(companyId, branch?.id),
+      this.masters.listCategories(companyId, resolvedBranchId),
+      this.masters.listProducts(companyId, resolvedBranchId),
+      this.orders.listOpen(companyId, resolvedBranchId),
+      this.masters.listCustomers(companyId, resolvedBranchId),
+      this.prisma.syncOp.findFirst({
+        where: {
+          companyId,
+          ...(resolvedBranchId
+            ? { OR: [{ branchId: resolvedBranchId }, { branchId: null }] }
+            : {}),
+        },
+        orderBy: { appliedAt: 'desc' },
+        select: { appliedAt: true },
+      }),
+      this.masters.listFloorTables(companyId, resolvedBranchId),
+      this.masters.listStockItems(companyId, resolvedBranchId),
+      this.orders.latestDayClose(companyId, resolvedBranchId),
+      this.orders.listShifts(companyId, resolvedBranchId),
+      this.masters.listStockReceipts(companyId, resolvedBranchId),
+      this.masters.listPurchaseOrders(companyId, resolvedBranchId),
+      this.orders.listLedger(companyId, resolvedBranchId),
       this.access.listRoles(companyId),
       this.access.listUsers(companyId),
-      this.masters.listStockTransfers(companyId, branch?.id),
-      this.orders.listAudit(companyId, branch?.id),
-      this.orders.listSequences(companyId, branch?.id),
+      this.masters.listStockTransfers(companyId, resolvedBranchId),
+      this.orders.listAudit(companyId, resolvedBranchId),
+      this.orders.listSequences(companyId, resolvedBranchId),
+      this.masters.listIngredients(companyId, resolvedBranchId),
+      this.masters.listCatalog(companyId, resolvedBranchId),
+      this.masters.listVendors(companyId),
+      this.masters.listFoodVouchers(companyId, resolvedBranchId),
     ])
 
+    const serverTime = new Date().toISOString()
     return {
-      serverTime: new Date().toISOString(),
-      cursor: String(cursor),
+      serverTime,
+      // ISO watermark — never use SyncOp.count() (breaks branch-filtered pull skip).
+      cursor: latestOp?.appliedAt?.toISOString?.() ?? serverTime,
       company,
       branches,
       activeBranch: branch,
@@ -80,6 +96,10 @@ export class SyncService {
       stockTransfers,
       audit,
       sequences,
+      ingredients,
+      catalog,
+      vendors,
+      foodVouchers,
     }
   }
 
@@ -212,29 +232,39 @@ export class SyncService {
       }
     }
 
-    const cursor = await this.prisma.syncOp.count({ where: { companyId } })
+    const latest = await this.prisma.syncOp.findFirst({
+      where: { companyId },
+      orderBy: { appliedAt: 'desc' },
+      select: { appliedAt: true },
+    })
     this.logger.log(
       `sync push device=${deviceId} accepted=${accepted.length} rejected=${rejected.length}`,
     )
-    return { accepted, rejected, idMap: {}, cursor: String(cursor) }
+    return {
+      accepted,
+      rejected,
+      idMap: {},
+      cursor: latest?.appliedAt?.toISOString?.() ?? new Date().toISOString(),
+    }
   }
 
   async pull(companyId: string, since: string, branchId?: string) {
     if (branchId) await assertBranchInCompany(this.prisma, branchId, companyId)
-    const iso = since && !/^\d+$/.test(since) ? new Date(since) : null
-    const numeric = /^\d+$/.test(since) ? Number(since) : 0
+    // Legacy clients stored SyncOp.count() as digits — treat as epoch so catch-up works.
+    const parsed =
+      since && !/^\d+$/.test(since) ? new Date(since) : new Date(0)
+    const sinceDate = Number.isNaN(parsed.getTime()) ? new Date(0) : parsed
     const entities = await this.prisma.syncOp.findMany({
       where: {
         companyId,
         ...(branchId ? { OR: [{ branchId }, { branchId: null }] } : {}),
-        ...(iso && !Number.isNaN(iso.getTime()) ? { appliedAt: { gt: iso } } : {}),
+        appliedAt: { gt: sinceDate },
       },
-      orderBy: { appliedAt: 'asc' },
-      ...(iso && !Number.isNaN(iso.getTime()) ? {} : { skip: numeric, take: 500 }),
+      orderBy: [{ appliedAt: 'asc' }, { id: 'asc' }],
       take: 500,
     })
     const last = entities[entities.length - 1]
-    const cursor = last?.appliedAt?.toISOString?.() ?? since ?? '0'
+    const cursor = last?.appliedAt?.toISOString?.() ?? sinceDate.toISOString()
     return { cursor, entities }
   }
 
@@ -284,9 +314,21 @@ export class SyncService {
           companyId,
         )
         break
-      case 'foodVoucher.upsert':
-        await this.masters.upsertFoodVoucherBatch(payload, companyId)
+      case 'foodVoucher.upsert': {
+        const batch = (payload.batch ?? payload) as Record<string, unknown>
+        await this.masters.upsertFoodVoucherBatch(
+          {
+            ...payload,
+            batch: {
+              ...batch,
+              branchId: batch.branchId ?? op.branchId ?? payload.branchId,
+            },
+            branchId: op.branchId ?? payload.branchId ?? batch.branchId,
+          },
+          companyId,
+        )
         break
+      }
       case 'foodVoucher.delete':
         await this.masters.deleteFoodVoucherBatch(op.entityId, companyId)
         break

@@ -1,0 +1,105 @@
+/* Hub footer — back left | keyboard true-center | main menu right */
+
+.zk-hub-foot {
+  display: flex !important;
+  position: relative;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 0.75rem;
+  box-sizing: border-box;
+}
+
+.zk-hub-foot-leading {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.zk-hub-foot-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.zk-hub-foot-center > * {
+  pointer-events: auto;
+}
+
+.zk-hub-foot > .zk-hub-home,
+.zk-hub-foot > a.zk-hub-home {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+}
+
+/* Reset native <button> so it matches Link.zk-hub-back on dark footer */
+.zk-hub-foot .zk-hub-back,
+button.zk-hub-back {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: #dce5e0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  line-height: 1;
+  min-height: var(--touch-min, 2.75rem);
+  padding: 0.45rem 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+  white-space: nowrap;
+  border-radius: 10px;
+}
+
+.zk-hub-foot .zk-hub-back:hover,
+button.zk-hub-back:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.zk-hub-foot .zk-hub-back:focus-visible,
+button.zk-hub-back:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.45);
+  outline-offset: 2px;
+}
+
+[dir='rtl'] .zk-hub-back-arrow {
+  display: inline-block;
+  transform: scaleX(-1);
+}
+
+@media (max-width: 768px) {
+  .zk-hub-foot {
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem;
+  }
+
+  .zk-hub-foot-center .zk-hub-kbd span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}

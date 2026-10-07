@@ -1,0 +1,25 @@
+{
+  "appId": "in.isarva.print-agent",
+  "productName": "Isarva POS Print Agent",
+  "copyright": "Copyright © Isarva Infotech",
+  "directories": {
+    "app": "print-agent",
+    "output": "release-agent"
+  },
+  "electronDist": "node_modules/electron/dist",
+  "files": [
+    "**/*",
+    "!tools/**",
+    "!electron-builder.json",
+    "!*.iss",
+    "!make-setup.mjs"
+  ],
+  "asar": true,
+  "npmRebuild": false,
+  "compression": "store",
+  "win": {
+    "icon": "print-agent/assets/icon.ico",
+    "signAndEditExecutable": false,
+    "target": [{ "target": "dir", "arch": ["x64"] }]
+  }
+}

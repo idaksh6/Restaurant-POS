@@ -43,6 +43,17 @@ function normalizeHex(value: string, fallback: string) {
   return fallback
 }
 
+/** Same result as `color-mix(in srgb, hex 75%, #111)` — computed here for Chrome < 111. */
+function darkenHex(value: string) {
+  const hex = normalizeHex(value, '')
+  if (!hex) return value
+  const mixed = [1, 3, 5].map((i) => {
+    const channel = Math.round(parseInt(hex.slice(i, i + 2), 16) * 0.75 + 0x11 * 0.25)
+    return channel.toString(16).padStart(2, '0')
+  })
+  return `#${mixed.join('')}`
+}
+
 const emptyDept = (sort: number): MenuCategory => ({
   id: `cat-${Date.now()}`,
   name: '',
@@ -504,7 +515,7 @@ export default function DepartmentsPage() {
                     style={{
                       background: cat.imageDataUrl
                         ? `linear-gradient(180deg, rgba(18,32,28,0.15), rgba(18,32,28,0.72)), url(${cat.imageDataUrl}) center/cover`
-                        : `linear-gradient(145deg, ${bg}, color-mix(in srgb, ${bg} 75%, #111))`,
+                        : `linear-gradient(145deg, ${bg}, ${darkenHex(bg)})`,
                       color: fg,
                       minHeight: `${Math.max(88, (cat.buttonHeight ?? 100) * 0.9)}px`,
                       fontSize: `${cat.buttonFontSize ?? 14}px`,

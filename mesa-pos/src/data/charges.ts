@@ -10,6 +10,11 @@ export type ExtraCharge = {
   percent?: boolean
   active: boolean
   sort?: number
+  /**
+   * Tax rate id from Tax master (at most one).
+   * Empty / missing = company default VAT (same as menu items).
+   */
+  taxIds?: string[]
 }
 
 export const CHARGES_KEY = 'mesa-extra-charges'
@@ -27,6 +32,10 @@ export function isDemoCharge(id: string) {
 }
 
 export function fromApiCharge(row: Record<string, unknown>): ExtraCharge {
+  const taxRaw = row.taxIds
+  const taxIds = Array.isArray(taxRaw)
+    ? taxRaw.map((x) => String(x)).filter(Boolean).slice(0, 1)
+    : []
   return {
     id: String(row.id),
     branchId: row.branchId ? String(row.branchId) : undefined,
@@ -35,6 +44,7 @@ export function fromApiCharge(row: Record<string, unknown>): ExtraCharge {
     percent: row.percent === true,
     active: row.active !== false,
     sort: Number(row.sort ?? 0),
+    taxIds,
   }
 }
 

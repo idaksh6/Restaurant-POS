@@ -1,14 +1,46 @@
-import { BadRequestException, Inject, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common'
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common'
 import * as bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import type { User } from '@prisma/client'
 import { TenantDbService } from '../../tenant/tenant-db.service'
+import {
+  defaultExpiryFrom,
+  licenseSnapshot,
+  resolveLicenseStatus,
+  type LicenseSnapshot,
+} from './license'
 
 const SECRET = process.env.JWT_SECRET ?? 'mesa-dev-secret'
 
 @Injectable()
 export class AuthService {
   constructor(@Inject(TenantDbService) private readonly tenants: TenantDbService) {}
+
+  /** Hard-block when suspended or past expiresAt. First activate is handled in lookupCompany. */
+  async assertCompanyLicense(companyId: string): Promise<LicenseSnapshot> {
+    const reg = await this.tenants.getRegistry(companyId)
+    if (!reg) throw new NotFoundException('Company not found')
+    const snap = licenseSnapshot(reg)
+    if (snap.licenseStatus === 'suspended') {
+      throw new ForbiddenException('This POS company is suspended. Contact support.')
+    }
+    if (snap.licenseStatus === 'expired') {
+      throw new ForbiddenException(
+        `POS license expired on ${snap.expiresAt?.slice(0, 10) ?? '—'}. Contact your administrator.`,
+      )
+    }
+    if (snap.licenseStatus === 'pending') {
+      throw new ForbiddenException('This POS is not activated yet. Enter the company code on the activation screen.')
+    }
+    return snap
+  }
 
   async login(username: string, pin: string, companyId?: string) {
     const uname = username.trim().toLowerCase()
@@ -40,6 +72,8 @@ export class AuthService {
       throw new UnauthorizedException('User is inactive and cannot log in')
     }
     if (!user.companyId) throw new UnauthorizedException('User is not bound to a company')
+
+    const license = await this.assertCompanyLicense(user.companyId)
 
     const prisma = await this.tenants.clientFor(user.companyId)
     const [company, branches] = await Promise.all([
@@ -74,16 +108,58 @@ export class AuthService {
       },
       branches,
       company,
+      license,
     }
   }
 
-  async lookupCompany(taxId: string) {
-    const id = taxId.trim()
-    if (!id || id.length < 10) {
-      throw new BadRequestException('Valid VAT / tax ID required')
+  /**
+   * Bind a POS terminal by company code or VAT.
+   * First device: stamps activatedAt + expiresAt (+12 months) → Active.
+   * Later devices: inherit the same license window (no re-stamp).
+   * Expired / suspended: hard block.
+   */
+  async lookupCompany(activationKey: string) {
+    const key = activationKey.trim()
+    if (!key) {
+      throw new BadRequestException('Company code or VAT / tax ID required')
     }
-    const reg = await this.tenants.getRegistryByTaxId(id)
-    if (!reg) throw new NotFoundException('No company for this VAT / tax ID')
+
+    const code = key.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    let reg =
+      code.length >= 3 ? await this.tenants.getRegistryByCompanyCode(code) : null
+    if (!reg && key.length >= 10) {
+      reg = await this.tenants.getRegistryByTaxId(key)
+    }
+    if (!reg) {
+      throw new NotFoundException('No company for this company code or VAT / tax ID')
+    }
+
+    let license = licenseSnapshot(reg)
+    if (license.licenseStatus === 'suspended') {
+      throw new ForbiddenException('This POS company is suspended. Contact support.')
+    }
+    if (license.licenseStatus === 'expired') {
+      throw new ForbiddenException(
+        `POS license expired on ${license.expiresAt?.slice(0, 10) ?? '—'}. Contact your administrator.`,
+      )
+    }
+
+    // First device ever activates — stamp once; other devices inherit.
+    if (!reg.activatedAt || license.licenseStatus === 'pending') {
+      const activatedAt = new Date()
+      const expiresAt = reg.expiresAt && reg.expiresAt > activatedAt ? reg.expiresAt : defaultExpiryFrom(activatedAt)
+      reg = await this.tenants.updateLicense(reg.id, {
+        licenseStatus: 'active',
+        activatedAt,
+        expiresAt,
+      })
+      license = licenseSnapshot(reg)
+    } else if (resolveLicenseStatus(reg) === 'expired') {
+      throw new ForbiddenException(
+        `POS license expired on ${license.expiresAt?.slice(0, 10) ?? '—'}. Contact your administrator.`,
+      )
+    }
+
     const prisma = await this.tenants.clientFor(reg.id)
     const company = await prisma.company.findUnique({
       where: { id: reg.id },
@@ -102,8 +178,12 @@ export class AuthService {
         },
       },
     })
-    if (!company) throw new NotFoundException('No company for this VAT / tax ID')
-    return company
+    if (!company) throw new NotFoundException('No company for this company code or VAT / tax ID')
+    return {
+      ...company,
+      companyCode: reg.companyCode,
+      license,
+    }
   }
 
   async listStaff(companyId?: string) {
@@ -111,6 +191,7 @@ export class AuthService {
       throw new BadRequestException('companyId required')
     }
     const cid = companyId.trim()
+    await this.assertCompanyLicense(cid)
     const prisma = await this.tenants.clientFor(cid)
     return prisma.user.findMany({
       where: { companyId: cid, active: true },
@@ -136,6 +217,7 @@ export class AuthService {
     if (code.length < 4) throw new BadRequestException('Enter the last 4 digits of your phone')
     if (!companyId?.trim()) throw new BadRequestException('companyId required — activate the POS terminal first')
     const cid = companyId.trim()
+    const license = await this.assertCompanyLicense(cid)
     const prisma = await this.tenants.clientFor(cid)
     const riders = await prisma.deliveryRider.findMany({
       where: { companyId: cid, active: true },
@@ -178,10 +260,10 @@ export class AuthService {
         username: `rider-${rider.id}`,
         branchId: rider.branchId,
         companyId: cid,
-        riderId: rider.id,
       },
-      branches,
       company,
+      branches,
+      license,
     }
   }
 

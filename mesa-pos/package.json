@@ -1,6 +1,6 @@
 {
   "name": "mesa-pos",
-  "description": "Mesa KSA Restaurant POS",
+  "description": "Isarva Restaurant POS",
   "author": "Mesa",
   "version": "0.1.0",
   "type": "module",
@@ -8,12 +8,15 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:desktop": "tsc -b && vite build --mode desktop",
     "lint": "oxlint",
     "preview": "vite preview",
-    "desktop": "npm run build && electron .",
-    "desktop:win": "npm run build && electron-builder --win dir --x64 && node electron/make-setup.mjs",
-    "desktop:mac": "npm run build && electron-builder --mac dmg",
-    "desktop:linux": "npm run build && electron-builder --linux AppImage"
+    "desktop": "npm run build:desktop && electron .",
+    "desktop:win": "npm run build:desktop && electron-builder --win dir --x64 && node electron/make-setup.mjs",
+    "desktop:mac": "npm run build:desktop && electron-builder --mac dmg",
+    "desktop:linux": "npm run build:desktop && electron-builder --linux AppImage",
+    "agent": "electron print-agent",
+    "agent:win": "electron-builder --config print-agent/electron-builder.json --win dir --x64 && node print-agent/make-setup.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -22,7 +25,8 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import ArabicTextInput from '../components/ArabicTextInput'
 import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
@@ -14,6 +15,7 @@ type FormState = {
   phone: string
   address: string
   email: string
+  birthDate: string
 }
 
 const emptyForm = (): FormState => ({
@@ -21,6 +23,7 @@ const emptyForm = (): FormState => ({
   phone: '',
   address: '',
   email: '',
+  birthDate: '',
 })
 
 function formatLastVisit(value: string, lang: Lang, today: string, yesterday: string, never: string) {
@@ -114,6 +117,7 @@ function formFromCustomer(c: CrmCustomer): FormState {
     phone: c.phone,
     address: c.address ?? '',
     email: c.email ?? '',
+    birthDate: c.birthDate ?? '',
   }
 }
 
@@ -122,7 +126,8 @@ function formsEqual(a: FormState, b: FormState) {
     a.name === b.name &&
     a.phone === b.phone &&
     a.address === b.address &&
-    a.email === b.email
+    a.email === b.email &&
+    a.birthDate === b.birthDate
   )
 }
 
@@ -232,6 +237,7 @@ export default function CrmPage() {
       phone: form.phone,
       address: form.address,
       email: form.email,
+      birthDate: form.birthDate,
     })
     setModalOpen(false)
     setEditingId(null)
@@ -425,6 +431,13 @@ export default function CrmPage() {
               <strong>{t.redeemAtSettle}</strong>
               <span>{t.redeemAtSettleHint}</span>
             </div>
+            <div>
+              <strong>{t.setLoyaltyCampaigns}</strong>
+              <span>
+                {t.loyaltyCrmNote} ·{' '}
+                <Link to="/settings/loyalty-campaigns">{t.loyaltyConfigure}</Link>
+              </span>
+            </div>
           </div>
         </section>
       </div>
@@ -515,6 +528,15 @@ export default function CrmPage() {
                   value={form.email}
                   onChange={(e) => patch('email', e.target.value)}
                   placeholder="optional"
+                />
+              </label>
+              <label className="crm-field crm-span-2">
+                <span>{t.crmBirthday}</span>
+                <input
+                  className="crm-input mesa-ltr-nums"
+                  type="date"
+                  value={form.birthDate}
+                  onChange={(e) => patch('birthDate', e.target.value)}
                 />
               </label>
             </div>

@@ -4,21 +4,25 @@ import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
 import ReceiptModal, { type ReceiptData } from '../components/ReceiptModal'
 import SettleModal, { type SettleResult } from '../components/SettleModal'
-import { lineTotal, money, nowTime, type OrderLine } from '../data/mock'
+import { lineTotal, money, nowTime, type OrderLine, type OrderType } from '../data/mock'
 import { calcBill, cashFromSettle, recipesFromDishes } from '../lib/bill'
+import { localizedAreaName } from '../lib/branding'
+import { orderTaxBillOptions } from '../data/tax'
 import { useI18n } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
+import { useBranch } from '../state/BranchContext'
+import { useCatalog } from '../state/CatalogContext'
 import { useCrm } from '../state/CrmContext'
 import { useMasters } from '../state/MastersContext'
 import { usePos } from '../state/PosContext'
 import { useShift } from '../state/ShiftContext'
 import { getPermissions } from '../auth/roles'
-import { SAUDI } from '../locale/saudi'
 import { attachZatcaToReceipt } from '../hardware/zatca'
+import { buildReceiptIdentity } from '../lib/receiptIds'
 
 type PayTarget =
-  | { kind: 'table'; id: string; title: string; lines: OrderLine[]; total: number; meta: string; status: string; discountPct: number; charges: { id: string; name: string; amount: number }[]; goods: number }
-  | { kind: 'ticket'; id: string; title: string; lines: OrderLine[]; total: number; meta: string; status: string; discountPct: number; charges: { id: string; name: string; amount: number }[]; goods: number }
+  | { kind: 'table'; id: string; title: string; lines: OrderLine[]; total: number; meta: string; status: string; discountPct: number; charges: { id: string; name: string; amount: number }[]; goods: number; orderType: OrderType; area?: string }
+  | { kind: 'ticket'; id: string; title: string; lines: OrderLine[]; total: number; meta: string; status: string; discountPct: number; charges: { id: string; name: string; amount: number }[]; goods: number; orderType: OrderType; area?: string }
 
 function PayIcon({ children }: { children: ReactNode }) {
   return (
@@ -182,9 +186,11 @@ function statusIcon(status: string, kind: PayTarget['kind']) {
 
 export default function PaymentsPage() {
   const { user } = useAuth()
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { customers, earnPoints, redeemPoints } = useCrm()
   const { dishes } = useMasters()
+  const { taxes } = useCatalog()
+  const { company } = useBranch()
   const { addCashIn } = useShift()
   const {
     tables,
@@ -203,40 +209,78 @@ export default function PaymentsPage() {
   const [query, setQuery] = useState('')
 
   const canSettle = user ? getPermissions(user.role).canSettle : false
+  const taxEnabled = company.enableTax !== false
+
+  function statusDisplay(status: string, kind: PayTarget['kind']) {
+    if (kind === 'ticket') {
+      if (status === 'takeaway') return t.navTakeaway
+      if (status === 'delivery') return t.navDelivery
+      if (status === 'online') return t.navOnline
+      return status
+    }
+    if (status === 'billing') return t.tableBilling
+    if (status === 'occupied') return t.payStillDining
+    return status
+  }
+
+  function channelLabel(channel: string) {
+    if (channel === 'quick-serve') return t.quickServe
+    if (channel === 'drive-thru') return t.driveThru
+    if (channel === 'takeaway') return t.navTakeaway
+    if (channel === 'delivery') return t.navDelivery
+    if (channel === 'online') return t.navOnline
+    return channel
+  }
 
   const tableQueue = useMemo(() => {
     return tables
-      .filter((t) => t.status === 'billing' || t.status === 'occupied')
+      .filter((table) => table.status === 'billing' || table.status === 'occupied')
       .map((table) => {
         const lines = tableOrders[table.id] ?? []
         const goods = lineTotal(lines)
         const discountPct = tableDiscounts[table.id] ?? 0
         const charges = getTableChargeLines(table.id, goods)
-        const bill = calcBill(goods, discountPct, charges)
+        const bill = calcBill(
+          goods,
+          discountPct,
+          charges,
+          orderTaxBillOptions(lines, dishes, taxes, taxEnabled),
+        )
         const qty = lines.reduce((s, l) => s + l.qty, 0)
+        const guests = table.guests ?? 0
         return {
           kind: 'table' as const,
           id: table.id,
-          title: `Table ${table.label}`,
+          title: `${t.printTable} ${table.label}`,
           lines,
           goods,
           discountPct,
           charges,
           total: bill.total,
-          meta: `${table.area} · ${table.guests ?? 0} guests · ${qty} items`,
+          meta: `${localizedAreaName(table.area, lang)} · ${t.payGuestsCount.replace('{n}', String(guests))} · ${qty} ${qty === 1 ? t.itemOne : t.itemMany}`,
           status: table.status,
+          orderType: 'dine-in' as const,
+          area: table.area,
         }
       })
-      .filter((t) => t.lines.length > 0)
+      .filter((item) => item.lines.length > 0)
       .sort((a, b) => Number(b.status === 'billing') - Number(a.status === 'billing'))
-  }, [tables, tableOrders, tableDiscounts, getTableChargeLines])
+  }, [tables, tableOrders, tableDiscounts, getTableChargeLines, dishes, taxes, taxEnabled, t, lang])
 
   const ticketQueue = useMemo(() => {
     return tickets
       .filter((ticket) => ticket.type !== 'dine-in' && ticket.lines.length > 0)
       .map((ticket) => {
-        const goods = lineTotal(ticket.lines) + (ticket.deliveryFee ?? 0)
-        const bill = calcBill(goods, 0, [])
+        const lineGoods = lineTotal(ticket.lines)
+        const fee = ticket.deliveryFee ?? 0
+        const charges =
+          fee > 0 ? [{ id: 'delivery-fee', name: t.dlDeliveryFee, amount: fee }] : []
+        const bill = calcBill(
+          lineGoods,
+          0,
+          charges,
+          orderTaxBillOptions(ticket.lines, dishes, taxes, taxEnabled),
+        )
         const qty = ticket.lines.reduce((s, l) => s + l.qty, 0)
         const channel =
           ticket.id.startsWith('qs-')
@@ -249,15 +293,16 @@ export default function PaymentsPage() {
           id: ticket.id,
           title: ticket.customer,
           lines: ticket.lines,
-          goods,
+          goods: lineGoods,
           discountPct: 0,
-          charges: [] as { id: string; name: string; amount: number }[],
+          charges,
           total: bill.total,
-          meta: `${channel} · ${qty} items${ticket.deliveryFee ? ` · fee ${money(ticket.deliveryFee)}` : ''}`,
+          meta: `${channelLabel(channel)} · ${qty} ${qty === 1 ? t.itemOne : t.itemMany}${fee ? ` · ${t.payFeeMeta.replace('{amount}', money(fee, lang))}` : ''}`,
           status: ticket.type,
+          orderType: ticket.type,
         }
       })
-  }, [tickets])
+  }, [tickets, dishes, taxes, taxEnabled, t, lang])
 
   const filteredTables = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -288,23 +333,51 @@ export default function PaymentsPage() {
 
   function complete(result: SettleResult) {
     if (!target || !user) return
-    const bill = calcBill(target.goods, target.discountPct, target.charges)
+    const bill = calcBill(
+      target.goods,
+      target.discountPct,
+      target.charges,
+      orderTaxBillOptions(target.lines, dishes, taxes, taxEnabled),
+    )
     const redeemSar = result.loyaltyRedeemSar ?? 0
     if (result.customerId && (result.loyaltyRedeemPts ?? 0) > 0) {
       redeemPoints(result.customerId, result.loyaltyRedeemPts!)
     }
-    const payable = Math.max(0, Math.round((bill.total - redeemSar) * 100) / 100)
+    const roundOff = Math.round((result.roundOff ?? 0) * 100) / 100
+    const payable = Math.max(0, Math.round((bill.total - redeemSar + roundOff) * 100) / 100)
     if (result.customerId) earnPoints(result.customerId, payable)
     const custName = customers.find((c) => c.id === result.customerId)?.name
     deductRecipeStock(target.lines, recipesFromDishes(dishes))
+    const dineTicket =
+      target.kind === 'table'
+        ? tickets.find(
+            (tk) =>
+              tk.tableId === target.id &&
+              tk.checkStatus !== 'settled' &&
+              tk.checkStatus !== 'merged',
+          )
+        : null
+    const table = target.kind === 'table' ? tables.find((tb) => tb.id === target.id) : null
+    const ids = buildReceiptIdentity({
+      ticketId: target.kind === 'ticket' ? target.id : dineTicket?.id,
+      staff: user,
+      tableLabel: table?.label,
+    })
     const settleMeta = {
       method: result.method,
       source: target.title,
       staff: user.name,
+      staffUsername: ids.user,
+      billNo: ids.billNo,
+      orderId: ids.orderId,
+      tableLabel: ids.tableLabel,
       subtotal: target.goods,
       tax: bill.tax,
       total: payable,
       discountAmt: bill.discountAmt || undefined,
+      roundOff: roundOff || undefined,
+      tendered: result.tendered,
+      change: result.change,
       lines: target.lines.map((l) => ({ ...l })),
       splitPayments: result.splitPayments,
       customerId: result.customerId,
@@ -334,14 +407,20 @@ export default function PaymentsPage() {
         tendered: result.tendered,
         change: result.change,
         staff: user.name,
+        staffUsername: ids.user,
+        billNo: ids.billNo,
+        orderId: ids.orderId,
+        tableLabel: ids.tableLabel,
         time: nowTime(),
         customerName: custName,
         kind: 'paid',
+        orderType: target.orderType,
+        tableArea: target.area,
       }),
     )
     addCashIn(cashFromSettle(result.method, payable, result.splitPayments))
     setTarget(null)
-    flash(`Paid by ${result.method}`)
+    flash(t.payPaidByFlash.replace('{method}', result.method))
   }
 
   if (!canSettle) {
@@ -350,11 +429,11 @@ export default function PaymentsPage() {
         <DashHeader search={query} onSearchChange={setQuery} brandTo="/" />
         <div className="panel floor-panel">
           <div className="ticket-empty">
-            <strong>Payments locked for your role</strong>
-            Only Cashier and Admin can settle.
+            <strong>{t.payLockedTitle}</strong>
+            {t.payLockedBody}
             <div style={{ marginTop: '1rem' }}>
               <Link to="/" className="btn btn-ghost">
-                Back home
+                {t.payBackHome}
               </Link>
             </div>
           </div>
@@ -368,11 +447,11 @@ export default function PaymentsPage() {
     return (
       <div className="pay-list">
         <div className="pay-list-head">
-          <span>Order</span>
-          <span>Details</span>
-          <span>Status</span>
-          <span>Amount</span>
-          <span>Action</span>
+          <span>{t.payColOrder}</span>
+          <span>{t.payColDetails}</span>
+          <span>{t.payColStatus}</span>
+          <span>{t.payColAmount}</span>
+          <span>{t.payColAction}</span>
         </div>
         {items.map((item) => (
           <div key={`${item.kind}-${item.id}`} className={`pay-list-row ${item.status}`}>
@@ -387,9 +466,9 @@ export default function PaymentsPage() {
               <span className="pay-badge-ico" aria-hidden>
                 {statusIcon(item.status, item.kind)}
               </span>
-              {item.status}
+              {statusDisplay(item.status, item.kind)}
             </span>
-            <strong className="pay-list-amount">{money(item.total)}</strong>
+            <strong className="pay-list-amount">{money(item.total, lang)}</strong>
             <div className="pay-list-actions">
               {item.kind === 'table' && item.status !== 'billing' ? (
                 <button
@@ -397,16 +476,16 @@ export default function PaymentsPage() {
                   className="btn btn-ghost pay-action-btn"
                   onClick={() => {
                     requestBill(item.id)
-                    flash('Marked billing')
+                    flash(t.payMarkedBillingFlash)
                   }}
                 >
                   <IconBill />
-                  Mark billing
+                  {t.payMarkBilling}
                 </button>
               ) : null}
               <button type="button" className="btn btn-primary pay-action-btn" onClick={() => setTarget(item)}>
                 <IconSettle />
-                Settle
+                {t.settle}
               </button>
             </div>
           </div>
@@ -424,53 +503,55 @@ export default function PaymentsPage() {
             <div>
               <h2>
                 <IconQueue />
-                Settle queue
+                {t.paySettleQueue}
               </h2>
               <p className="pay-sub">
-                {filteredTables.length + filteredTickets.length} pending · {money(queueTotal)} due
+                {t.payPendingDue
+                  .replace('{n}', String(filteredTables.length + filteredTickets.length))
+                  .replace('{amount}', money(queueTotal, lang))}
               </p>
             </div>
             <span className="pay-cashier">
               <IconCashier />
-              Cashier · {user?.name}
+              {t.payCashier.replace('{name}', user?.name ?? '')}
             </span>
           </header>
 
           <div className="pay-metrics">
-            <div className="pay-metric">
+            <div className="pay-metric tone-ready">
               <span className="pay-metric-ico" aria-hidden>
                 <IconReady />
               </span>
               <div>
-                <strong>{filteredTables.filter((t) => t.status === 'billing').length}</strong>
-                <span>Ready to pay</span>
+                <strong>{filteredTables.filter((row) => row.status === 'billing').length}</strong>
+                <span>{t.payReadyToPay}</span>
               </div>
             </div>
-            <div className="pay-metric">
+            <div className="pay-metric tone-dining">
               <span className="pay-metric-ico" aria-hidden>
                 <IconDining />
               </span>
               <div>
-                <strong>{filteredTables.filter((t) => t.status === 'occupied').length}</strong>
-                <span>Still dining</span>
+                <strong>{filteredTables.filter((row) => row.status === 'occupied').length}</strong>
+                <span>{t.payStillDining}</span>
               </div>
             </div>
-            <div className="pay-metric">
+            <div className="pay-metric tone-takeaway">
               <span className="pay-metric-ico" aria-hidden>
                 <IconBag />
               </span>
               <div>
                 <strong>{filteredTickets.length}</strong>
-                <span>Takeaway / delivery</span>
+                <span>{t.payTakeawayDelivery}</span>
               </div>
             </div>
-            <div className="pay-metric highlight">
+            <div className="pay-metric tone-total highlight">
               <span className="pay-metric-ico" aria-hidden>
                 <IconTotal />
               </span>
               <div>
-                <strong>{money(queueTotal)}</strong>
-                <span>Queue total</span>
+                <strong>{money(queueTotal, lang)}</strong>
+                <span>{t.payQueueTotal}</span>
               </div>
             </div>
           </div>
@@ -480,86 +561,81 @@ export default function PaymentsPage() {
               <div className="pay-section">
                 <div className="pay-section-title">
                   <IconTable />
-                  Dine-in tables
+                  {t.payDineInTables}
                 </div>
                 {renderRows(filteredTables)}
               </div>
             ) : null}
 
-            {filteredTickets.length > 0 ? (
-              <div className="pay-section">
-                <div className="pay-section-title">
+            <div className="pay-section">
+              <div className="pay-section-title">
+                <IconBag />
+                {t.payTakeawayDeliveryOnline}
+              </div>
+              {filteredTickets.length > 0 ? (
+                renderRows(filteredTickets)
+              ) : (
+                <div className="pay-section-empty">
                   <IconBag />
-                  Takeaway · Delivery · Online
+                  <strong>{t.payNoTakeawayOrders}</strong>
+                  <span>{query.trim() ? t.payEmptySearchHint : t.payEmptyHint}</span>
                 </div>
-                {renderRows(filteredTickets)}
-              </div>
-            ) : null}
-
-            {filteredTables.length === 0 && filteredTickets.length === 0 ? (
-              <div className="pay-empty">
-                <strong>Queue empty</strong>
-                <span>
-                  {query.trim()
-                    ? 'No bills match your search.'
-                    : 'No open bills. They appear here when a waiter requests payment.'}
-                </span>
-              </div>
-            ) : null}
+              )}
+            </div>
           </div>
         </section>
 
         <aside className="pay-rail">
           <div className="pay-rail-copy">
-            <h2>Settle from here</h2>
-            <p>Take cash, mada, cards, or wallets. Split when the table asks.</p>
+            <h2>{t.paySettleFromHere}</h2>
+            <p>{t.paySettleHint}</p>
           </div>
 
           <div className="pay-methods">
-            <span>
+            <span className="pay-method tone-cash">
               <IconCash />
-              Cash
+              {t.cash}
             </span>
-            <span>
+            <span className="pay-method tone-mada">
               <IconCard />
-              mada
+              {t.payMada}
             </span>
-            <span>
+            <span className="pay-method tone-card">
               <IconCard />
-              Visa / MC
+              {t.payVisaMc}
             </span>
-            <span>
+            <span className="pay-method tone-wallet">
               <IconWallet />
-              Apple Pay
+              {t.payApplePay}
             </span>
-            <span>
+            <span className="pay-method tone-stc">
               <IconWallet />
-              STC Pay
+              {t.payStcPay}
             </span>
-            <span>
+            <span className="pay-method tone-split">
               <IconSplit />
-              Split
+              {t.settleSplitBill}
             </span>
           </div>
 
           <ol className="pay-guide">
             <li>
-              <strong>Waiter bills the table</strong>
-              <span>Status moves to billing</span>
+              <strong>{t.payGuideWaiter}</strong>
+              <span>{t.payGuideStatusBilling}</span>
             </li>
             <li>
-              <strong>Take payment here</strong>
-              <span>Cash · mada · Apple Pay · STC Pay</span>
+              <strong>{t.payGuideTakePayment}</strong>
+              <span>{t.payGuideMethods}</span>
             </li>
             <li>
-              <strong>Receipt prints</strong>
-              <span>Table frees · {SAUDI.vatLabel}</span>
+              <strong>{t.payGuideReceipt}</strong>
+              <span>{t.payGuideTableVat.replace('{vat}', t.vat)}</span>
             </li>
           </ol>
 
           <Link to="/dine-in" className="btn btn-teal pay-floor-btn">
             <IconMap />
-            Open floor map
+            {t.payOpenFloorMap}
           </Link>
         </aside>
       </div>

@@ -191,7 +191,7 @@ export function thermalTemplateCss(templateId: PrintTemplateId, widthMm: number)
   }
   .meta.ar {
     direction: rtl;
-    font-weight: 600;
+    font-weight: 400;
   }
   .head { margin-bottom: 10px; }
   .row {
@@ -202,7 +202,7 @@ export function thermalTemplateCss(templateId: PrintTemplateId, widthMm: number)
     display: block;
     direction: rtl;
     margin-top: 2px;
-    font-weight: 600;
+    font-weight: 400;
   }
 `
   } else if (templateId === 'minimal') {

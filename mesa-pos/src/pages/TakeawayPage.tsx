@@ -1,19 +1,33 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { getPermissions } from '../auth/roles'
 import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
 import ConfirmModal from '../components/ConfirmModal'
 import MenuPicker from '../components/MenuPicker'
+import QtyStepper from '../components/QtyStepper'
 import ReceiptModal, { type ReceiptData } from '../components/ReceiptModal'
 import SendOrdersModal from '../components/SendOrdersModal'
 import SettleModal, { type SettleResult } from '../components/SettleModal'
 import TextPromptModal from '../components/TextPromptModal'
 import { redeemFoodVoucher } from '../data/foodVouchers'
+import { ITEM_NOTE_SUGGESTIONS } from '../data/itemNotes'
 import { lineTotal, money, nowTime, type OpenTicket } from '../data/mock'
 import { hydrateSequencesFromApi, nextSeq } from '../data/sequences'
-import { calcBill, cashFromSettle, recipesFromDishes } from '../lib/bill'
-import { SAUDI } from '../locale/saudi'
+import { calcBill, calcBillWithFoodVoucher, cashFromSettle, recipesFromDishes, settleAfterFoodVoucher } from '../lib/bill'
+import { floorDiscountPercents } from '../data/discount'
+import {
+  companyDefaultTaxPercent,
+  dishTaxPercent,
+  normalizeTaxIds,
+  orderTaxBillOptions,
+  taxBreakdownForOrder,
+  vatDisplayLabel,
+  vatRateLabel,
+} from '../data/tax'
+import { localizedLineName } from '../lib/branding'
+import { lineNameWithoutOptions, parseOrderLineNote } from '../lib/orderLineOptions'
+import { useI18n } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
 import { useBranch } from '../state/BranchContext'
 import { useCatalog } from '../state/CatalogContext'
@@ -23,6 +37,7 @@ import { usePos } from '../state/PosContext'
 import { useShift } from '../state/ShiftContext'
 import { useSync } from '../sync/SyncContext'
 import { attachZatcaToReceipt } from '../hardware/zatca'
+import { buildReceiptIdentity } from '../lib/receiptIds'
 
 function TaIcon({ children }: { children: ReactNode }) {
   return (
@@ -122,21 +137,25 @@ function ticketNo(ticket: OpenTicket) {
   return fromId?.[1] ?? '—'
 }
 
-function statusOf(ticket: OpenTicket) {
-  if (ticket.held) return { label: 'Held', tone: 'held' as const }
-  if (ticket.lines.length === 0) return { label: 'New', tone: 'muted' as const }
-  if (ticket.lines.some((l) => !l.sent)) return { label: 'Open', tone: 'amber' as const }
-  return { label: 'Sent', tone: 'teal' as const }
+function statusOf(
+  ticket: OpenTicket,
+  labels: { held: string; empty: string; open: string; sent: string },
+) {
+  if (ticket.held) return { label: labels.held, tone: 'held' as const }
+  if (ticket.lines.length === 0) return { label: labels.empty, tone: 'muted' as const }
+  if (ticket.lines.some((l) => !l.sent)) return { label: labels.open, tone: 'amber' as const }
+  return { label: labels.sent, tone: 'teal' as const }
 }
 
 export default function TakeawayPage() {
   const { user } = useAuth()
+  const { t, lang } = useI18n()
   const perms = user ? getPermissions(user.role) : getPermissions('cashier')
   const { customers, earnPoints, redeemPoints } = useCrm()
   const { dishes } = useMasters()
-  const { redeemGiftCard } = useCatalog()
+  const { redeemGiftCard, taxes, discounts } = useCatalog()
   const { addCashIn } = useShift()
-  const { activeBranchId } = useBranch()
+  const { activeBranchId, company } = useBranch()
   const { syncEpoch } = useSync()
   const {
     tickets,
@@ -144,6 +163,12 @@ export default function TakeawayPage() {
     updateTicket,
     addToTicket,
     changeTicketQty,
+    setTicketLineNote,
+    voidTicketLine,
+    setTicketDiscount,
+    toggleTicketCharge,
+    getTicketChargeLines,
+    chargeCatalog,
     sendTicketOrders,
     settleTicket,
     cancelTicket,
@@ -152,6 +177,18 @@ export default function TakeawayPage() {
     dayIsClosed,
   } = usePos()
 
+  const discountPicks = useMemo(() => floorDiscountPercents(discounts), [discounts])
+
+  const statusLabels = useMemo(
+    () => ({
+      held: t.taStatusHeld,
+      empty: t.taStatusNew,
+      open: t.taStatusOpen,
+      sent: t.taStatusSent,
+    }),
+    [t],
+  )
+
   useEffect(() => {
     void hydrateSequencesFromApi().catch(() => undefined)
   }, [syncEpoch, activeBranchId])
@@ -159,13 +196,20 @@ export default function TakeawayPage() {
   const takeaway = useMemo(
     () =>
       tickets.filter(
-        (t) => t.type === 'takeaway' && !t.id.startsWith('qs-') && !t.id.startsWith('dt-'),
+        (t) =>
+          t.type === 'takeaway' &&
+          !t.id.startsWith('qs-') &&
+          !t.id.startsWith('dt-') &&
+          !t.id.startsWith('bc-') &&
+          t.channel !== 'barcode',
       ),
     [tickets],
   )
 
+  const [searchParams] = useSearchParams()
+  const deepTicketId = searchParams.get('ticket')
   const [search, setSearch] = useState('')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(() => deepTicketId)
   const [ticketNote, setTicketNote] = useState('')
   const [linkedCustomerId, setLinkedCustomerId] = useState<string | null>(null)
   const [showCustomer, setShowCustomer] = useState(false)
@@ -174,22 +218,95 @@ export default function TakeawayPage() {
   const [showNote, setShowNote] = useState(false)
   const [showCancel, setShowCancel] = useState(false)
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
+  const [voidTarget, setVoidTarget] = useState<{
+    ticketId: string
+    lineId: string
+    name: string
+  } | null>(null)
+  const [noteTarget, setNoteTarget] = useState<{
+    ticketId: string
+    lineId: string
+    name: string
+    note: string
+  } | null>(null)
 
   useEffect(() => {
+    if (deepTicketId && takeaway.some((t) => t.id === deepTicketId)) {
+      setSelectedId(deepTicketId)
+      return
+    }
     if (!selectedId) return
     if (!takeaway.some((t) => t.id === selectedId)) {
       setSelectedId(null)
       setTicketNote('')
       setLinkedCustomerId(null)
     }
-  }, [takeaway, selectedId])
+  }, [takeaway, selectedId, deepTicketId])
 
   const selected = takeaway.find((t) => t.id === selectedId) ?? null
+
+  useEffect(() => {
+    setTicketNote(selected?.note?.trim() ?? '')
+  }, [selected?.id, selected?.note])
+
   const lines = selected?.lines ?? []
   const pending = lines.filter((l) => !l.sent).length
   const goods = lineTotal(lines)
-  const bill = useMemo(() => calcBill(goods, 0, []), [goods])
-  const { tax, total, taxable } = bill
+  const discountPct = selected?.discountPct ?? 0
+  const chargeIdsKey = (selected?.chargeIds ?? []).join(',')
+  const taxEnabled = company.enableTax !== false
+  const chargeLines = useMemo(
+    () => (selected ? getTicketChargeLines(selected.id, goods) : []),
+    // chargeIdsKey forces refresh when toggles change; getTicketChargeLines reads ticketsRef
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selected?.id, chargeIdsKey, goods, getTicketChargeLines],
+  )
+  const taxOpts = useMemo(
+    () => orderTaxBillOptions(lines, dishes, taxes, taxEnabled),
+    [lines, dishes, taxes, taxEnabled],
+  )
+  const bill = useMemo(
+    () => calcBill(goods, discountPct, chargeLines, taxOpts),
+    [goods, discountPct, chargeLines, taxOpts],
+  )
+  const { tax, total, taxByRate, discountAmt } = bill
+  const vatDetailRows = useMemo(
+    () =>
+      taxBreakdownForOrder({
+        lines,
+        dishes,
+        taxes,
+        discountPct,
+        charges: chargeLines,
+        enableTax: taxEnabled,
+        taxByRate,
+      }),
+    [lines, dishes, taxes, discountPct, chargeLines, taxEnabled, taxByRate],
+  )
+  const vatLabel = useMemo(
+    () =>
+      vatDisplayLabel(
+        companyDefaultTaxPercent(taxes),
+        taxByRate.length > 1 ||
+          lines.some((l) => {
+            const dish = dishes.find((d) => d.id === l.itemId)
+            return dishTaxPercent(dish?.taxIds, taxes) !== companyDefaultTaxPercent(taxes)
+          }),
+      ),
+    [taxes, taxByRate.length, lines, dishes],
+  )
+
+  const handleMenuAdd = useCallback(
+    (item: Parameters<typeof addToTicket>[1], note?: string) => {
+      if (!selectedId) return
+      if (dayIsClosed) {
+        flash(t.dayClosed)
+        return
+      }
+      addToTicket(selectedId, item, note)
+    },
+    [selectedId, dayIsClosed, flash, t.dayClosed, addToTicket],
+  )
 
   const q = search.trim().toLowerCase()
   const filtered = useMemo(() => {
@@ -210,7 +327,18 @@ export default function TakeawayPage() {
     (t) => !t.held && t.lines.length > 0 && t.lines.every((l) => l.sent),
   ).length
   const heldCount = takeaway.filter((t) => t.held).length
-  const queueTotal = takeaway.reduce((s, t) => s + calcBill(lineTotal(t.lines), 0, []).total, 0)
+  const queueTotal = takeaway.reduce((s, tkt) => {
+    const g = lineTotal(tkt.lines)
+    return (
+      s +
+      calcBill(
+        g,
+        tkt.discountPct ?? 0,
+        getTicketChargeLines(tkt.id, g),
+        orderTaxBillOptions(tkt.lines, dishes, taxes, company.enableTax !== false),
+      ).total
+    )
+  }, 0)
 
   const linkedCustomer = linkedCustomerId
     ? customers.find((c) => c.id === linkedCustomerId)
@@ -218,7 +346,7 @@ export default function TakeawayPage() {
 
   function createTicket(opts?: { quiet?: boolean; walkIn?: boolean }) {
     if (dayIsClosed) {
-      flash('Day is closed — reopen in Back Office')
+      flash(t.dayClosedHint)
       return
     }
     const n = nextSeq('takeaway')
@@ -227,8 +355,8 @@ export default function TakeawayPage() {
       id: `tk-${n}-${Date.now()}`,
       type: 'takeaway',
       customer: useCustomer
-        ? `Walk-in #${n} · ${useCustomer.name}`
-        : `Walk-in #${n}`,
+        ? `${t.taWalkIn} #${n} · ${useCustomer.name}`
+        : `${t.taWalkIn} #${n}`,
       phone: useCustomer?.phone,
       openedAt: nowTime(),
       lines: [],
@@ -238,13 +366,13 @@ export default function TakeawayPage() {
     setSelectedId(ticket.id)
     setTicketNote('')
     if (opts?.walkIn) setLinkedCustomerId(null)
-    if (!opts?.quiet) flash(`Takeaway #${n}`)
+    if (!opts?.quiet) flash(`${t.navTakeaway} #${n}`)
   }
 
   function selectTicket(ticket: OpenTicket) {
     if (ticket.held) {
       updateTicket(ticket.id, { held: false, heldAt: undefined })
-      flash(`Resumed · #${ticketNo(ticket)}`)
+      flash(`${t.taResumeHeld} · #${ticketNo(ticket)}`)
     }
     setSelectedId(ticket.id)
     setTicketNote('')
@@ -257,18 +385,18 @@ export default function TakeawayPage() {
   function holdTicket() {
     if (!selected) return
     if (dayIsClosed) {
-      flash('Day is closed', 'err')
+      flash(t.dayClosed, 'err')
       return
     }
     if (selected.lines.length === 0) {
-      flash('Add items before holding', 'err')
+      flash(t.taNoItems, 'err')
       return
     }
     const n = ticketNo(selected)
     updateTicket(selected.id, { held: true, heldAt: nowTime() })
     setTicketNote('')
     createTicket({ quiet: true, walkIn: true })
-    flash(`Held #${n} · next customer ready`)
+    flash(`${t.taHold} #${n}`)
   }
 
   function applyCustomer(customerId: string | null) {
@@ -277,18 +405,18 @@ export default function TakeawayPage() {
     if (!selected) return
     if (!customerId) {
       const n = ticketNo(selected)
-      updateTicket(selected.id, { customer: `Walk-in #${n}`, phone: undefined })
-      flash('Walk-in')
+      updateTicket(selected.id, { customer: `${t.taWalkIn} #${n}`, phone: undefined })
+      flash(t.taWalkIn)
       return
     }
     const c = customers.find((x) => x.id === customerId)
     if (!c) return
     const n = ticketNo(selected)
     updateTicket(selected.id, {
-      customer: `Walk-in #${n} · ${c.name}`,
+      customer: `${t.taWalkIn} #${n} · ${c.name}`,
       phone: c.phone,
     })
-    flash(`Customer · ${c.name}`)
+    flash(`${t.tileCustomer} · ${c.name}`)
   }
 
   function requestCancel() {
@@ -309,7 +437,7 @@ export default function TakeawayPage() {
   function completeSettle(result: SettleResult) {
     if (!selected) return
     if (dayIsClosed) {
-      flash('Day is closed')
+      flash(t.dayClosed)
       return
     }
     if (lines.length === 0) {
@@ -326,39 +454,68 @@ export default function TakeawayPage() {
     if (result.foodVoucherId) {
       redeemFoodVoucher(result.foodVoucherId)
     }
-    const payable = Math.max(0, Math.round((total - redeemSar) * 100) / 100)
+    const roundOff = Math.round((result.roundOff ?? 0) * 100) / 100
+    const { bill: settledBill, payable, voucherSar } = settleAfterFoodVoucher({
+      goods,
+      discountPct,
+      charges: chargeLines,
+      taxOptions: taxOpts,
+      baseBill: bill,
+      foodVoucherSar: result.foodVoucherAmount,
+      loyaltySar: redeemSar,
+      roundOff,
+    })
     const customerId = result.customerId ?? linkedCustomerId ?? undefined
     if (customerId) earnPoints(customerId, payable)
+    const paySplits = (result.splitPayments ?? []).filter((p) => !/^Food voucher/i.test(p.method))
+    const ids = buildReceiptIdentity({ ticketId: selected.id, staff: user })
     settleTicket(selected.id, {
       method: result.method,
-      source: `Takeaway · ${selected.customer}`,
+      source: `${t.navTakeaway} · ${selected.customer}`,
       staff: user?.name,
-      subtotal: taxable,
-      tax,
+      staffUsername: ids.user,
+      billNo: ids.billNo,
+      orderId: ids.orderId,
+      subtotal: settledBill.taxable,
+      tax: settledBill.tax,
       total: payable,
+      roundOff: roundOff || undefined,
+      tendered: result.tendered,
+      change: result.change,
       lines,
-      splitPayments: result.splitPayments,
+      splitPayments: paySplits.length ? paySplits : undefined,
       customerId,
       loyaltyRedeem: redeemSar || undefined,
     })
     deductRecipeStock(lines, recipesFromDishes(dishes))
-    addCashIn(cashFromSettle(result.method, payable, result.splitPayments))
+    addCashIn(cashFromSettle(result.method, payable, paySplits.length ? paySplits : undefined))
     setShowSettle(false)
     setReceipt(attachZatcaToReceipt({
-      title: `Takeaway · ${selected.customer}`,
+      title: `${t.navTakeaway} · ${selected.customer}`,
       method: result.method,
       lines,
-      subtotal: taxable,
-      tax,
+      subtotal: goods,
+      discountAmt: settledBill.discountAmt || undefined,
+      discountPct: discountPct || undefined,
+      charges: chargeLines.length
+        ? chargeLines.map((c) => ({ name: c.name, amount: c.amount }))
+        : undefined,
+      tax: settledBill.tax,
       total: payable,
       loyaltyRedeem: redeemSar || undefined,
-      splitPayments: result.splitPayments,
+      foodVoucherAmt: voucherSar || undefined,
+      foodVoucherCode: result.foodVoucherCode,
+      splitPayments: paySplits.length ? paySplits : undefined,
       staff: user?.name,
+      staffUsername: ids.user,
+      billNo: ids.billNo,
+      orderId: ids.orderId,
       time: new Date().toLocaleString(),
       customerName: linkedCustomer?.name ?? selected.customer,
       kind: 'paid',
+      orderType: selected.type,
     }))
-    flash(`Paid by ${result.method}`)
+    flash(`${t.settle} · ${result.method}`)
     setSelectedId(null)
     setLinkedCustomerId(null)
     setTicketNote('')
@@ -375,33 +532,33 @@ export default function TakeawayPage() {
               <IconBag />
             </span>
             <div>
-              <h1>Takeaway</h1>
+              <h1>{t.navTakeaway}</h1>
               <p>
-                {takeaway.length} open · {openCount} need KOT · {money(queueTotal)}
-                {dayIsClosed ? ' · day closed' : ''}
+                {takeaway.length} {t.taOpenWord} · {openCount} {t.taNeedKot} · {money(queueTotal, lang)}
+                {dayIsClosed ? ` · ${t.dayClosed}` : ''}
               </p>
             </div>
           </div>
           <div className="ta-toolbar-stats" aria-hidden={false}>
             <span>
-              <strong>{takeaway.length}</strong> tickets
+              <strong>{takeaway.length}</strong> {t.taTicketsWord}
             </span>
             <span>
-              <strong>{openCount}</strong> KOT
+              <strong>{openCount}</strong> {t.navKot}
             </span>
             <span>
-              <strong>{readyCount}</strong> ready
+              <strong>{readyCount}</strong> {t.taReadyWord}
             </span>
             {heldCount ? (
               <span className="ta-stat-held">
-                <strong>{heldCount}</strong> held
+                <strong>{heldCount}</strong> {t.taHeldWord}
               </span>
             ) : null}
           </div>
           <div className="ta-hero-actions">
-            {dayIsClosed ? <span className="ta-pill closed">Day closed</span> : null}
+            {dayIsClosed ? <span className="ta-pill closed">{t.dayClosed}</span> : null}
             <Link to="/quick-serve" className="ta-link-btn">
-              <IconBolt /> Quick serve
+              <IconBolt /> {t.tileQuickServe}
             </Link>
             <button
               type="button"
@@ -409,7 +566,7 @@ export default function TakeawayPage() {
               disabled={dayIsClosed}
               onClick={() => createTicket()}
             >
-              <IconPlus /> New ticket
+              <IconPlus /> {t.qsNewTicket}
             </button>
           </div>
         </header>
@@ -417,14 +574,20 @@ export default function TakeawayPage() {
         <section className="ta-rail">
           <div className="ta-rail-head">
             <h2>
-              <IconTicket /> Queue
+              <IconTicket /> {t.taQueue}
             </h2>
             <span className="ta-chip">{filtered.length}</span>
           </div>
           <div className="ta-rail-scroll">
             {filtered.map((ticket) => {
-              const st = statusOf(ticket)
-              const amt = calcBill(lineTotal(ticket.lines), 0, []).total
+              const st = statusOf(ticket, statusLabels)
+              const g = lineTotal(ticket.lines)
+              const amt = calcBill(
+                g,
+                ticket.discountPct ?? 0,
+                getTicketChargeLines(ticket.id, g),
+                orderTaxBillOptions(ticket.lines, dishes, taxes, company.enableTax !== false),
+              ).total
               const active = ticket.id === selectedId
               return (
                 <button
@@ -432,14 +595,16 @@ export default function TakeawayPage() {
                   type="button"
                   className={`ta-rail-card${active ? ' selected' : ''}${ticket.held ? ' held' : ''}`}
                   onClick={() => selectTicket(ticket)}
-                  title={ticket.held ? 'Tap to resume held customer' : undefined}
+                  title={ticket.held ? t.taResumeHeld : undefined}
                 >
                   <span className="ta-ticket-no">#{ticketNo(ticket)}</span>
                   <span className="ta-rail-copy">
-                    <strong>{ticket.customer.replace(/^Walk-in /, '')}</strong>
+                    <strong>
+                      {ticket.customer.replace(/^Walk-in |^زائر /, '')}
+                    </strong>
                     <em className={`ta-status ${st.tone}`}>{st.label}</em>
                   </span>
-                  <span className="ta-rail-amt">{money(amt)}</span>
+                  <span className="ta-rail-amt">{money(amt, lang)}</span>
                 </button>
               )
             })}
@@ -448,13 +613,13 @@ export default function TakeawayPage() {
               className="ta-rail-add"
               disabled={dayIsClosed}
               onClick={() => createTicket()}
-              title="New ticket"
+              title={t.qsNewTicket}
             >
               <IconPlus />
-              <span>New</span>
+              <span>{t.taStatusNew}</span>
             </button>
             {filtered.length === 0 && takeaway.length > 0 ? (
-              <div className="ta-rail-empty">No matches</div>
+              <div className="ta-rail-empty">{t.noMatches}</div>
             ) : null}
           </div>
         </section>
@@ -463,15 +628,15 @@ export default function TakeawayPage() {
           {!selected ? (
             <div className="ta-empty tall">
               <IconBag />
-              <strong>Select a ticket</strong>
-              <span>Pick from the queue above or create a new takeaway order.</span>
+              <strong>{t.taSelectTicket}</strong>
+              <span>{t.taSelectHint}</span>
               <button
                 type="button"
                 className="btn btn-primary"
                 disabled={dayIsClosed}
                 onClick={() => createTicket()}
               >
-                <IconPlus /> New ticket
+                <IconPlus /> {t.qsNewTicket}
               </button>
             </div>
           ) : (
@@ -479,11 +644,11 @@ export default function TakeawayPage() {
               <div className="ta-work-head">
                 <div>
                   <h2>
-                    #{ticketNo(selected)} <em>Takeaway</em>
+                    #{ticketNo(selected)} <em>{t.navTakeaway}</em>
                   </h2>
                   <div className="ta-work-tags">
-                    <span className={`ta-status ${statusOf(selected).tone}`}>
-                      {statusOf(selected).label}
+                    <span className={`ta-status ${statusOf(selected, statusLabels).tone}`}>
+                      {statusOf(selected, statusLabels).label}
                     </span>
                     <span className="ta-chip soft">{selected.customer}</span>
                     {linkedCustomer ? (
@@ -491,104 +656,271 @@ export default function TakeawayPage() {
                         <IconUser /> {linkedCustomer.name}
                       </span>
                     ) : null}
-                    {dayIsClosed ? <span className="ta-pill closed">Day closed</span> : null}
+                    {dayIsClosed ? <span className="ta-pill closed">{t.dayClosed}</span> : null}
                   </div>
                 </div>
                   <div className="ta-work-tools">
                     <button type="button" className="ta-tool" onClick={() => setShowCustomer(true)}>
-                      <IconUser /> Customer
+                      <IconUser /> {t.tileCustomer}
                     </button>
                     <button type="button" className="ta-tool" onClick={() => setShowNote(true)}>
-                      Note
+                      {t.taNoteLabel}
                     </button>
                     <button
                       type="button"
                       className="ta-tool hold"
                       disabled={dayIsClosed || selected.lines.length === 0 || selected.held}
-                      title="Park this customer and serve the next one"
+                      title={t.taHoldHint}
                       onClick={holdTicket}
                     >
-                      <IconHold /> Hold
+                      <IconHold /> {t.taHold}
                     </button>
                     <button type="button" className="ta-tool danger" onClick={requestCancel}>
-                      <IconCancel /> Cancel
+                      <IconCancel /> {t.cancel}
                     </button>
                   </div>
               </div>
 
-              {ticketNote ? <p className="ta-note">Note: {ticketNote}</p> : null}
+              {ticketNote ? (
+                <p className="ta-note">
+                  {t.taNoteLabel}: {ticketNote}
+                </p>
+              ) : null}
 
               <div className="ta-work-body">
                 <div className="ta-menu">
-                  <MenuPicker
-                    onAdd={(item, note) => {
-                      if (dayIsClosed) {
-                        flash('Day is closed')
-                        return
-                      }
-                      addToTicket(selected.id, item, note)
-                    }}
-                  />
+                  <MenuPicker onAdd={handleMenuAdd} />
                 </div>
 
                 <div className="ta-order">
                   <div className="ta-panel-head compact">
-                    <h2>Order</h2>
+                    <h2>{t.taOrder}</h2>
                     <span className="ta-chip">
-                      {lines.length} · {pending ? `${pending} unsent` : 'all sent'}
+                      {lines.length} · {pending ? `${pending} ${t.taUnsent}` : t.taAllSent}
                     </span>
                   </div>
-                  <div className="ta-lines">
+                  <div className="ta-lines dine-order-cards">
                     {lines.length === 0 ? (
                       <div className="ta-empty inline">
-                        <strong>No items yet</strong>
-                        <span>Tap products to build the ticket.</span>
+                        <strong>{t.taNoItems}</strong>
+                        <span>{t.taNoItemsHint}</span>
                       </div>
                     ) : (
-                      lines.map((line) => (
-                        <div key={line.id} className="order-line">
-                          <div className="name">{line.name}</div>
-                          <strong>{money(line.qty * line.price)}</strong>
-                          <div className="sub">
-                            {money(line.price)} · {line.sent ? 'Sent' : 'New'}
-                            {line.note ? ` · ${line.note}` : ''}
-                          </div>
-                          <div className="qty-controls">
-                            <button
-                              type="button"
-                              disabled={dayIsClosed || line.sent}
-                              onClick={() => changeTicketQty(selected.id, line.id, -1)}
-                            >
-                              −
-                            </button>
-                            <span>{line.qty}</span>
-                            <button
-                              type="button"
-                              disabled={dayIsClosed}
-                              onClick={() => changeTicketQty(selected.id, line.id, 1)}
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                      ))
+                      lines.map((line) => {
+                        const noteText = line.note?.trim() ?? ''
+                        const itemName = localizedLineName(line, dishes, lang)
+                        const dish = dishes.find((d) => d.id === line.itemId)
+                        const opts = parseOrderLineNote(line.note, dish)
+                        const hasOptBadges = Boolean(opts.size || opts.addons.length)
+                        const displayName = hasOptBadges
+                          ? lineNameWithoutOptions(itemName, line.note)
+                          : itemName
+                        const thumb = dish?.imageDataUrl
+                        const thumbMark =
+                          dish?.code?.trim() ||
+                          (line.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 3) || '•').toUpperCase()
+                        const taxPct = dishTaxPercent(dish?.taxIds, taxes)
+                        const lineGoods = Math.round(line.qty * line.price * 100) / 100
+                        const lineShare = goods > 0 ? lineGoods / goods : 0
+                        const lineNet = lineGoods - discountAmt * lineShare
+                        const lineTax = !taxEnabled
+                          ? 0
+                          : Math.round(lineNet * (taxPct / 100) * 100) / 100
+                        const hasItemTax = Boolean(normalizeTaxIds(dish?.taxIds)[0])
+                        const taxRateName = (() => {
+                          const id = normalizeTaxIds(dish?.taxIds)[0]
+                          if (!id) return null
+                          return taxes.find((tx) => tx.id === id)?.name ?? null
+                        })()
+                        return (
+                          <article key={line.id} className="dine-order-item">
+                            <div className="dine-order-item-top">
+                              <span
+                                className={`dine-order-item-thumb${thumb ? ' has-photo' : ''}`}
+                                aria-hidden
+                              >
+                                {thumb ? <img src={thumb} alt="" /> : thumbMark}
+                              </span>
+                              <div className="dine-order-item-info">
+                                <strong className="dine-order-item-name">{displayName}</strong>
+                                {hasOptBadges ? (
+                                  <div className="dine-order-item-opts" aria-label="Options">
+                                    {opts.size ? (
+                                      <span className="dine-opt-badge size">{opts.size}</span>
+                                    ) : null}
+                                    {opts.addons.map((addon) => (
+                                      <span key={addon} className="dine-opt-badge addon">
+                                        {addon}
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : null}
+                                <span className="dine-order-item-price mesa-ltr-nums">
+                                  {money(line.price, lang)}
+                                </span>
+                                {taxEnabled ? (
+                                  <span
+                                    className={`dine-order-item-tax${!hasItemTax ? ' is-default' : ''}`}
+                                    title={
+                                      hasItemTax
+                                        ? `Item tax${taxRateName ? `: ${taxRateName}` : ''}`
+                                        : 'Company default tax'
+                                    }
+                                  >
+                                    Tax {Number.isInteger(taxPct) ? taxPct : taxPct.toFixed(2)}%
+                                    {hasItemTax ? '' : ' · default'}
+                                    <em className="mesa-ltr-nums"> · {money(lineTax, lang)}</em>
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="dine-order-item-mid">
+                              <QtyStepper
+                                className="dine-qty"
+                                value={line.qty}
+                                ariaLabel={displayName}
+                                disabled={dayIsClosed}
+                                minusDisabled={!!line.sent || dayIsClosed}
+                                inputDisabled={!!line.sent || dayIsClosed}
+                                onChange={(delta) => changeTicketQty(selected.id, line.id, delta)}
+                              />
+                              <strong className="dine-order-item-total mesa-ltr-nums">
+                                {money(line.qty * line.price, lang)}
+                              </strong>
+                              <button
+                                type="button"
+                                className="dine-void-btn"
+                                title={t.diVoidLine}
+                                disabled={dayIsClosed}
+                                onClick={() =>
+                                  setVoidTarget({
+                                    ticketId: selected.id,
+                                    lineId: line.id,
+                                    name: displayName,
+                                  })
+                                }
+                              >
+                                {t.diVoid}
+                              </button>
+                            </div>
+
+                            <div className="dine-order-item-meta">
+                              <span className={`dine-order-item-status${line.sent ? ' sent' : ''}`}>
+                                {line.sent ? t.taStatusSent : t.taStatusNew}
+                              </span>
+                              <button
+                                type="button"
+                                className="dine-line-note-btn"
+                                title={noteText ? t.diEditNote : t.diAddNote}
+                                disabled={dayIsClosed}
+                                onClick={() =>
+                                  setNoteTarget({
+                                    ticketId: selected.id,
+                                    lineId: line.id,
+                                    name: displayName,
+                                    note: line.note ?? '',
+                                  })
+                                }
+                              >
+                                {noteText ? t.diEditNote : t.diAddNote}
+                              </button>
+                            </div>
+
+                            {opts.kitchenNote ? (
+                              <p className="dine-order-item-note">{opts.kitchenNote}</p>
+                            ) : null}
+                          </article>
+                        )
+                      })
                     )}
                   </div>
 
                   <div className="ta-totals">
                     <div>
-                      <span>Subtotal</span>
-                      <span>{money(taxable)}</span>
+                      <span>{t.subtotal}</span>
+                      <span>{money(goods, lang)}</span>
                     </div>
                     <div>
-                      <span>{SAUDI.vatLabel}</span>
-                      <span>{money(tax)}</span>
+                      <span>
+                        {t.discount} ({discountPct}%)
+                      </span>
+                      <span>-{money(discountAmt, lang)}</span>
                     </div>
+                    {chargeLines.map((c) => (
+                      <div key={c.id}>
+                        <span>{c.name}</span>
+                        <span>{money(c.amount, lang)}</span>
+                      </div>
+                    ))}
+                    {vatDetailRows.length > 0
+                      ? vatDetailRows.map((row) => (
+                          <div
+                            key={`vat-${row.percent}`}
+                            className="totals-vat-row"
+                            title={
+                              row.items.length
+                                ? row.items.map((n) => `${n} · ${vatRateLabel(row.percent)}`).join('\n')
+                                : vatRateLabel(row.percent)
+                            }
+                          >
+                            <span>{vatRateLabel(row.percent)}</span>
+                            <span>{money(row.tax, lang)}</span>
+                          </div>
+                        ))
+                      : (
+                          <div key="vat-fallback" className="totals-vat-row" hidden={!(tax > 0)}>
+                            <span>{vatLabel}</span>
+                            <span>{money(tax, lang)}</span>
+                          </div>
+                        )}
                     <div className="grand">
-                      <span>Total</span>
-                      <span>{money(total)}</span>
+                      <span>{t.total}</span>
+                      <span>{money(total, lang)}</span>
                     </div>
                   </div>
+
+                  <div className="discount-row ta-discount-row">
+                    <span className="field-label">{t.discount}</span>
+                    <div className="menu-tabs">
+                      {discountPicks.map((pct) => (
+                        <button
+                          key={pct}
+                          type="button"
+                          className={discountPct === pct ? 'active' : ''}
+                          disabled={dayIsClosed}
+                          onClick={() => setTicketDiscount(selected.id, pct)}
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {chargeCatalog.some((c) => c.active) ? (
+                    <div className="discount-row ta-discount-row">
+                      <span className="field-label">{t.diExtraCharges}</span>
+                      <div className="menu-tabs">
+                        {chargeCatalog
+                          .filter((c) => c.active)
+                          .map((c) => {
+                            const on = (selected.chargeIds ?? []).includes(c.id)
+                            return (
+                              <button
+                                key={c.id}
+                                type="button"
+                                className={on ? 'active' : ''}
+                                disabled={dayIsClosed}
+                                onClick={() => toggleTicketCharge(selected.id, c.id)}
+                              >
+                                {c.name}
+                                {' · '}
+                                {c.percent ? `${c.amount}%` : money(c.amount, lang)}
+                              </button>
+                            )
+                          })}
+                      </div>
+                    </div>
+                  ) : null}
 
                     <div className="ta-actions">
                       {perms.canSendOrders ? (
@@ -598,13 +930,14 @@ export default function TakeawayPage() {
                           disabled={dayIsClosed}
                           onClick={() => {
                             if (!pending) {
-                              flash('Nothing new to send')
+                              flash(t.taNothingToSend)
                               return
                             }
                             setShowSend(true)
                           }}
                         >
-                          <IconSend /> Send orders{pending > 0 ? ` (${pending})` : ''}
+                          <IconSend /> {t.sendOrders}
+                          {pending > 0 ? ` (${pending})` : ''}
                         </button>
                       ) : null}
                       {perms.canSettle ? (
@@ -614,20 +947,20 @@ export default function TakeawayPage() {
                           disabled={lines.length === 0 || dayIsClosed}
                           onClick={() => setShowSettle(true)}
                         >
-                          <IconPay /> Settle
+                          <IconPay /> {t.settle}
                         </button>
                       ) : (
                         <button
                           type="button"
                           className="btn btn-primary"
                           disabled={lines.length === 0}
-                          onClick={() => flash('Ticket ready — cashier will settle')}
+                          onClick={() => flash(t.taSendToCashierFlash)}
                         >
-                          Send to cashier
+                          {t.taSendToCashier}
                         </button>
                       )}
                       <button type="button" className="btn btn-ghost ta-cancel-btn" onClick={requestCancel}>
-                        <IconCancel /> Cancel ticket
+                        <IconCancel /> {t.taCancelTicket}
                       </button>
                     </div>
                 </div>
@@ -637,7 +970,7 @@ export default function TakeawayPage() {
         </section>
       </div>
 
-      <HubFooter backTo="/" backLabel="Home" />
+      <HubFooter backTo="/" backLabel={t.home} />
 
       {showSend && selected ? (
         <SendOrdersModal
@@ -657,6 +990,16 @@ export default function TakeawayPage() {
           total={total}
           customers={customers}
           preselectCustomerId={linkedCustomerId ?? undefined}
+          computeDue={(voucherSar, loyaltySar) => {
+            const next = calcBillWithFoodVoucher(
+              goods,
+              discountPct,
+              chargeLines,
+              taxOpts,
+              voucherSar,
+            )
+            return Math.max(0, Math.round((next.total - loyaltySar) * 100) / 100)
+          }}
           onClose={() => setShowSettle(false)}
           onConfirm={completeSettle}
         />
@@ -666,14 +1009,14 @@ export default function TakeawayPage() {
         <div className="modal-backdrop" role="dialog" aria-modal="true">
           <div className="modal-card">
             <div className="section-head">
-              <h2>Select customer</h2>
+              <h2>{t.taSelectCustomer}</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setShowCustomer(false)}>
-                Close
+                {t.printClose}
               </button>
             </div>
             <div className="method-grid">
               <button type="button" className="btn btn-ghost" onClick={() => applyCustomer(null)}>
-                Walk-in
+                {t.taWalkIn}
               </button>
               {customers.map((c) => (
                 <button
@@ -692,34 +1035,68 @@ export default function TakeawayPage() {
 
       {showNote ? (
         <TextPromptModal
-          title="Ticket note"
-          label="Note"
+          title={t.taNoteLabel}
+          label={t.taNoteLabel}
           initialValue={ticketNote}
-          placeholder="Allergy, packing, call when ready…"
-          confirmLabel="Save"
-          cancelLabel="Close"
+          placeholder={t.taNoteLabel}
+          confirmLabel={t.save}
+          cancelLabel={t.printClose}
           onClose={() => setShowNote(false)}
           onConfirm={(value) => {
-            setTicketNote(value)
+            const cleaned = value.trim()
+            setTicketNote(cleaned)
             setShowNote(false)
-            if (value) flash('Note saved')
+            if (selected) updateTicket(selected.id, { note: cleaned || undefined })
+            if (cleaned) flash(t.save)
           }}
         />
       ) : null}
 
       {showCancel && selected ? (
         <ConfirmModal
-          title="Cancel ticket"
-          message={
-            selected.lines.some((l) => l.sent)
-              ? `Cancel ${selected.customer}? Kitchen may already have items.`
-              : `Cancel ${selected.customer}? This removes the ticket from the queue.`
-          }
-          confirmLabel="Cancel ticket"
-          cancelLabel="Keep ticket"
+          title={t.taCancelTicket}
+          message={`${t.taCancelTicket} · ${selected.customer}?`}
+          confirmLabel={t.taCancelTicket}
+          cancelLabel={t.cancel}
           danger
           onClose={() => setShowCancel(false)}
           onConfirm={confirmCancel}
+        />
+      ) : null}
+
+      {voidTarget ? (
+        <TextPromptModal
+          title={t.diVoidTitle.replace('{name}', voidTarget.name)}
+          label={t.diVoidReason}
+          initialValue={t.diVoidDefault}
+          placeholder={t.diReason}
+          confirmLabel={t.diVoidItem}
+          cancelLabel={t.cancel}
+          onClose={() => setVoidTarget(null)}
+          onConfirm={(reason) => {
+            const target = voidTarget
+            setVoidTarget(null)
+            voidTicketLine(target.ticketId, target.lineId, reason || t.diVoidDefault, user?.name)
+          }}
+        />
+      ) : null}
+
+      {noteTarget ? (
+        <TextPromptModal
+          title={t.diNoteTitle.replace('{name}', noteTarget.name)}
+          label={t.diItemNote}
+          initialValue={noteTarget.note}
+          placeholder={t.diNotePlaceholder}
+          confirmLabel={t.diSaveNote}
+          cancelLabel={t.cancel}
+          suggestions={ITEM_NOTE_SUGGESTIONS}
+          onClose={() => setNoteTarget(null)}
+          onConfirm={(note) => {
+            const target = noteTarget
+            setNoteTarget(null)
+            setTicketLineNote(target.ticketId, target.lineId, note)
+            flash(t.save)
+          }}
         />
       ) : null}
 

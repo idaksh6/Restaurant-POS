@@ -1,0 +1,8 @@
+{
+  "name": "isarva-print-agent",
+  "productName": "Isarva POS Print Agent",
+  "description": "Isarva POS Print Agent — prints KOT, bills and receipts to thermal printers",
+  "author": "Isarva Infotech",
+  "version": "1.0.0",
+  "main": "main.cjs"
+}

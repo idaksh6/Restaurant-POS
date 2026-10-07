@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   allNavKeys,
   emptyRolePrivileges,
@@ -17,22 +17,32 @@ import {
 } from '../auth/roles'
 import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
-import { cashFromLedger, ledgerForDay, tenderTotals, todayKey } from '../data/ledger'
-import { money } from '../data/mock'
+import ReceiptModal, { type ReceiptData } from '../components/ReceiptModal'
+import { cashFromLedger, ledgerForDay, tenderTotals, todayKey, type LedgerEntry } from '../data/ledger'
+import { lineTotal, money, type OpenTicket, type OrderLine } from '../data/mock'
+import { useSync } from '../sync/SyncContext'
+import { loadExpenseDetails, loadExpenseTypes } from '../data/paymentTypes'
+import { attachZatcaToReceipt, resolveZatcaForSale } from '../hardware/zatca'
+import { allocateBillNo, formatOrderId } from '../lib/receiptIds'
+import { dailyJournalCsv } from '../lib/accountingJournal'
+import { downloadText, toCsv } from '../lib/dataTransfer'
 import { personDisplayName } from '../lib/branding'
 import { buildStaffOnShift, resolveStaffDisplayName } from '../lib/staffOnShift'
 import { useBranchUsers } from '../hooks/useBranchUsers'
 import { useManagedRoles } from '../hooks/useManagedRoles'
 import { apiAccessReady, apiSaveRole } from '../lib/apiAccess'
 import { settingsHubPath } from '../lib/settingsHub'
+import { ticketHref } from '../lib/ticketHref'
 import { localeTag, navI18n, useI18n } from '../locale/i18n'
+import { hoursByEmployee, punchHours } from '../data/timeClock'
 import { useAuth } from '../state/AuthContext'
 import { usePos } from '../state/PosContext'
 import { useShift } from '../state/ShiftContext'
+import { useTimeClock } from '../state/TimeClockContext'
 
-type Tab = 'overview' | 'sales' | 'day' | 'shift' | 'voids' | 'discounts' | 'roles'
+type Tab = 'overview' | 'sales' | 'day' | 'shift' | 'clock' | 'voids' | 'discounts' | 'roles'
 
-const TAB_IDS: Tab[] = ['overview', 'sales', 'day', 'shift', 'voids', 'discounts', 'roles']
+const TAB_IDS: Tab[] = ['overview', 'sales', 'day', 'shift', 'clock', 'voids', 'discounts', 'roles']
 
 function parseBoTab(value: string | null): Tab {
   if (value && TAB_IDS.includes(value as Tab)) return value as Tab
@@ -168,6 +178,73 @@ function IconStaff() {
     </BoIcon>
   )
 }
+function IconExport() {
+  return (
+    <BoIcon>
+      <path d="M12 3v12" />
+      <path d="M8 11l4 4 4-4" />
+      <path d="M4 19h16" />
+    </BoIcon>
+  )
+}
+function IconRefresh() {
+  return (
+    <BoIcon>
+      <path d="M20 12a8 8 0 1 1-2.2-5.5" />
+      <path d="M20 4v5h-5" />
+    </BoIcon>
+  )
+}
+function IconCheck() {
+  return (
+    <BoIcon>
+      <path d="M5 12.5 10 17l9-10" />
+    </BoIcon>
+  )
+}
+function IconWarn() {
+  return (
+    <BoIcon>
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+      <path d="M10.3 4.3 2.8 17.2A2 2 0 0 0 4.5 20h15a2 2 0 0 0 1.7-2.8L13.7 4.3a2 2 0 0 0-3.4 0Z" />
+    </BoIcon>
+  )
+}
+function IconMobile() {
+  return (
+    <BoIcon>
+      <rect x="8" y="3" width="8" height="18" rx="2" />
+      <path d="M11 17h2" />
+    </BoIcon>
+  )
+}
+function IconBank() {
+  return (
+    <BoIcon>
+      <path d="M3 10h18" />
+      <path d="M5 10v8M9 10v8M15 10v8M19 10v8" />
+      <path d="M4 18h16" />
+      <path d="M12 4 3 10h18L12 4Z" />
+    </BoIcon>
+  )
+}
+function IconPie() {
+  return (
+    <BoIcon>
+      <path d="M12 3a9 9 0 1 0 9 9h-9V3Z" />
+      <path d="M14.2 3.4A9 9 0 0 1 21 12h-6.8V3.4Z" />
+    </BoIcon>
+  )
+}
+
+function tenderBucket(method: string): 'cash' | 'card' | 'mobile' | 'other' {
+  const m = method.toLowerCase()
+  if (/cash|نقد/.test(m)) return 'cash'
+  if (/mada|visa|master|card|debit|credit|بطاق/.test(m)) return 'card'
+  if (/stc|apple|google|wallet|urpay|mobile|pay|محفظ/.test(m)) return 'mobile'
+  return 'other'
+}
 
 function localizedRoleName(role: ManagedRole, lang: 'en' | 'ar') {
   if (lang === 'ar' && role.nameAr?.trim()) return role.nameAr.trim()
@@ -221,8 +298,13 @@ export default function BackOfficePage() {
     closeDay,
     reopenDay,
     flash,
+    upsertLedger,
   } = usePos()
   const { activeShift, history, openShift, closeShift } = useShift()
+  const { punches, getOpenPunch, clockIn, clockOut } = useTimeClock()
+  const { runSync } = useSync()
+  const openPunch = user ? getOpenPunch(user.id) : null
+  const hoursRows = useMemo(() => hoursByEmployee(punches), [punches])
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = parseBoTab(searchParams.get('tab'))
 
@@ -234,6 +316,78 @@ export default function BackOfficePage() {
   const [countedCash, setCountedCash] = useState('')
   const [floatAmt, setFloatAmt] = useState('200')
   const [shiftCounted, setShiftCounted] = useState('')
+  const [ledgerReceipt, setLedgerReceipt] = useState<ReceiptData | null>(null)
+
+  async function printLedgerInvoice(rawEntry: LedgerEntry) {
+    // Reuse the ZATCA invoice issued at settle. Older rows never stored the id —
+    // recover it by totals + time so the reprint shows the reported Phase 2 QR,
+    // never a freshly minted Phase 1 one.
+    const resolvedUuid = await resolveZatcaForSale({
+      invoiceUuid: rawEntry.invoiceUuid,
+      total: rawEntry.total,
+      tax: rawEntry.tax,
+      at: rawEntry.at,
+    })
+    const entry: LedgerEntry =
+      resolvedUuid && resolvedUuid !== rawEntry.invoiceUuid
+        ? { ...rawEntry, invoiceUuid: resolvedUuid }
+        : rawEntry
+    const lines: OrderLine[] = (entry.lines ?? []).map((l, i) => ({
+      id: `${entry.id}-L${i}`,
+      itemId: l.itemId || `legacy-${i}`,
+      name: l.name,
+      nameAr: l.nameAr,
+      qty: l.qty,
+      price: l.price,
+    }))
+    const tableFromSource = /^Table\s+(.+?)(?:\s*[·•|]|$)/i.exec(entry.source)?.[1]?.trim()
+    const needsIdentity = entry.billNo == null || !entry.orderId
+    const patched: LedgerEntry = needsIdentity
+      ? {
+          ...entry,
+          billNo: entry.billNo ?? allocateBillNo(),
+          orderId: entry.orderId || formatOrderId(entry.id),
+          staffUsername: entry.staffUsername || entry.staff,
+          tableLabel: entry.tableLabel || tableFromSource,
+        }
+      : {
+          ...entry,
+          staffUsername: entry.staffUsername || entry.staff,
+          tableLabel: entry.tableLabel || tableFromSource,
+        }
+    if (
+      needsIdentity ||
+      entry !== rawEntry ||
+      patched.staffUsername !== entry.staffUsername ||
+      patched.tableLabel !== entry.tableLabel
+    ) {
+      upsertLedger(patched)
+    }
+    const receipt: ReceiptData = {
+      title: patched.source,
+      method: patched.method,
+      lines,
+      subtotal: patched.subtotal,
+      tax: patched.tax,
+      total: patched.total,
+      discountAmt: patched.discountAmt,
+      charges: patched.charges?.map((c) => ({ name: c.name, amount: c.amount })),
+      loyaltyRedeem: patched.loyaltyRedeem,
+      splitPayments: patched.splitPayments,
+      tendered: patched.tendered,
+      change: patched.change,
+      staff: patched.staff,
+      staffUsername: patched.staffUsername || patched.staff,
+      billNo: patched.billNo,
+      orderId: patched.orderId,
+      tableLabel: patched.tableLabel,
+      invoiceUuid: patched.invoiceUuid,
+      time: new Date(patched.at).toLocaleString(),
+      kind: 'paid',
+    }
+    setLedgerReceipt(attachZatcaToReceipt(receipt, { createIfMissing: false }))
+  }
+
   const { roles: managedRoles, loading: rolesLoading } = useManagedRoles(cid)
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null)
   const [roleDraft, setRoleDraft] = useState<CustomPrivileges | null>(null)
@@ -268,6 +422,7 @@ export default function BackOfficePage() {
       { id: 'sales', label: t.boTabSalesLedger, icon: <IconLedger /> },
       { id: 'day', label: t.boTabDayClose, icon: <IconDay /> },
       { id: 'shift', label: t.boTabShift, icon: <IconShift /> },
+      { id: 'clock', label: t.boTabClock, icon: <IconShift /> },
       { id: 'voids', label: t.boTabVoidReport, icon: <IconVoid /> },
       { id: 'discounts', label: t.boTabDiscountReport, icon: <IconDiscount /> },
       { id: 'roles', label: t.boTabRoles, icon: <IconRoles /> },
@@ -302,8 +457,110 @@ export default function BackOfficePage() {
   const salesTotal = sales.reduce((s, e) => s + e.total, 0)
   const openTables = tables.filter((t) => t.status === 'occupied' || t.status === 'billing')
   const openTickets = tickets.length
+  const voidsTotal = voids.reduce((s, e) => s + Math.abs(e.total), 0)
+  const discountsTotal = discounts.reduce((s, e) => s + Math.abs(e.total), 0)
   const isAdmin = user?.role === 'admin'
   const q = search.trim().toLowerCase()
+
+  const paymentBuckets = useMemo(() => {
+    const buckets = {
+      cash: 0,
+      card: 0,
+      mobile: 0,
+      other: 0,
+    }
+    for (const [method, amount] of Object.entries(tenders)) {
+      buckets[tenderBucket(method)] += amount
+    }
+    const total = Object.values(buckets).reduce((s, n) => s + n, 0) || 1
+    return [
+      { id: 'cash' as const, label: t.boPayCash, amount: buckets.cash, tone: 'green' },
+      { id: 'card' as const, label: t.boPayCard, amount: buckets.card, tone: 'blue' },
+      { id: 'mobile' as const, label: t.boPayMobile, amount: buckets.mobile, tone: 'violet' },
+      { id: 'other' as const, label: t.boOther, amount: buckets.other, tone: 'rose' },
+    ].map((row) => ({ ...row, pct: (row.amount / total) * 100 }))
+  }, [tenders, t.boPayCash, t.boPayCard, t.boPayMobile, t.boOther])
+
+  const openTicketRows = useMemo(() => {
+    const typeLabel = (tk: OpenTicket) => {
+      if (tk.id.startsWith('qs-')) return 'Quick Serve'
+      if (tk.id.startsWith('dt-')) return 'Drive Thru'
+      if (tk.id.startsWith('bc-') || tk.channel === 'barcode') return 'Barcode'
+      const ch = (tk.channel || '').toLowerCase()
+      if (ch.includes('drive') || ch.includes('dt')) return 'Drive Thru'
+      if (tk.type === 'dine-in') return 'Dine-in'
+      if (tk.type === 'takeaway') return 'Walk-in'
+      if (tk.type === 'delivery') return 'Delivery'
+      if (tk.type === 'online') return 'Online'
+      return 'Ticket'
+    }
+    const formatOpened = (raw?: string) => {
+      if (!raw) return '—'
+      const ms = Date.parse(raw)
+      if (!Number.isFinite(ms)) return '—'
+      return new Date(ms).toLocaleTimeString(localeTag(lang), {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    }
+    return tickets
+      .filter((tk) => tk.checkStatus !== 'settled' && tk.checkStatus !== 'merged' && !tk.mergedIntoTableId)
+      .map((tk, idx) => {
+        const tableLabel = tk.tableId
+          ? tables.find((tb) => tb.id === tk.tableId)?.label
+          : undefined
+        const num = String(tk.id).replace(/\D/g, '').slice(-3) || String(idx + 1)
+        const name =
+          tableLabel ||
+          (tk.customer?.trim() ? tk.customer.trim() : `#${num} ${typeLabel(tk)}`)
+        const items = tk.lines.reduce((s, l) => s + l.qty, 0)
+        const goods = lineTotal(tk.lines)
+        const amount =
+          typeof tk.amount === 'number' && tk.amount > 0 ? tk.amount : goods
+        return {
+          id: tk.id,
+          idx: idx + 1,
+          name,
+          openedAt: formatOpened(tk.openedAt),
+          items,
+          amount,
+          href: ticketHref(tk),
+        }
+      })
+  }, [tickets, tables, lang])
+
+  const salesTrend = useMemo(() => {
+    const yesterday = new Date()
+    yesterday.setHours(12, 0, 0, 0)
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yKey = todayKey(yesterday)
+    const yTotal = ledgerForDay(ledger, yKey)
+      .filter((e) => e.type === 'sale' && e.source !== 'Day Close')
+      .reduce((s, e) => s + e.total, 0)
+    if (yTotal <= 0) return { pct: 0, dir: 'flat' as const }
+    const raw = Math.round(((salesTotal - yTotal) / yTotal) * 100)
+    if (raw > 0) return { pct: raw, dir: 'up' as const }
+    if (raw < 0) return { pct: Math.abs(raw), dir: 'down' as const }
+    return { pct: 0, dir: 'flat' as const }
+  }, [ledger, salesTotal])
+
+  async function refreshDayClose() {
+    try {
+      await runSync({ force: true, quiet: true })
+      flash(t.refreshOk)
+    } catch {
+      flash(t.refreshOffline, 'err')
+    }
+  }
+
+  function exportDayJournal() {
+    const types = loadExpenseTypes()
+    const csv = dailyJournalCsv(day, ledger, loadExpenseDetails(), (id) =>
+      types.find((x) => x.id === id)?.name ?? id,
+    )
+    downloadText(`mesa-journal-${day}.csv`, csv)
+    flash(t.boJournalCsvOk)
+  }
 
   const hourly = useMemo(() => {
     const buckets = Array.from({ length: 24 }, (_, h) => ({
@@ -530,41 +787,52 @@ export default function BackOfficePage() {
 
         <div className="bo-metrics">
           <article className="bo-metric tone-teal">
-            <span className="bo-metric-ico">
+            <span className="bo-metric-ico" aria-hidden>
               <IconSales />
             </span>
-            <div>
-              <span>{t.boTodaySales}</span>
-              <strong>{fmtMoney(salesTotal)}</strong>
+            <div className="bo-metric-body">
+              <span className="bo-metric-label">{t.boTodaySales}</span>
+              <strong className="bo-metric-value">{fmtMoney(salesTotal)}</strong>
+              <span className="bo-metric-sub">{t.boMetricVsPrevDay}</span>
             </div>
+            <em className={`bo-metric-badge ${salesTrend.dir}`}>
+              {salesTrend.dir === 'up' ? '↑' : salesTrend.dir === 'down' ? '↓' : '−'}{' '}
+              {salesTrend.pct}%
+            </em>
           </article>
           <article className="bo-metric tone-amber">
-            <span className="bo-metric-ico">
+            <span className="bo-metric-ico" aria-hidden>
               <IconCash />
             </span>
-            <div>
-              <span>{t.boCashExpected}</span>
-              <strong>{fmtMoney(expectedCash)}</strong>
+            <div className="bo-metric-body">
+              <span className="bo-metric-label">{t.boCashExpected}</span>
+              <strong className="bo-metric-value">{fmtMoney(expectedCash)}</strong>
+              <span className="bo-metric-sub">{t.boMetricAsPerSystem}</span>
             </div>
+            <em className="bo-metric-badge flat">− 0%</em>
           </article>
           <article className="bo-metric tone-blue">
-            <span className="bo-metric-ico">
+            <span className="bo-metric-ico" aria-hidden>
               <IconTables />
             </span>
-            <div>
-              <span>{t.boOpenTablesTickets}</span>
-              <strong>
+            <div className="bo-metric-body">
+              <span className="bo-metric-label">{t.boOpenTablesTickets}</span>
+              <strong className="bo-metric-value">
                 {openTables.length} / {openTickets}
               </strong>
+              <span className="bo-metric-sub">{t.boMetricInProgress}</span>
             </div>
           </article>
-          <article className={`bo-metric ${dayIsClosed ? 'tone-rose' : 'tone-green'}`}>
-            <span className="bo-metric-ico">
+          <article className={`bo-metric ${dayIsClosed ? 'tone-rose' : 'tone-violet'}`}>
+            <span className="bo-metric-ico" aria-hidden>
               <IconDay />
             </span>
-            <div>
-              <span>{t.boDayStatus}</span>
-              <strong>{dayIsClosed ? t.boClosed : t.boOpen}</strong>
+            <div className="bo-metric-body">
+              <span className="bo-metric-label">{t.boDayStatus}</span>
+              <strong className="bo-metric-value">{dayIsClosed ? t.boClosed : t.boOpen}</strong>
+              <span className="bo-metric-sub">
+                {dayIsClosed ? t.boMetricDayClosed : t.boMetricDayOpen}
+              </span>
             </div>
           </article>
         </div>
@@ -842,6 +1110,7 @@ export default function BackOfficePage() {
                       <th>{t.boColTax}</th>
                       <th>{t.boColTotal}</th>
                       <th>{t.boColStaff}</th>
+                      <th>{t.boColInvoice}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -856,8 +1125,23 @@ export default function BackOfficePage() {
                         <td>{fmtMoney(e.tax)}</td>
                         <td>
                           <strong>{fmtMoney(e.total)}</strong>
+                          {e.roundOff && e.roundOff > 0 ? (
+                            <div className="bo-round-off">
+                              +{fmtMoney(e.roundOff)} {t.boRoundOff}
+                            </div>
+                          ) : null}
                         </td>
                         <td>{e.staff ?? '—'}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn-ghost bo-invoice-btn"
+                            onClick={() => void printLedgerInvoice(e)}
+                            title={t.boPrintInvoice}
+                          >
+                            {t.boPrintInvoice}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -873,80 +1157,212 @@ export default function BackOfficePage() {
           ) : null}
 
           {tab === 'day' ? (
-            <section className="bo-panel">
-              <div className="bo-panel-head">
-                <h2>
-                  <IconDay /> {t.boEndOfDay}
-                </h2>
-                <span className="bo-chip">{day}</span>
-              </div>
-              {(openTables.length > 0 || openTickets > 0) && (
-                <div className="toast-banner">
-                  {t.boDayCloseWarning
-                    .replace('{tables}', String(openTables.length))
-                    .replace('{tickets}', String(openTickets))}
-                </div>
-              )}
-              <div className="bo-tenders">
-                <div className="bo-tender tone-teal">
-                  <span className="bo-tender-ico">
-                    <IconSales />
-                  </span>
-                  <strong>{t.boSalesTotal}</strong>
-                  <em>{fmtMoney(salesTotal)}</em>
-                </div>
-                <div className="bo-tender tone-amber">
-                  <span className="bo-tender-ico">
-                    <IconCash />
-                  </span>
-                  <strong>{t.boExpectedCash}</strong>
-                  <em>{fmtMoney(expectedCash)}</em>
-                </div>
-                <div className="bo-tender tone-rose">
-                  <span className="bo-tender-ico">
-                    <IconVoid />
-                  </span>
-                  <strong>{t.boVoidsDiscounts}</strong>
-                  <em>
-                    {voids.length} · {discounts.length}
-                  </em>
-                </div>
-                {Object.entries(tenders).map(([method, amt], i) => (
-                  <div key={method} className={`bo-tender tone-${['blue', 'green', 'teal', 'amber'][i % 4]}`}>
-                    <span className="bo-tender-ico">
-                      <IconTender />
-                    </span>
-                    <strong>{method}</strong>
-                    <em>{fmtMoney(amt)}</em>
+            <div className="bo-dayclose">
+              <div className="bo-dayclose-grid">
+                <section className="bo-panel bo-dayclose-main">
+                  <div className="bo-panel-head bo-dayclose-head">
+                    <div>
+                      <h2>
+                        <IconDay /> {t.boEndOfDay}
+                      </h2>
+                      <p className="bo-dayclose-lead">{t.boDayCloseLead}</p>
+                    </div>
+                    <span className="bo-chip">{day}</span>
                   </div>
-                ))}
+
+                  {(openTables.length > 0 || openTickets > 0) && (
+                    <div className="bo-dayclose-warn" role="status">
+                      <IconWarn />
+                      <span>
+                        {t.boDayCloseWarning
+                          .replace('{tables}', String(openTables.length))
+                          .replace('{tickets}', String(openTickets))}
+                      </span>
+                    </div>
+                  )}
+
+                  <ul className="bo-dayclose-rows">
+                    <li className="tone-teal">
+                      <span className="bo-dayclose-row-ico">
+                        <IconSales />
+                      </span>
+                      <strong>{t.boSalesTotal}</strong>
+                      <em>{fmtMoney(salesTotal)}</em>
+                    </li>
+                    <li className="tone-amber">
+                      <span className="bo-dayclose-row-ico">
+                        <IconCash />
+                      </span>
+                      <strong>{t.boExpectedCash}</strong>
+                      <em>{fmtMoney(expectedCash)}</em>
+                    </li>
+                    <li className="tone-rose">
+                      <span className="bo-dayclose-row-ico">
+                        <IconVoid />
+                      </span>
+                      <strong>{t.boVoidsDiscounts}</strong>
+                      <em>
+                        {voids.length + discounts.length}
+                        {voidsTotal + discountsTotal > 0
+                          ? ` · ${fmtMoney(voidsTotal + discountsTotal)}`
+                          : ''}
+                      </em>
+                    </li>
+                    {Object.entries(tenders).map(([method, amt], i) => {
+                      const tone = (['blue', 'green', 'teal', 'amber', 'violet'] as const)[i % 5]
+                      return (
+                        <li key={method} className={`tone-${tone}`}>
+                          <span className="bo-dayclose-row-ico">
+                            <IconTender />
+                          </span>
+                          <strong>{method}</strong>
+                          <em>{fmtMoney(amt)}</em>
+                        </li>
+                      )
+                    })}
+                  </ul>
+
+                  {!dayIsClosed ? (
+                    <div className="bo-dayclose-cash">
+                      <label className="field-label" htmlFor="bo-counted-cash">
+                        {t.boCountedCashDrawer}
+                      </label>
+                      <input
+                        id="bo-counted-cash"
+                        className="bo-dayclose-input"
+                        inputMode="decimal"
+                        value={countedCash}
+                        onChange={(e) => setCountedCash(e.target.value)}
+                        placeholder={String(expectedCash)}
+                      />
+                      <p className="bo-dayclose-variance">
+                        {t.boVariancePreview}{' '}
+                        <strong>{fmtMoney((Number(countedCash) || 0) - expectedCash)}</strong>
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="bo-dayclose-lock">{t.boDayClosedLock}</p>
+                  )}
+
+                  <div className="bo-dayclose-export">
+                    <button type="button" className="bo-dayclose-export-btn" onClick={exportDayJournal}>
+                      <IconExport />
+                      {t.boExportJournalCsv}
+                    </button>
+                  </div>
+                </section>
+
+                <aside className="bo-dayclose-side">
+                  <section className="bo-panel bo-dayclose-payboard">
+                    <div className="bo-panel-head bo-dayclose-payboard-head">
+                      <h2>
+                        <IconPie /> {t.boPaymentBreakdown}
+                      </h2>
+                      <button
+                        type="button"
+                        className="bo-dayclose-details"
+                        onClick={() => setTab('sales')}
+                      >
+                        {t.boViewDetails}
+                      </button>
+                    </div>
+                    <div className="bo-dayclose-paygrid">
+                      {paymentBuckets.map((row) => (
+                        <article key={row.id} className={`bo-dayclose-pay tone-${row.tone}`}>
+                          <span className="bo-dayclose-pay-ico" aria-hidden>
+                            {row.id === 'cash' ? (
+                              <IconCash />
+                            ) : row.id === 'card' ? (
+                              <IconTender />
+                            ) : row.id === 'mobile' ? (
+                              <IconMobile />
+                            ) : (
+                              <IconBank />
+                            )}
+                          </span>
+                          <div className="bo-dayclose-pay-copy">
+                            <span className="bo-dayclose-pay-label">{row.label}</span>
+                            <strong className="bo-dayclose-pay-amt">{fmtMoney(row.amount)}</strong>
+                            <em className="bo-dayclose-pay-pct">{row.pct.toFixed(0)}%</em>
+                          </div>
+                          <i
+                            className="bo-dayclose-pay-bar"
+                            style={{
+                              width: `${Math.min(100, Math.max(row.pct, row.amount > 0 ? 4 : 0))}%`,
+                            }}
+                          />
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="bo-panel">
+                    <div className="bo-panel-head">
+                      <h2>
+                        <IconTables /> {t.boOpenTablesTickets}
+                      </h2>
+                      <span className="bo-chip">{openTicketRows.length}</span>
+                    </div>
+                    {openTicketRows.length === 0 ? (
+                      <div className="bo-empty-inline">
+                        <strong>{t.boNoOpenTickets}</strong>
+                        <span>{t.boNoOpenTicketsHint}</span>
+                      </div>
+                    ) : (
+                      <div className="bo-dayclose-table-wrap">
+                        <table className="bo-dayclose-table">
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>{t.boColName}</th>
+                              <th>{t.boColOpened}</th>
+                              <th>{t.boColItems}</th>
+                              <th>{t.boColAmount}</th>
+                              <th />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {openTicketRows.map((row) => (
+                              <tr key={row.id}>
+                                <td className="mesa-ltr-nums">{row.idx}</td>
+                                <td>
+                                  <strong>{row.name}</strong>
+                                </td>
+                                <td className="mesa-ltr-nums">{row.openedAt}</td>
+                                <td className="mesa-ltr-nums">{row.items}</td>
+                                <td className="mesa-ltr-nums">{fmtMoney(row.amount)}</td>
+                                <td>
+                                  <Link to={row.href} className="bo-dayclose-view">
+                                    {t.boViewTicket}
+                                  </Link>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </section>
+                </aside>
               </div>
-              {!dayIsClosed ? (
-                <div className="bo-form">
-                  <label className="field-label">{t.boCountedCashDrawer}</label>
-                  <input
-                    className="search"
-                    inputMode="decimal"
-                    value={countedCash}
-                    onChange={(e) => setCountedCash(e.target.value)}
-                    placeholder={String(expectedCash)}
-                  />
-                  <p className="modal-lead">
-                    {t.boVariancePreview} {fmtMoney((Number(countedCash) || 0) - expectedCash)}
-                  </p>
-                  <button type="button" className="btn btn-teal" onClick={confirmDayClose}>
-                    {t.boConfirmDayClose}
+
+              <div className="bo-dayclose-footer">
+                <button type="button" className="bo-dayclose-refresh" onClick={() => void refreshDayClose()}>
+                  <IconRefresh />
+                  {t.refresh}
+                </button>
+                {!dayIsClosed ? (
+                  <button type="button" className="bo-dayclose-close" onClick={confirmDayClose}>
+                    <IconCheck />
+                    {t.boCloseDay}
                   </button>
-                </div>
-              ) : (
-                <div className="bo-form">
-                  <p className="modal-lead">{t.boDayClosedLock}</p>
-                  <button type="button" className="btn btn-primary" onClick={() => reopenDay()}>
+                ) : (
+                  <button type="button" className="bo-dayclose-close reopen" onClick={() => reopenDay()}>
                     {t.boReopenDay}
                   </button>
-                </div>
-              )}
-            </section>
+                )}
+              </div>
+            </div>
           ) : null}
 
           {tab === 'shift' ? (
@@ -1025,6 +1441,100 @@ export default function BackOfficePage() {
                   <div className="simple-item">
                     <strong>{t.boNoShifts}</strong>
                     <span>{t.boNoShiftsHint}</span>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          {tab === 'clock' ? (
+            <section className="bo-panel">
+              <div className="bo-panel-head">
+                <h2>
+                  <IconShift /> {t.boTabClock}
+                </h2>
+                <span className="bo-chip">{user?.name}</span>
+              </div>
+              <div className="bo-form">
+                <p className="modal-lead">{t.boClockHint}</p>
+                {openPunch ? (
+                  <>
+                    <p>
+                      {t.boClockSince}{' '}
+                      <strong>{new Date(openPunch.clockInAt).toLocaleString(localeTag(lang))}</strong>
+                      {' · '}
+                      {t.boClockHoursSoFar.replace('{hours}', String(punchHours(openPunch)))}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        if (!user) return
+                        const res = clockOut(user.id)
+                        flash(res.message)
+                      }}
+                    >
+                      {t.boClockOut}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-teal"
+                    onClick={() => {
+                      if (!user) return
+                      const res = clockIn(user.id, user.name)
+                      flash(res.message)
+                    }}
+                  >
+                    {t.boClockIn}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ marginInlineStart: '0.5rem' }}
+                  onClick={() => {
+                    const csv = toCsv(
+                      ['userId', 'userName', 'hours', 'punches'],
+                      hoursRows.map((r) => [r.userId, r.userName, r.hours, r.punches]),
+                    )
+                    downloadText(`mesa-hours-${day}.csv`, csv)
+                    flash(t.boHoursCsvOk)
+                  }}
+                >
+                  {t.boExportHoursCsv}
+                </button>
+              </div>
+              <div className="table-wrap" style={{ marginTop: '1rem' }}>
+                <table className="data-table bo-table">
+                  <thead>
+                    <tr>
+                      <th>{t.boColStaff}</th>
+                      <th>{t.boColIn}</th>
+                      <th>{t.boColOut}</th>
+                      <th>{t.boColHours}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {punches.slice(0, 40).map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.userName}</td>
+                        <td>{new Date(p.clockInAt).toLocaleString(localeTag(lang))}</td>
+                        <td>
+                          {p.clockOutAt
+                            ? new Date(p.clockOutAt).toLocaleString(localeTag(lang))
+                            : `— ${t.boClockOpen}`}
+                        </td>
+                        <td className="mesa-ltr-nums">{punchHours(p)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {punches.length === 0 ? (
+                  <div className="ticket-empty">
+                    <strong>{t.boNoPunches}</strong>
+                    {t.boNoPunchesHint}
                   </div>
                 ) : null}
               </div>
@@ -1320,6 +1830,9 @@ export default function BackOfficePage() {
       </div>
 
       <HubFooter backTo={settingsHubPath('accounts')} backLabel={t.accounts} />
+      {ledgerReceipt ? (
+        <ReceiptModal receipt={ledgerReceipt} onClose={() => setLedgerReceipt(null)} reprint />
+      ) : null}
     </div>
   )
 }

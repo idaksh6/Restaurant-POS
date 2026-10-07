@@ -1,0 +1,112 @@
+/* Access denied — centered card, mobile-first */
+
+.app-shell:has(.zk-access-denied) .main-stage {
+  padding: 0 !important;
+  display: flex !important;
+  overflow: auto !important;
+  min-height: 0;
+}
+
+.zk-access-denied {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem
+    max(1.25rem, env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+  background:
+    radial-gradient(640px 280px at 12% 0%, rgba(31, 107, 92, 0.1), transparent 55%),
+    radial-gradient(520px 240px at 100% 8%, rgba(180, 35, 24, 0.06), transparent 50%),
+    linear-gradient(180deg, #eef3f0 0%, #e6ece8 100%);
+}
+
+.zk-access-denied-card {
+  width: min(100%, 26rem);
+  margin: 0 auto;
+  padding: 1.35rem 1.25rem 1.25rem;
+  border-radius: 18px;
+  background: #fff;
+  border: 1px solid var(--line, #d5ddd8);
+  box-shadow: var(--shadow, 0 18px 40px #12201c14);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.zk-access-denied-mark {
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto 0.85rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: #f8d7d3;
+  color: #b42318;
+}
+
+.zk-access-denied-mark svg {
+  width: 1.45rem;
+  height: 1.45rem;
+}
+
+.zk-access-denied-title {
+  display: block;
+  font-family: var(--font-display);
+  font-size: clamp(1.2rem, 3.5vw, 1.45rem);
+  font-weight: 750;
+  color: var(--ink, #12201c);
+  letter-spacing: -0.02em;
+}
+
+.zk-access-denied-lead {
+  margin: 0.55rem 0 0;
+  color: var(--ink-soft, #2a3b35);
+  font-size: 0.98rem;
+  line-height: 1.45;
+  font-weight: 650;
+}
+
+.zk-access-denied-hint {
+  margin: 0.45rem 0 0;
+  color: var(--muted, #5f7169);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.zk-access-denied-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.55rem;
+  margin-top: 1.25rem;
+}
+
+.zk-access-denied-btn {
+  min-height: var(--touch-min, 44px);
+  min-width: 8.5rem;
+  justify-content: center;
+}
+
+@media (max-width: 560px) {
+  .zk-access-denied {
+    place-items: end center;
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  .zk-access-denied-card {
+    width: 100%;
+    border-radius: 18px 18px 14px 14px;
+    padding: 1.2rem 1rem 1.1rem;
+  }
+
+  .zk-access-denied-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .zk-access-denied-btn {
+    width: 100%;
+    min-width: 0;
+  }
+}

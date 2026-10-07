@@ -1,0 +1,47 @@
+.dev-license-badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: 1px solid #c5d0cb;
+  background: #eef2ef;
+  color: #2a3b35;
+}
+
+.dev-license-badge.st-active {
+  background: #d8f0e2;
+  border-color: #8fcdb0;
+  color: #1f7a45;
+}
+
+.dev-license-badge.st-pending {
+  background: #f6e7c8;
+  border-color: #e0c58a;
+  color: #8a5a10;
+}
+
+.dev-license-badge.st-expired,
+.dev-license-badge.st-suspended {
+  background: #f8d7d3;
+  border-color: #e5a39c;
+  color: #9b2c2c;
+}
+
+.dev-meta-hint {
+  color: #5f7169;
+  font-size: 0.85em;
+}
+
+.dev-license-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #d5ddd8;
+  border-radius: 12px;
+  background: #f7f9f7;
+}

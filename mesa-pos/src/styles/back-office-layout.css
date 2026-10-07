@@ -145,3 +145,776 @@
 html[dir='rtl'] .zk-bo .bo-tabs {
   direction: rtl;
 }
+
+.bo-round-off {
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted, #5f7169);
+}
+
+.bo-invoice-btn {
+  padding: 0.28rem 0.55rem !important;
+  font-size: 0.78rem !important;
+  min-height: 2rem;
+  white-space: nowrap;
+}
+
+/* -- Metric cards (mockup) ------------------------------------ */
+
+.zk-bo .bo-metric {
+  position: relative;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-height: 5.25rem;
+  padding: 0.9rem 1rem 0.85rem;
+  overflow: hidden;
+}
+
+.zk-bo .bo-metric-body {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  padding-inline-end: 3.25rem;
+}
+
+.zk-bo .bo-metric-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-transform: none;
+  line-height: 1.25;
+}
+
+.zk-bo .bo-metric-value {
+  margin-top: 0.05rem;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 1.22rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.zk-bo .bo-metric-sub {
+  margin-top: 0.15rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.zk-bo .bo-metric-badge {
+  position: absolute;
+  top: 0.65rem;
+  inset-inline-end: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.zk-bo .bo-metric-badge.up {
+  color: #116b3f;
+  background: #e7f6ee;
+}
+
+.zk-bo .bo-metric-badge.down {
+  color: #9b1c1c;
+  background: #fdecea;
+}
+
+.zk-bo .bo-metric-badge.flat {
+  color: #9a4318;
+  background: #f8ebe5;
+}
+
+.zk-bo .bo-metric.tone-teal .bo-metric-sub {
+  color: #1f6b5c;
+}
+
+.zk-bo .bo-metric.tone-amber .bo-metric-sub {
+  color: #c45c26;
+}
+
+.zk-bo .bo-metric.tone-amber .bo-metric-badge.flat {
+  color: #c45c26;
+  background: #f8ebe5;
+}
+
+.zk-bo .bo-metric.tone-blue .bo-metric-sub {
+  color: #2f6fed;
+}
+
+.zk-bo .bo-metric.tone-violet .bo-metric-sub {
+  color: #7c3aed;
+}
+
+.zk-bo .bo-metric.tone-rose .bo-metric-sub {
+  color: var(--danger);
+}
+
+.zk-bo .bo-metric.tone-violet {
+  border-color: color-mix(in srgb, #7c3aed 28%, var(--line));
+  background: linear-gradient(180deg, #f3eefc 0%, #fff 72%);
+}
+
+.zk-bo .bo-metric.tone-violet .bo-metric-ico {
+  color: #7c3aed;
+  background: #ebe4fb;
+}
+
+.zk-bo .bo-metric-ico {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 14px;
+}
+
+.zk-bo .bo-metric-ico .bo-ico {
+  width: 1.3rem;
+  height: 1.3rem;
+}
+
+@media (max-width: 960px) {
+  .zk-bo .bo-metric-body {
+    padding-inline-end: 0;
+  }
+
+  .zk-bo .bo-metric-badge {
+    position: static;
+    justify-self: start;
+    margin-top: 0.15rem;
+  }
+
+  .zk-bo .bo-metric {
+    flex-wrap: wrap;
+  }
+
+  .zk-bo .bo-metric-body {
+    flex: 1 1 calc(100% - 3.5rem);
+  }
+
+  .zk-bo .bo-metric-badge {
+    margin-inline-start: auto;
+  }
+}
+
+.bo-dayclose {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.bo-dayclose-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(17rem, 0.9fr);
+  align-items: start;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.bo-dayclose-side {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.bo-dayclose-head {
+  align-items: flex-start;
+}
+
+.bo-dayclose-lead {
+  margin: 0.35rem 0 0;
+  max-width: 36rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.bo-dayclose-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #f0c98a;
+  border-radius: 12px;
+  background: #fff6e8;
+  color: #7a3c00;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.bo-dayclose-warn .bo-ico {
+  flex-shrink: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.1rem;
+  color: #c45c26;
+}
+
+.bo-dayclose-rows {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.bo-dayclose-rows li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.72rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f7faf8;
+}
+
+.bo-dayclose-rows li strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.bo-dayclose-rows li em {
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.bo-dayclose-row-ico {
+  display: grid;
+  place-items: center;
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.bo-dayclose-rows li.tone-teal {
+  border-color: color-mix(in srgb, var(--teal) 24%, var(--line));
+  background: color-mix(in srgb, var(--teal) 7%, #fff);
+}
+
+.bo-dayclose-rows li.tone-teal .bo-dayclose-row-ico,
+.bo-dayclose-rows li.tone-teal em {
+  color: var(--teal);
+}
+
+.bo-dayclose-rows li.tone-teal .bo-dayclose-row-ico {
+  background: color-mix(in srgb, var(--teal) 14%, #fff);
+}
+
+.bo-dayclose-rows li.tone-amber {
+  border-color: color-mix(in srgb, #c45c26 24%, var(--line));
+  background: #fbf4f0;
+}
+
+.bo-dayclose-rows li.tone-amber .bo-dayclose-row-ico,
+.bo-dayclose-rows li.tone-amber em {
+  color: #c45c26;
+}
+
+.bo-dayclose-rows li.tone-amber .bo-dayclose-row-ico {
+  background: #f7e8e1;
+}
+
+.bo-dayclose-rows li.tone-rose {
+  border-color: color-mix(in srgb, var(--danger) 24%, var(--line));
+  background: color-mix(in srgb, var(--danger) 7%, #fff);
+}
+
+.bo-dayclose-rows li.tone-rose .bo-dayclose-row-ico,
+.bo-dayclose-rows li.tone-rose em {
+  color: var(--danger);
+}
+
+.bo-dayclose-rows li.tone-rose .bo-dayclose-row-ico {
+  background: color-mix(in srgb, var(--danger) 14%, #fff);
+}
+
+.bo-dayclose-rows li.tone-blue {
+  border-color: color-mix(in srgb, #2f6fed 24%, var(--line));
+  background: #f0f5fe;
+}
+
+.bo-dayclose-rows li.tone-blue .bo-dayclose-row-ico,
+.bo-dayclose-rows li.tone-blue em {
+  color: #2f6fed;
+}
+
+.bo-dayclose-rows li.tone-blue .bo-dayclose-row-ico {
+  background: #e2ebfc;
+}
+
+.bo-dayclose-rows li.tone-green {
+  border-color: color-mix(in srgb, var(--ok) 24%, var(--line));
+  background: color-mix(in srgb, var(--ok) 7%, #fff);
+}
+
+.bo-dayclose-rows li.tone-green .bo-dayclose-row-ico,
+.bo-dayclose-rows li.tone-green em {
+  color: var(--ok);
+}
+
+.bo-dayclose-rows li.tone-green .bo-dayclose-row-ico {
+  background: color-mix(in srgb, var(--ok) 14%, #fff);
+}
+
+.bo-dayclose-rows li.tone-violet {
+  border-color: color-mix(in srgb, #7c3aed 24%, var(--line));
+  background: #f6f1fd;
+}
+
+.bo-dayclose-rows li.tone-violet .bo-dayclose-row-ico,
+.bo-dayclose-rows li.tone-violet em {
+  color: #7c3aed;
+}
+
+.bo-dayclose-rows li.tone-violet .bo-dayclose-row-ico {
+  background: #ebe4fb;
+}
+
+.bo-dayclose-cash {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.9rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-2);
+}
+
+.bo-dayclose-input {
+  width: 100%;
+  min-height: 2.65rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  box-sizing: border-box;
+}
+
+.bo-dayclose-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--teal) 45%, transparent);
+  border-color: var(--teal);
+}
+
+.bo-dayclose-variance {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.bo-dayclose-variance strong {
+  color: var(--ink);
+  font-family: var(--font-display);
+}
+
+.bo-dayclose-lock {
+  margin: 0 0 0.9rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.bo-dayclose-export {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.bo-dayclose-export-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.bo-dayclose-export-btn:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.bo-dayclose-export-btn .bo-ico {
+  width: 1rem;
+  height: 1rem;
+}
+
+.bo-dayclose-payboard {
+  padding-bottom: 0.95rem;
+}
+
+.bo-dayclose-payboard-head {
+  margin-bottom: 0.65rem;
+  gap: 0.5rem;
+}
+
+.bo-dayclose-payboard-head h2 {
+  font-size: 0.9rem;
+}
+
+.bo-dayclose-details {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.85rem;
+  padding: 0.2rem 0.65rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 750;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bo-dayclose-details:hover {
+  filter: brightness(0.97);
+}
+
+.bo-dayclose-paygrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.bo-dayclose-pay {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.35rem 0.5rem;
+  min-width: 0;
+  padding: 0.55rem 0.6rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+}
+
+.bo-dayclose-pay-copy {
+  display: grid;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.bo-dayclose-pay-ico {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.bo-dayclose-pay-ico .bo-ico {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.bo-dayclose-pay-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+}
+
+.bo-dayclose-pay-amt {
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.bo-dayclose-pay-pct {
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 750;
+  line-height: 1.2;
+  opacity: 0.9;
+}
+
+.bo-dayclose-pay-bar {
+  grid-column: 1 / -1;
+  display: block;
+  height: 0.22rem;
+  margin-top: 0.2rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.45;
+  max-width: 100%;
+}
+
+.bo-dayclose-pay.tone-green {
+  border-color: #b7e0c8;
+  background: #eef8f2;
+  color: #1f7a45;
+}
+
+.bo-dayclose-pay.tone-green .bo-dayclose-pay-ico {
+  color: #1f7a45;
+  background: #dff3e8;
+}
+
+.bo-dayclose-pay.tone-blue {
+  border-color: #b8cdf8;
+  background: #eef3fd;
+  color: #2f6fed;
+}
+
+.bo-dayclose-pay.tone-blue .bo-dayclose-pay-ico {
+  color: #2f6fed;
+  background: #e0e9fc;
+}
+
+.bo-dayclose-pay.tone-violet {
+  border-color: #d2c2f5;
+  background: #f5f0fd;
+  color: #7c3aed;
+}
+
+.bo-dayclose-pay.tone-violet .bo-dayclose-pay-ico {
+  color: #7c3aed;
+  background: #ebe4fb;
+}
+
+.bo-dayclose-pay.tone-rose {
+  border-color: #f0c0cf;
+  background: #fdf0f4;
+  color: #c2255c;
+}
+
+.bo-dayclose-pay.tone-rose .bo-dayclose-pay-ico {
+  color: #c2255c;
+  background: #fce4ec;
+}
+
+.bo-dayclose-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.bo-dayclose-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.bo-dayclose-table th,
+.bo-dayclose-table td {
+  padding: 0.65rem 0.7rem;
+  border-bottom: 1px solid #e6ece8;
+  text-align: start;
+  vertical-align: middle;
+}
+
+.bo-dayclose-table th {
+  background: #f4f7f5;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bo-dayclose-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.bo-dayclose-table td strong {
+  font-weight: 750;
+  color: var(--ink);
+}
+
+.bo-dayclose-view {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.9rem;
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--teal);
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.bo-dayclose-view:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.bo-dayclose-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.15rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, #fff 92%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 -8px 24px #12201c0f;
+}
+
+.bo-dayclose-refresh,
+.bo-dayclose-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.65rem;
+  padding: 0.45rem 1.15rem;
+  border-radius: 12px;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.bo-dayclose-refresh {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+}
+
+.bo-dayclose-refresh:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.bo-dayclose-close {
+  border: 0;
+  background: #1a4f45;
+  color: #fff;
+  box-shadow: 0 8px 18px #1a4f4538;
+  min-width: 9.5rem;
+}
+
+.bo-dayclose-close:hover {
+  filter: brightness(1.06);
+}
+
+.bo-dayclose-close.reopen {
+  background: var(--accent);
+  box-shadow: 0 8px 18px #c45c2633;
+}
+
+.bo-dayclose-refresh .bo-ico,
+.bo-dayclose-close .bo-ico {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+html[dir='rtl'] .bo-dayclose-footer {
+  justify-content: flex-start;
+}
+
+@media (max-width: 1100px) {
+  .bo-dayclose-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 960px) {
+  .zk-bo .bo-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bo-dayclose-footer {
+    position: static;
+    justify-content: stretch;
+  }
+
+  .bo-dayclose-refresh,
+  .bo-dayclose-close {
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 860px) {
+  .bo-dayclose-paygrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .zk-bo .bo-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bo-dayclose-pay {
+    padding: 0.5rem 0.55rem 0.45rem;
+  }
+
+  .bo-dayclose-pay-amt {
+    font-size: 0.84rem;
+  }
+
+  .bo-dayclose-footer {
+    flex-direction: column-reverse;
+  }
+
+  .bo-dayclose-refresh,
+  .bo-dayclose-close {
+    width: 100%;
+  }
+
+  .bo-dayclose-rows li strong {
+    white-space: normal;
+  }
+}

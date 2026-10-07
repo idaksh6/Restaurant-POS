@@ -1,0 +1,476 @@
+/* Masters desk — mobile page scroll so categories / menu items stay reachable */
+
+@media (max-width: 1100px) {
+  .app-shell:has(.zk-mst-desk) {
+    height: 100% !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-shell:has(.zk-mst-desk) .side-nav {
+    display: none !important;
+  }
+
+  .app-shell:has(.zk-mst-desk) .main-stage {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .zk-mst-desk {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .zk-mst-desk .zk-dash-header.zk-dash-header-bar {
+    flex-shrink: 0 !important;
+  }
+
+  .zk-mst-desk > .mst-page-inner {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  .zk-mst-desk > .zk-hub-foot {
+    flex-shrink: 0 !important;
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    z-index: 40 !important;
+    margin-top: 0 !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .mst-page-inner {
+    overflow: visible !important;
+  }
+
+  .mst-board {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .mst-table-wrap {
+    flex: none !important;
+    min-height: 0 !important;
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 720px) {
+  .zk-mst-desk > .mst-page-inner {
+    margin: 0.45rem 0.5rem 0.35rem !important;
+    gap: 0.65rem !important;
+  }
+
+  .mst-hero {
+    padding: 0.65rem 0.75rem !important;
+    gap: 0.5rem !important;
+  }
+
+  .mst-hero-brand h1 {
+    font-size: 1rem !important;
+  }
+
+  .mst-hero-brand p {
+    font-size: 0.7rem !important;
+  }
+
+  .mst-hero-mark {
+    width: 2rem !important;
+    height: 2rem !important;
+  }
+
+  .mst-stat em {
+    display: none;
+  }
+
+  .mst-stat {
+    padding: 0.32rem 0.45rem !important;
+  }
+
+  .mst-toolbar {
+    gap: 0.45rem !important;
+  }
+
+  .mst-filters {
+    gap: 0.4rem !important;
+    padding: 0.45rem 0.5rem !important;
+  }
+
+  /* flex:13rem grows in stacked grid and stretches the search tall */
+  .mst-filters .mst-search {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    min-height: 40px !important;
+    max-height: 40px !important;
+    padding: 0 0.65rem !important;
+  }
+
+  .mst-filters .mst-search input {
+    min-height: 0 !important;
+    padding: 0 !important;
+    line-height: 1.25 !important;
+    font-size: 0.86rem !important;
+  }
+
+  .mst-filters .mst-search .mst-ico,
+  .mst-filters .mst-search svg {
+    flex-shrink: 0 !important;
+    width: 1.05rem !important;
+    height: 1.05rem !important;
+  }
+
+  .mst-status-pills {
+    width: 100% !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.1rem !important;
+  }
+
+  .mst-pill {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+  }
+
+  .mst-add-btn {
+    min-height: 2.25rem !important;
+    padding: 0.4rem 0.75rem !important;
+    font-size: 0.82rem !important;
+  }
+}
+
+/* Custom options editor (variations + addon groups) */
+.mst-customizer-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.mst-cz-section {
+  border: 1px solid var(--line, #d5ddd8);
+  border-radius: 10px;
+  padding: 0.65rem 0.7rem;
+  background: #f8faf9;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mst-cz-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.mst-cz-head > .mst-input {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.mst-cz-minmax {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted, #5f7169);
+}
+
+.mst-cz-minmax .mst-input {
+  width: 3.4rem;
+  min-width: 3.4rem;
+}
+
+.mst-addon-master-attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.mst-addon-master-attach .mst-btn .muted {
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.mst-cz-col-labels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.5rem 2.2rem;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 750;
+  color: var(--muted, #5f7169);
+  padding: 0 0.1rem;
+}
+
+.mst-topping-group .mst-recipe-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.5rem 2.2rem;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.mst-cat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.08rem;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.mst-cat-cell strong {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--ink, #12201c);
+}
+
+.mst-cat-cell span {
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--muted, #5f7169);
+}
+
+.mst-type-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 0.16rem 0.45rem;
+}
+
+.mst-type-pill.main {
+  color: #0f766e;
+  background: #d8ebe5;
+}
+
+.mst-type-pill.sub {
+  color: #0369a1;
+  background: #e0f2fe;
+}
+
+/* Menu details (products) — stable height on cold refresh + readable category tree */
+html:has(.zk-products),
+body:has(.zk-products),
+#root:has(.zk-products) {
+  height: 100%;
+  overflow: hidden;
+}
+
+.app-shell.settings-mode:has(.zk-products) {
+  width: 100%;
+  height: 100% !important;
+  min-height: 100% !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+  grid-template-columns: 1fr !important;
+}
+
+.app-shell.settings-mode:has(.zk-products) .main-stage {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.app-shell.settings-mode .main-stage > .zk-products {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-rows: none !important;
+}
+
+.zk-products > .zk-hub-top,
+.zk-products > .zk-products-bar,
+.zk-products > .zk-products-lead,
+.zk-products > .zk-products-search {
+  flex-shrink: 0;
+}
+
+.zk-products > .zk-hub-top {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.zk-products > .zk-products-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  display: grid !important;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) !important;
+  gap: 0.85rem;
+  padding: 0.85rem 1rem 1rem;
+}
+
+.zk-products .zk-products-tree {
+  min-width: 220px !important;
+  width: auto !important;
+  overflow: auto !important;
+}
+
+.zk-products .zk-products-list {
+  min-width: 0 !important;
+  overflow: auto !important;
+}
+
+.zk-products > .zk-hub-foot {
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .zk-products > .zk-products-body {
+    grid-template-columns: 1fr !important;
+    overflow: auto !important;
+  }
+
+  .zk-products .zk-products-tree {
+    min-width: 0 !important;
+    max-height: 10rem;
+  }
+}
+
+.mst-cz-enable-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.mst-cz-enable-row .mst-hint {
+  margin: 0.2rem 0 0;
+  max-width: 28rem;
+}
+
+.zk-cz-in-products {
+  margin: 0;
+  padding: 0.25rem 0 0.5rem;
+  background: transparent;
+  border: 0;
+}
+
+.zk-cz-in-products .mst-input,
+.zk-cz-in-products .search {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.zk-products-options-jump {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin-top: 0.65rem;
+  text-align: start;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #0f766e;
+  background: #e7f5f1;
+  border: 1px solid #b7e0d5;
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+}
+
+.zk-products-options-jump:hover {
+  background: #d8ebe5;
+}
+
+.zk-product-popular {
+  position: absolute;
+  top: 0.15rem;
+  inset-inline-end: 0.15rem;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  width: auto;
+  height: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  color: #e03131;
+  background: transparent;
+  box-shadow: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+  pointer-events: none;
+}
+
+.zk-product-popular svg {
+  display: block;
+  width: 1.65rem;
+  height: 1.65rem;
+}
+
+.zk-product-card.has-photo .zk-product-popular {
+  color: #fa5252;
+  background: transparent;
+  border: none;
+}
+
+/* Roles — Screens / Actions bulk select */
+.zk-access-h-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin: 1.1rem 0 0.5rem;
+}
+
+.zk-access-h-row .zk-access-h {
+  margin: 0;
+}
+
+.zk-access-bulk {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.zk-access-bulk-btn {
+  appearance: none;
+  margin: 0;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--teal) 35%, var(--line));
+  background: color-mix(in srgb, var(--teal-soft) 70%, #fff);
+  color: var(--teal);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.zk-access-bulk-btn:hover {
+  background: var(--teal-soft);
+  border-color: var(--teal);
+}

@@ -4,10 +4,14 @@ import { getPermissions } from '../auth/roles'
 import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
 import MenuPicker from '../components/MenuPicker'
+import QtyStepper from '../components/QtyStepper'
 import SendOrdersModal from '../components/SendOrdersModal'
 import SettleModal, { type SettleResult } from '../components/SettleModal'
 import { lineTotal, money, nowTime, type OpenTicket } from '../data/mock'
 import { cashFromSettle, calcBill, recipesFromDishes } from '../lib/bill'
+import { loadCompanyProfile } from '../data/company'
+import { peekDishes } from '../data/repos/mastersRepo'
+import { loadTaxes, orderTaxBillOptions } from '../data/tax'
 import { resolveDeliveryColumn, type DeliveryColumn } from '../lib/deliveryBoard'
 import {
   apiAcceptChannelOrder,
@@ -15,7 +19,6 @@ import {
   pushChannelStatusQuiet,
 } from '../lib/apiDeliveryChannels'
 import {
-  channelDeliverActionLabel,
   channelIsPrepaid,
   isExternalChannelOrder,
   KSA_DELIVERY_CHANNELS,
@@ -23,9 +26,16 @@ import {
   resolveDeliveryChannel,
 } from '../lib/ksaDelivery'
 import { apiIngestDelivery, apiMastersReady } from '../lib/apiMasters'
+import {
+  channelHonestyStatus,
+  channelConfigFor,
+} from '../data/deliveryIntegrations'
+import { guestOrderUrl } from '../data/guestOrder'
 import { onlineChannels } from '../locale/saudi'
+import { useI18n } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
 import { useBranch } from '../state/BranchContext'
+import { useCatalog } from '../state/CatalogContext'
 import { useCrm } from '../state/CrmContext'
 import { useMasters } from '../state/MastersContext'
 import { usePos } from '../state/PosContext'
@@ -38,14 +48,6 @@ type ChannelFilter = 'all' | (typeof onlineChannels)[number]
 const ONLINE_CHANNEL_META = KSA_DELIVERY_CHANNELS.filter((c) =>
   (onlineChannels as readonly string[]).includes(c.id),
 )
-
-const COLUMNS: Array<{ id: DeliveryColumn; label: string; hint: string }> = [
-  { id: 'new', label: 'New', hint: 'Accept & send KOT' },
-  { id: 'preparing', label: 'Kitchen', hint: 'In progress' },
-  { id: 'ready', label: 'Ready', hint: 'Hand to courier' },
-  { id: 'dispatched', label: 'Out', hint: 'Platform pickup' },
-  { id: 'delivered', label: 'Settle', hint: 'Close prepaid' },
-]
 
 function OlIcon({ children }: { children: ReactNode }) {
   return (
@@ -172,16 +174,42 @@ function onlineNo(ticket: OpenTicket, list: OpenTicket[]) {
 function ticketAmount(ticket: OpenTicket) {
   const goods = lineTotal(ticket.lines)
   const fee = ticket.deliveryFee ?? 0
-  return calcBill(goods, 0, fee > 0 ? [{ id: 'fee', name: 'Delivery fee', amount: fee }] : []).total
+  return calcBill(
+    goods,
+    0,
+    fee > 0 ? [{ id: 'fee', name: 'Delivery fee', amount: fee }] : [],
+    orderTaxBillOptions(
+      ticket.lines,
+      peekDishes(),
+      loadTaxes(),
+      loadCompanyProfile().enableTax !== false,
+    ),
+  ).total
 }
 
 export default function OnlinePage() {
   const { user } = useAuth()
+  const { t, lang } = useI18n()
   const perms = user ? getPermissions(user.role) : getPermissions('cashier')
+  const columns: Array<{ id: DeliveryColumn; label: string; hint: string }> = useMemo(
+    () => [
+      { id: 'new', label: t.taStatusNew, hint: t.olColNewHint },
+      { id: 'preparing', label: t.olColKitchen, hint: t.olColKitchenHint },
+      { id: 'ready', label: t.dlReady, hint: t.olColReadyHint },
+      { id: 'dispatched', label: t.dlColOut, hint: t.olColOutHint },
+      { id: 'delivered', label: t.settle, hint: t.olColSettleHint },
+    ],
+    [t],
+  )
+  function deliverActionLabel(channel?: string) {
+    const c = resolveDeliveryChannel(channel)
+    return c.fleet === 'platform' ? t.dlHandToCourierSettle : t.dlDeliverAndSettle
+  }
   const { customers, earnPoints, redeemPoints } = useCrm()
   const { dishes } = useMasters()
+  const { taxes } = useCatalog()
   const { addCashIn } = useShift()
-  const { activeBranchId } = useBranch()
+  const { activeBranchId, company } = useBranch()
   const { runSync } = useSync()
   const {
     tickets,
@@ -281,8 +309,14 @@ export default function OnlinePage() {
   const goods = lineTotal(lines)
   const fee = selected?.deliveryFee ?? 0
   const bill = useMemo(
-    () => calcBill(goods, 0, fee > 0 ? [{ id: 'delivery-fee', name: 'Delivery fee', amount: fee }] : []),
-    [goods, fee],
+    () =>
+      calcBill(
+        goods,
+        0,
+        fee > 0 ? [{ id: 'delivery-fee', name: t.dlDeliveryFee, amount: fee }] : [],
+        orderTaxBillOptions(lines, dishes, taxes, company.enableTax !== false),
+      ),
+    [goods, fee, lines, dishes, taxes, company.enableTax, t.dlDeliveryFee],
   )
   const { total, taxable } = bill
   const selectedCol = selected ? resolveDeliveryColumn(selected) : null
@@ -306,14 +340,14 @@ export default function OnlinePage() {
       } else {
         updateTicket(ticket.id, { channelAcceptStatus: 'accepted', deliveryStatus: 'new' })
       }
-      flash(`Accepted · ${resolveDeliveryChannel(ticket.channel).label}`)
+      flash(`${t.dlAccepted} · ${resolveDeliveryChannel(ticket.channel).label}`)
     } catch (err) {
       if (apiMastersReady()) {
         updateTicket(ticket.id, { channelAcceptStatus: 'accepted', deliveryStatus: 'new' })
-        flash(`Accepted locally · ${resolveDeliveryChannel(ticket.channel).label}`)
+        flash(`${t.olAcceptedLocally} · ${resolveDeliveryChannel(ticket.channel).label}`)
         return
       }
-      flash(err instanceof Error ? err.message : 'Accept failed')
+      flash(err instanceof Error ? err.message : t.dlAcceptFailed)
     }
   }
 
@@ -325,7 +359,7 @@ export default function OnlinePage() {
       } else {
         cancelTicket(ticket.id, 'Rejected at POS')
       }
-      flash(`Rejected · OL-${onlineNo(ticket, online)}`)
+      flash(`${t.dlRejected} · OL-${onlineNo(ticket, online)}`)
       if (selectedId === ticket.id) {
         setSelectedId(null)
         setDeskOpen(false)
@@ -333,14 +367,14 @@ export default function OnlinePage() {
     } catch (err) {
       if (apiMastersReady()) {
         cancelTicket(ticket.id, 'Rejected at POS')
-        flash(`Rejected locally · OL-${onlineNo(ticket, online)}`)
+        flash(`${t.olRejectedLocally} · OL-${onlineNo(ticket, online)}`)
         if (selectedId === ticket.id) {
           setSelectedId(null)
           setDeskOpen(false)
         }
         return
       }
-      flash(err instanceof Error ? err.message : 'Reject failed')
+      flash(err instanceof Error ? err.message : t.dlRejectFailed)
     }
   }
 
@@ -350,15 +384,19 @@ export default function OnlinePage() {
     if (result.customerId && (result.loyaltyRedeemPts ?? 0) > 0) {
       redeemPoints(result.customerId, result.loyaltyRedeemPts!)
     }
-    const payable = Math.max(0, Math.round((total - redeemSar) * 100) / 100)
+    const roundOff = Math.round((result.roundOff ?? 0) * 100) / 100
+    const payable = Math.max(0, Math.round((total - redeemSar + roundOff) * 100) / 100)
     if (result.customerId) earnPoints(result.customerId, payable)
     settleTicket(selected.id, {
       method: result.method,
-      source: `Online · ${selected.channel ?? 'App'}`,
+      source: `${t.navOnline} · ${selected.channel ?? 'App'}`,
       staff: user?.name,
       subtotal: taxable,
       tax: total - taxable,
       total: payable,
+      roundOff: roundOff || undefined,
+      tendered: result.tendered,
+      change: result.change,
       lines,
       splitPayments: result.splitPayments,
       customerId: result.customerId,
@@ -368,7 +406,7 @@ export default function OnlinePage() {
     addCashIn(cashFromSettle(result.method, payable, result.splitPayments))
     pushChannelStatusQuiet(selected.id, 'delivered')
     setShowSettle(false)
-    flash(`Settled · OL-${laneNo}`)
+    flash(`${t.olSettled} · OL-${laneNo}`)
     setSelectedId(null)
     setDeskOpen(false)
   }
@@ -423,9 +461,9 @@ export default function OnlinePage() {
           })),
         })
       }
-      flash(`${channel} order imported · #${externalOrderId}`)
+      flash(`${channel} ${t.olOrderImported} · #${externalOrderId}`)
     } catch (err) {
-      flash(err instanceof Error ? err.message : 'Import failed')
+      flash(err instanceof Error ? err.message : t.olImportFailed)
     } finally {
       setIngestBusy(false)
     }
@@ -433,12 +471,12 @@ export default function OnlinePage() {
 
   function cardPrimaryAction(ticket: OpenTicket) {
     if (needsChannelAccept(ticket)) {
-      return { label: 'Accept order', run: () => void acceptExternalOrder(ticket) }
+      return { label: t.dlAcceptOrder, run: () => void acceptExternalOrder(ticket) }
     }
     const col = resolveDeliveryColumn(ticket)
     if (col === 'new') {
       return {
-        label: pendingFor(ticket) ? 'Send KOT' : 'Open order',
+        label: pendingFor(ticket) ? t.dlSendKot : t.olOpenOrder,
         run: () => {
           selectTicket(ticket, true)
           if (pendingFor(ticket) && perms.canSendOrders) setShowSend(true)
@@ -447,27 +485,27 @@ export default function OnlinePage() {
     }
     if (col === 'preparing') {
       return {
-        label: 'Mark ready',
+        label: t.dlMarkReady,
         run: () => {
           updateTicket(ticket.id, { deliveryStatus: 'ready', kitchenStatus: 'ready' })
           pushChannelStatusQuiet(ticket.id, 'ready')
-          flash(`Ready · OL-${onlineNo(ticket, online)}`)
+          flash(`${t.dlReady} · OL-${onlineNo(ticket, online)}`)
         },
       }
     }
     if (col === 'ready') {
       return {
-        label: 'Release to courier',
+        label: t.dlReleaseCourier,
         run: () => {
           updateTicket(ticket.id, { deliveryStatus: 'dispatched', dispatchedAt: nowTime() })
           pushChannelStatusQuiet(ticket.id, 'dispatched')
-          flash(`${resolveDeliveryChannel(ticket.channel).label} courier notified`)
+          flash(`${resolveDeliveryChannel(ticket.channel).label} ${t.olCourierNotified}`)
         },
       }
     }
     if (col === 'dispatched') {
       return {
-        label: channelDeliverActionLabel(ticket.channel),
+        label: deliverActionLabel(ticket.channel),
         run: () => {
           selectTicket(ticket, true)
           if (perms.canSettle) setShowSettle(true)
@@ -475,7 +513,7 @@ export default function OnlinePage() {
       }
     }
     return {
-      label: 'Settle',
+      label: t.settle,
       run: () => {
         selectTicket(ticket, true)
         if (perms.canSettle) setShowSettle(true)
@@ -494,38 +532,52 @@ export default function OnlinePage() {
               <IconGlobe />
             </span>
             <div>
-              <h1>Online orders</h1>
+              <h1>{t.olTitle}</h1>
               <p>
-                KSA aggregators · {stats.total} open
-                {dayIsClosed ? ' · day closed' : ''}
+                {t.olAggregators} · {stats.total} {t.taOpenWord}
+                {dayIsClosed ? ` · ${t.dayClosed}` : ''}
               </p>
             </div>
           </div>
           <div className="ol-toolbar-stats">
             <span className="ol-stat-pill">
               <IconBag />
-              <strong>{stats.total}</strong> active
+              <strong>{stats.total}</strong> {t.olActive}
             </span>
             <span className={`ol-stat-pill${stats.accept ? ' warn' : ''}`}>
               <IconClock />
-              <strong>{stats.accept}</strong> accept
+              <strong>{stats.accept}</strong> {t.olAcceptStat}
             </span>
             <span className={`ol-stat-pill${stats.kot ? ' accent' : ''}`}>
               <IconSend />
-              <strong>{stats.kot}</strong> KOT
+              <strong>{stats.kot}</strong> {t.navKot}
             </span>
             <span className="ol-stat-pill">
               <IconPay />
-              <strong>{money(stats.revenue)}</strong>
+              <strong>{money(stats.revenue, lang)}</strong>
             </span>
           </div>
           <div className="ol-toolbar-actions">
-            {dayIsClosed ? <span className="dl-pill closed">Day closed</span> : null}
+            {dayIsClosed ? <span className="dl-pill closed">{t.dayClosed}</span> : null}
             <Link to="/settings/delivery-integrations" className="ol-link-btn">
-              Channel APIs
+              {t.olChannelApis}
             </Link>
+            <button
+              type="button"
+              className="ol-link-btn"
+              onClick={() => {
+                const url = guestOrderUrl(activeBranchId, { companyId: company?.id })
+                void navigator.clipboard?.writeText(url).then(
+                  () => flash(t.olQrLinkCopied),
+                  () => flash(url),
+                )
+              }}
+              title={t.olQrMenuLink}
+            >
+              {t.olQrMenuLink}
+            </button>
             <Link to="/courier" className="ol-link-btn">
-              Courier pickup
+              {t.dlCourierPickup}
             </Link>
             <button
               type="button"
@@ -534,38 +586,43 @@ export default function OnlinePage() {
               onClick={() => void importOrder()}
             >
               <IconPlus />
-              {ingestBusy ? 'Importing…' : 'Import order'}
+              {ingestBusy ? t.dlImporting : t.olImportOrder}
             </button>
           </div>
         </header>
 
-        <section className="ol-channel-strip" aria-label="Filter by channel">
+        <section className="ol-channel-strip" aria-label={t.olFilterByChannel}>
           <button
             type="button"
             className={`ol-channel-tab all${channelFilter === 'all' ? ' active' : ''}`}
             onClick={() => setChannelFilter('all')}
           >
             <span className="ol-channel-glyph all">∗</span>
-            <span className="ol-channel-label">All</span>
+            <span className="ol-channel-label">{t.olAll}</span>
             <em>{online.length}</em>
           </button>
-          {ONLINE_CHANNEL_META.map((ch) => (
+          {ONLINE_CHANNEL_META.map((ch) => {
+            const honesty = channelHonestyStatus(channelConfigFor(ch.id))
+            return (
             <button
               key={ch.id}
               type="button"
               className={`ol-channel-tab tone-${ch.tone}${channelFilter === ch.id ? ' active' : ''}`}
               onClick={() => setChannelFilter(ch.id as ChannelFilter)}
+              title={`${ch.label} · ${honesty.label}`}
             >
               <span className={`ol-channel-glyph tone-${ch.tone}`}>{channelAbbr(ch.id)}</span>
               <span className="ol-channel-label">{ch.label}</span>
+              <span className={`ol-honesty ol-honesty-${honesty.status}`}>{honesty.label}</span>
               <em>{channelCounts.get(ch.id) ?? 0}</em>
             </button>
-          ))}
+            )
+          })}
         </section>
 
         {!deskOpen || !selected ? (
           <section className="dl-kanban ol-kanban">
-            {COLUMNS.map((col) => {
+            {columns.map((col) => {
               const cards = byColumn[col.id]
               return (
                 <div key={col.id} className={`dl-col dl-col-${col.id}`}>
@@ -582,11 +639,11 @@ export default function OnlinePage() {
                         <span className="ol-empty-icon">
                           <IconBag />
                         </span>
-                        <strong>No {col.label.toLowerCase()} orders</strong>
+                        <strong>{t.olNoLaneOrders}</strong>
                         <p>
                           {channelFilter === 'all'
-                            ? 'Import or wait for channel webhook'
-                            : `No ${channelFilter} orders in this lane`}
+                            ? t.olEmptyImportHint
+                            : t.olEmptyChannelHint}
                         </p>
                       </div>
                     ) : (
@@ -612,13 +669,13 @@ export default function OnlinePage() {
                               </div>
                               <span className="dl-order-name">{ticket.customer}</span>
                               <span className="dl-order-meta">
-                                {ticket.phone || 'No phone'} · {age}
+                                {ticket.phone || t.dlNoPhone} · {age}
                               </span>
-                              <span className="dl-order-addr">{ticket.address || 'Address TBD'}</span>
+                              <span className="dl-order-addr">{ticket.address || t.dlAddressTbd}</span>
                               <div className="dl-order-foot">
-                                <span>{money(ticketAmount(ticket))}</span>
+                                <span>{money(ticketAmount(ticket), lang)}</span>
                                 <span className={`dl-pay ${channelIsPrepaid(ticket.channel) ? 'prepaid' : 'unpaid'}`}>
-                                  {channelIsPrepaid(ticket.channel) ? 'Prepaid' : 'COD'}
+                                  {channelIsPrepaid(ticket.channel) ? t.dlPrepaid : t.dlCod}
                                 </span>
                               </div>
                               <span className={`ol-channel-badge tone-${ch.tone}`}>
@@ -629,10 +686,10 @@ export default function OnlinePage() {
                                 <span className="dl-ext-id">#{ticket.externalOrderId}</span>
                               ) : null}
                               {needsChannelAccept(ticket) ? (
-                                <span className="dl-pending-accept">Awaiting accept</span>
+                                <span className="dl-pending-accept">{t.dlAwaitingAccept}</span>
                               ) : null}
                               {pendingFor(ticket) ? (
-                                <span className="ol-kot-pill">KOT pending</span>
+                                <span className="ol-kot-pill">{t.olKotPending}</span>
                               ) : null}
                             </button>
                             {needsChannelAccept(ticket) ? (
@@ -645,7 +702,7 @@ export default function OnlinePage() {
                                     void acceptExternalOrder(ticket)
                                   }}
                                 >
-                                  Accept
+                                  {t.dlAccept}
                                 </button>
                                 <button
                                   type="button"
@@ -655,7 +712,7 @@ export default function OnlinePage() {
                                     void rejectExternalOrder(ticket)
                                   }}
                                 >
-                                  Reject
+                                  {t.dlReject}
                                 </button>
                               </div>
                             ) : (
@@ -689,7 +746,7 @@ export default function OnlinePage() {
                   className="dl-back"
                   onClick={() => setDeskOpen(false)}
                 >
-                  <IconBack /> Board
+                  <IconBack /> {t.dlBoard}
                 </button>
                 <h2>
                   OL-{laneNo || '—'}{' '}
@@ -698,14 +755,14 @@ export default function OnlinePage() {
                 <div className="dl-work-tags">
                   {selectedCol ? (
                     <span className={`dl-status ${columnTone(selectedCol)}`}>
-                      {COLUMNS.find((c) => c.id === selectedCol)?.label}
+                      {columns.find((c) => c.id === selectedCol)?.label}
                     </span>
                   ) : null}
                   <span className={`ol-channel-badge tone-${resolveDeliveryChannel(selected.channel).tone}`}>
                     {resolveDeliveryChannel(selected.channel).label}
                   </span>
                   <span className={`dl-pay ${channelIsPrepaid(selected.channel) ? 'prepaid' : 'unpaid'}`}>
-                    {channelIsPrepaid(selected.channel) ? 'Prepaid' : 'COD'}
+                    {channelIsPrepaid(selected.channel) ? t.dlPrepaid : t.dlCod}
                   </span>
                   {selected.externalOrderId ? (
                     <span className="dl-chip soft">#{selected.externalOrderId}</span>
@@ -716,7 +773,7 @@ export default function OnlinePage() {
                 </p>
               </div>
               <div className="ol-import-channel">
-                <span>Import as</span>
+                <span>{t.olImportAs}</span>
                 <div className="ol-channel-mini">
                   {onlineChannels.map((ch) => (
                     <button
@@ -735,15 +792,15 @@ export default function OnlinePage() {
             {needsChannelAccept(selected) ? (
               <div className="ol-accept-banner">
                 <div>
-                  <strong>Incoming app order</strong>
-                  <p>Accept within 30 minutes to start kitchen prep.</p>
+                  <strong>{t.olIncomingApp}</strong>
+                  <p>{t.olAcceptWithin}</p>
                 </div>
                 <div className="ol-accept-actions">
                   <button type="button" className="btn btn-primary" onClick={() => void acceptExternalOrder(selected)}>
-                    Accept
+                    {t.dlAccept}
                   </button>
                   <button type="button" className="btn btn-ghost" onClick={() => void rejectExternalOrder(selected)}>
-                    Reject
+                    {t.dlReject}
                   </button>
                 </div>
               </div>
@@ -754,7 +811,7 @@ export default function OnlinePage() {
                 <MenuPicker
                   onAdd={(item, note) => {
                     if (dayIsClosed) {
-                      flash('Day is closed')
+                      flash(t.dayClosed)
                       return
                     }
                     addToTicket(selected.id, item, note)
@@ -766,23 +823,21 @@ export default function OnlinePage() {
                   {lines.length === 0 ? (
                     <div className="ol-lines-empty">
                       <IconBag />
-                      <p>Add items from the menu or import a channel order</p>
+                      <p>{t.olAddItemsHint}</p>
                     </div>
                   ) : (
                     lines.map((line) => (
                       <div key={line.id} className="order-line">
                         <div className="name">{line.name}</div>
-                        <strong>{money(line.qty * line.price)}</strong>
-                        <div className="sub">{line.sent ? 'KOT sent' : 'Not sent'}</div>
-                        <div className="qty-controls">
-                          <button type="button" onClick={() => changeTicketQty(selected.id, line.id, -1)}>
-                            −
-                          </button>
-                          <span>{line.qty}</span>
-                          <button type="button" onClick={() => changeTicketQty(selected.id, line.id, 1)}>
-                            +
-                          </button>
-                        </div>
+                        <strong>{money(line.qty * line.price, lang)}</strong>
+                        <div className="sub">{line.sent ? t.olKotSentLine : t.olNotSent}</div>
+                        <QtyStepper
+                          value={line.qty}
+                          ariaLabel={line.name}
+                          minusDisabled={line.sent}
+                          inputDisabled={line.sent}
+                          onChange={(delta) => changeTicketQty(selected.id, line.id, delta)}
+                        />
                       </div>
                     ))
                   )}
@@ -791,13 +846,13 @@ export default function OnlinePage() {
                   <div className="totals">
                     {fee > 0 ? (
                       <div>
-                        <span>Delivery fee</span>
-                        <span>{money(fee)}</span>
+                        <span>{t.dlDeliveryFee}</span>
+                        <span>{money(fee, lang)}</span>
                       </div>
                     ) : null}
                     <div className="grand">
-                      <span>Total incl. VAT</span>
-                      <span>{money(total)}</span>
+                      <span>{t.olTotalInclVat}</span>
+                      <span>{money(total, lang)}</span>
                     </div>
                   </div>
                   <div className="action-row">
@@ -806,11 +861,11 @@ export default function OnlinePage() {
                       className="btn btn-teal"
                       disabled={!pending || dayIsClosed}
                       onClick={() => {
-                        if (!pending) return flash('Nothing new to send')
+                        if (!pending) return flash(t.taNothingToSend)
                         setShowSend(true)
                       }}
                     >
-                      Send KOT {pending ? `(${pending})` : ''}
+                      {t.dlSendKot} {pending ? `(${pending})` : ''}
                     </button>
                     <button
                       type="button"
@@ -818,7 +873,7 @@ export default function OnlinePage() {
                       disabled={dayIsClosed || !lines.length}
                       onClick={() => setShowSettle(true)}
                     >
-                      Settle
+                      {t.settle}
                     </button>
                   </div>
                 </div>
@@ -828,7 +883,7 @@ export default function OnlinePage() {
         )}
       </div>
 
-      <HubFooter backTo="/" trailing={null} />
+      <HubFooter backTo="/" backLabel={t.home} trailing={null} />
 
       {showSend && selected ? (
         <SendOrdersModal
@@ -837,7 +892,7 @@ export default function OnlinePage() {
           onSend={(priority) => {
             sendTicketOrders(selected.id, priority)
             setShowSend(false)
-            flash(`KOT sent · OL-${laneNo}`)
+            flash(`${t.dlKotSent} · OL-${laneNo}`)
           }}
         />
       ) : null}

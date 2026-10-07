@@ -51,7 +51,10 @@ export const PO_KEY = 'mesa-purchase-orders'
 export const DEMO_PO_IDS = new Set(['po-1001'])
 export const DEMO_VENDOR_IDS = new Set(['sup-1', 'sup-2', 'sup-3'])
 
-/** Default vendors so Inventory / PO pickers work before staff create their own. */
+/**
+ * Demo vendor roster (dev only). Never auto-inject in production —
+ * staff import vendors via Database → Import or create manually.
+ */
 export const DEFAULT_SUPPLIERS: Supplier[] = [
   { id: 'vnd-meat', name: 'Al Nakheel Meats', phone: '', city: 'Riyadh', active: true },
   { id: 'vnd-seafood', name: 'Red Sea Catch', phone: '', city: 'Jeddah', active: true },
@@ -62,16 +65,21 @@ export const DEFAULT_SUPPLIERS: Supplier[] = [
   { id: 'vnd-general', name: 'General Supplier', phone: '', city: 'Riyadh', active: true },
 ]
 
+const SEED_VENDOR_IDS = new Set(DEFAULT_SUPPLIERS.map((s) => s.id))
+
 const PO_STATUSES: POStatus[] = ['draft', 'ordered', 'partial', 'received', 'cancelled']
 
 export function isDemoVendor(id: string) {
   return DEMO_VENDOR_IDS.has(id)
 }
 
+export function isSeedVendor(id: string) {
+  return SEED_VENDOR_IDS.has(id) || isDemoVendor(id)
+}
+
+/** Strip demo/seed vendors. Does not invent defaults. */
 export function ensureDefaultSuppliers(existing: Supplier[]): Supplier[] {
-  const real = existing.filter((s) => !isDemoVendor(s.id))
-  if (real.length) return real
-  return DEFAULT_SUPPLIERS.map((s) => ({ ...s }))
+  return existing.filter((s) => s?.id && !isSeedVendor(s.id))
 }
 
 function asStatus(value: unknown): POStatus {

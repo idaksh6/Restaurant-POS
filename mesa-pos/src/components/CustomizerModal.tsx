@@ -87,7 +87,17 @@ function CustomizerBody({
         return
       }
     }
-    onSave({ name: `${dish.name} (${summary})`, price: total, note: summary })
+    let baseName = dish.name.trim()
+    if (summary) {
+      const suffix = ` (${summary})`
+      while (baseName.endsWith(suffix) || baseName.endsWith(`(${summary})`)) {
+        baseName = baseName.endsWith(suffix)
+          ? baseName.slice(0, -suffix.length).trimEnd()
+          : baseName.slice(0, -`(${summary})`.length).trimEnd()
+      }
+    }
+    const name = summary ? `${baseName} (${summary})` : baseName
+    onSave({ name, price: total, note: summary || undefined })
   }
 
   function groupLabel(group: AddonGroup) {
@@ -115,6 +125,9 @@ function CustomizerBody({
         <div className="cz-body">
           <div className="cz-section">
             <div className="cz-section-title">{customizer.variationLabel}</div>
+            <p className="cz-section-hint">
+              Size price is the base for this order — addons add on top.
+            </p>
             <div className="cz-variations">
               {customizer.variations.map((v) => (
                 <button

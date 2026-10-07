@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { getPermissions } from '../auth/roles'
 import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
 import MesaSelect from '../components/MesaSelect'
 import { getActiveBranchId } from '../data/company'
 import type { ItemCustomizer, MasterDish, MenuCategory } from '../data/masters'
-import { getAddonGroups, isDishCodeTaken, nextUniqueDishCode, recipeLineIngredientId } from '../data/masters'
+import { getAddonGroups, isDishCodeTaken, nextUniqueDishCode, recipeLineIngredientId, withSyncedBasePrice } from '../data/masters'
 import { money } from '../data/mock'
 import { useDeleteConfirm } from '../hooks/useDeleteConfirm'
 import { settingsHubPath } from '../lib/settingsHub'
@@ -30,26 +30,70 @@ type DishSort = 'name' | 'price-asc' | 'price-desc' | 'code'
 const PAGE_SIZE = 10
 const CAT_TONES = ['#0f766e', '#0369a1', '#b45309', '#047857', '#0e7490', '#be123c', '#115e59', '#a16207']
 
-const CAT_DISH_OPTIONS = [
-  { value: 'all', label: 'All categories' },
-  { value: 'with', label: 'With dishes' },
-  { value: 'empty', label: 'Empty' },
-]
+function categoryPathLabel(
+  cat: MenuCategory | undefined,
+  byId: Map<string, MenuCategory>,
+): { main: string; sub: string | null; full: string } {
+  if (!cat) return { main: '—', sub: null, full: '—' }
+  if (!cat.parentId) return { main: cat.name, sub: null, full: cat.name }
+  const parent = byId.get(cat.parentId)
+  if (!parent) return { main: cat.name, sub: null, full: cat.name }
+  return { main: parent.name, sub: cat.name, full: `${parent.name} › ${cat.name}` }
+}
 
-const FLAG_OPTIONS = [
-  { value: 'all', label: 'All flags' },
-  { value: 'popular', label: 'Popular' },
-  { value: 'options', label: 'Has options' },
-  { value: 'recipe', label: 'Has recipe' },
-  { value: 'none', label: 'No flags' },
-]
+function buildCategorySelectOptions(
+  cats: MenuCategory[],
+  opts?: { includeAll?: boolean; allLabel?: string; offSuffix?: string },
+) {
+  const byId = new Map(cats.map((c) => [c.id, c]))
+  const mains = cats
+    .filter((c) => !c.parentId)
+    .sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name))
+  const out: { value: string; label: string }[] = []
+  if (opts?.includeAll) {
+    out.push({ value: 'all', label: opts.allLabel ?? 'All categories' })
+  }
+  const off = opts?.offSuffix ?? '(off)'
+  const used = new Set<string>()
+  for (const main of mains) {
+    used.add(main.id)
+    out.push({
+      value: main.id,
+      label: main.active ? main.name : `${main.name} ${off}`,
+    })
+    const children = cats
+      .filter((c) => c.parentId === main.id)
+      .sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name))
+    for (const sub of children) {
+      used.add(sub.id)
+      const path = categoryPathLabel(sub, byId).full
+      out.push({
+        value: sub.id,
+        label: sub.active ? path : `${path} ${off}`,
+      })
+    }
+  }
+  for (const c of cats) {
+    if (used.has(c.id)) continue
+    const path = categoryPathLabel(c, byId).full
+    out.push({
+      value: c.id,
+      label: c.active ? path : `${path} ${off}`,
+    })
+  }
+  return out
+}
 
-const DISH_SORT_OPTIONS = [
-  { value: 'name', label: 'Name A–Z' },
-  { value: 'price-asc', label: 'Price ↑' },
-  { value: 'price-desc', label: 'Price ↓' },
-  { value: 'code', label: 'Code' },
-]
+function dishInCategoryFilter(
+  dish: MasterDish,
+  filterId: string,
+  byId: Map<string, MenuCategory>,
+) {
+  if (filterId === 'all') return true
+  if (dish.categoryId === filterId) return true
+  const cat = byId.get(dish.categoryId)
+  return Boolean(cat?.parentId && cat.parentId === filterId)
+}
 
 function toneForCategory(cat: MenuCategory) {
   if (cat.buttonColor?.trim()) return cat.buttonColor.trim()
@@ -244,24 +288,30 @@ function withAddonGroups(customizer: ItemCustomizer) {
   ]
 }
 
+function newId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
+
 function appendTopping(
   dish: MasterDish,
   topping: { name: string; price: number },
+  groupIndex = 0,
 ): MasterDish {
   if (!dish.customizer) return dish
   const groups = withAddonGroups(dish.customizer)
+  const gi = Math.min(Math.max(0, groupIndex), Math.max(0, groups.length - 1))
   return {
     ...dish,
     customizer: {
       ...dish.customizer,
       addonGroups: groups.map((g, i) =>
-        i === 0
+        i === gi
           ? {
               ...g,
               addons: [
                 ...g.addons,
                 {
-                  id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                  id: newId('a'),
                   name: topping.name,
                   price: topping.price,
                 },
@@ -282,6 +332,7 @@ export default function MastersPage() {
   const { askDelete, deleteConfirmDialog } = useDeleteConfirm()
   const { categories, dishes, saveCategory, deleteCategory, saveDish, deleteDish } = useMasters()
   const canAccess = user ? getPermissions(user.role).canMasters || user.role === 'admin' : false
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = parseMastersTab(searchParams.get('tab'))
 
@@ -327,6 +378,16 @@ export default function MastersPage() {
     setIsNew(false)
   }
 
+  function goDepartments() {
+    closeEditor()
+    navigate('/settings/departments')
+  }
+
+  function goTaxPhotos() {
+    closeEditor()
+    navigate('/settings/menu-details')
+  }
+
   useEffect(() => {
     if (!modalOpen) return
     const prev = document.body.style.overflow
@@ -357,15 +418,51 @@ export default function MastersPage() {
   )
 
   const categoryOptions = useMemo(
-    () => [
-      { value: 'all', label: 'All categories' },
-      ...sortedCats.map((c) => ({
-        value: c.id,
-        label: c.active ? c.name : `${c.name} (off)`,
-      })),
-    ],
-    [sortedCats],
+    () =>
+      buildCategorySelectOptions(sortedCats, {
+        includeAll: true,
+        allLabel: t.mstAllCategories,
+        offSuffix: t.mstCatOffSuffix,
+      }),
+    [sortedCats, t],
   )
+
+  const dishCategoryOptions = useMemo(
+    () => buildCategorySelectOptions(sortedCats, { offSuffix: t.mstCatOffSuffix }),
+    [sortedCats, t],
+  )
+
+  const catDishOptions = useMemo(
+    () => [
+      { value: 'all', label: t.mstAllCategories },
+      { value: 'with', label: t.mstWithDishes },
+      { value: 'empty', label: t.mstEmptyCats },
+    ],
+    [t],
+  )
+
+  const flagOptions = useMemo(
+    () => [
+      { value: 'all', label: t.mstAllFlags },
+      { value: 'popular', label: t.popular },
+      { value: 'options', label: t.mstHasOptions },
+      { value: 'recipe', label: t.mstHasRecipe },
+      { value: 'none', label: t.mstNoFlags },
+    ],
+    [t],
+  )
+
+  const dishSortOptions = useMemo(
+    () => [
+      { value: 'name', label: t.mstSortName },
+      { value: 'price-asc', label: t.mstSortPriceAsc },
+      { value: 'price-desc', label: t.mstSortPriceDesc },
+      { value: 'code', label: t.code },
+    ],
+    [t],
+  )
+
+  const catById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
   /** Ingredient catalog + toppings from other dishes, for the Add topping dropdown. */
   const toppingPickOptions = useMemo(() => {
@@ -421,7 +518,9 @@ export default function MastersPage() {
     let list = dishes.filter((d) => {
       if (statusFilter === 'active' && !d.active) return false
       if (statusFilter === 'inactive' && d.active) return false
-      if (categoryFilter !== 'all' && d.categoryId !== categoryFilter) return false
+      if (categoryFilter !== 'all' && !dishInCategoryFilter(d, categoryFilter, catById)) {
+        return false
+      }
       if (flagFilter === 'popular' && !d.popular) return false
       if (flagFilter === 'options' && !d.customizer) return false
       if (flagFilter === 'recipe' && !(d.recipe?.length ?? 0)) return false
@@ -429,10 +528,12 @@ export default function MastersPage() {
         return false
       }
       if (!q) return true
+      const path = categoryPathLabel(catById.get(d.categoryId), catById).full.toLowerCase()
       return (
         d.name.toLowerCase().includes(q) ||
         d.code.toLowerCase().includes(q) ||
-        d.category.toLowerCase().includes(q)
+        d.category.toLowerCase().includes(q) ||
+        path.includes(q)
       )
     })
     list = [...list]
@@ -443,7 +544,7 @@ export default function MastersPage() {
       return a.name.localeCompare(b.name)
     })
     return list
-  }, [dishes, query, statusFilter, categoryFilter, flagFilter, dishSort])
+  }, [dishes, query, statusFilter, categoryFilter, flagFilter, dishSort, catById])
 
   const list = tab === 'categories' ? filteredCats : filteredDishes
   const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE))
@@ -461,27 +562,25 @@ export default function MastersPage() {
 
   const stats = useMemo(
     () => [
-      { key: 'cats', label: 'Categories', value: categories.length, tone: 'teal', icon: <IconFolders /> },
+      { key: 'cats', label: t.categories, value: categories.length, tone: 'teal', icon: <IconFolders /> },
       { key: 'dishes', label: t.menuItems, value: dishes.length, tone: 'ocean', icon: <IconPlate /> },
       {
         key: 'active',
-        label: 'Active',
+        label: t.active,
         value: dishes.filter((d) => d.active).length,
         tone: 'lime',
         icon: <IconCheck />,
       },
       {
         key: 'custom',
-        label: 'Customizable',
+        label: t.mstCustomizable,
         value: dishes.filter((d) => d.customizer).length,
         tone: 'amber',
         icon: <IconSliders />,
       },
     ],
-    [categories, dishes],
+    [categories, dishes, t],
   )
-
-  const catById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories])
 
   function startNewCategory() {
     setTab('categories')
@@ -492,7 +591,7 @@ export default function MastersPage() {
 
   function startNewDish() {
     if (!categories.length) {
-      flash('Add a category first', 'err')
+      flash(t.mstAddCategoryFirst, 'err')
       setTab('categories')
       return
     }
@@ -517,7 +616,7 @@ export default function MastersPage() {
   function saveCat() {
     if (!editingCat) return
     if (!editingCat.name.trim()) {
-      flash('Category name is required', 'err')
+      flash(t.mstCategoryNameRequired, 'err')
       return
     }
     saveCategory({
@@ -526,7 +625,7 @@ export default function MastersPage() {
       branchId: editingCat.branchId ?? getActiveBranchId(),
       sort: Number(editingCat.sort) || 0,
     })
-    flash(isNew ? 'Category created' : 'Category updated')
+    flash(isNew ? t.mstCategoryCreated : t.mstCategoryUpdated)
     closeEditor()
     void runSync({ quiet: true }).catch(() => undefined)
   }
@@ -535,14 +634,14 @@ export default function MastersPage() {
     if (!editingCat || isNew) return
     const linked = dishes.filter((d) => d.categoryId === editingCat.id).length
     if (linked > 0) {
-      flash(`Move or delete ${linked} dish(es) first`, 'err')
+      flash(t.mstMoveDishesFirst.replace('{count}', String(linked)), 'err')
       return
     }
     askDelete({
       name: editingCat.name,
       onConfirm: () => {
         void deleteCategory(editingCat.id).then(() => {
-          flash('Category deleted')
+          flash(t.mstCategoryDeleted)
           closeEditor()
           void runSync({ quiet: true }).catch(() => undefined)
         })
@@ -553,29 +652,31 @@ export default function MastersPage() {
   function saveDishForm() {
     if (!editingDish) return
     if (!editingDish.name.trim()) {
-      flash('Menu item name is required', 'err')
+      flash(t.mstMenuItemNameRequired, 'err')
       return
     }
     if (!editingDish.categoryId) {
-      flash('Pick a category', 'err')
+      flash(t.mstPickCategory, 'err')
       return
     }
     const code =
       editingDish.code.trim() || nextUniqueDishCode(dishes.filter((d) => d.id !== editingDish.id))
     if (isDishCodeTaken(dishes, code, editingDish.id)) {
-      flash('Menu item code already exists — enter a unique code or use the suggested one', 'err')
+      flash(t.mstCodeTaken, 'err')
       return
     }
     const cat = categories.find((c) => c.id === editingDish.categoryId)
-    void saveDish({
-      ...editingDish,
-      name: editingDish.name.trim(),
-      code,
-      category: cat?.name ?? editingDish.category,
-      price: Math.max(0, Number(editingDish.price) || 0),
-      branchId: editingDish.branchId ?? getActiveBranchId(),
-    }).then(() => {
-      flash(isNew ? 'Menu item created' : 'Menu item updated')
+    void saveDish(
+      withSyncedBasePrice({
+        ...editingDish,
+        name: editingDish.name.trim(),
+        code,
+        category: cat?.name ?? editingDish.category,
+        price: Math.max(0, Number(editingDish.price) || 0),
+        branchId: editingDish.branchId ?? getActiveBranchId(),
+      }),
+    ).then(() => {
+      flash(isNew ? t.mstMenuItemCreated : t.mstMenuItemUpdated)
       closeEditor()
       void runSync({ quiet: true }).catch(() => undefined)
     })
@@ -587,7 +688,7 @@ export default function MastersPage() {
       name: editingDish.name,
       onConfirm: () => {
         void deleteDish(editingDish.id).then(() => {
-          flash('Menu item deleted')
+          flash(t.mstMenuItemDeleted)
           closeEditor()
           void runSync({ quiet: true }).catch(() => undefined)
         })
@@ -599,10 +700,10 @@ export default function MastersPage() {
     return (
       <div className="panel floor-panel">
         <div className="ticket-empty">
-          <strong>Masters locked</strong>
-          <p>Only Admin or a role with Masters can open this screen.</p>
+          <strong>{t.mstLocked}</strong>
+          <p>{t.mstLockedHint}</p>
           <Link to="/" className="btn btn-ghost" style={{ marginTop: '1rem' }}>
-            Main Menu
+            {t.mainMenu}
           </Link>
         </div>
       </div>
@@ -620,10 +721,11 @@ export default function MastersPage() {
               <IconFolders />
             </span>
             <div>
-              <h1>Masters</h1>
+              <h1>{t.mstTitle}</h1>
               <p>
-                Menu for <strong>{activeBranch.code}</strong> · {activeBranch.name} — categories &{' '}
-                {t.menuItems.toLowerCase()} sync with the API.
+                {t.mstHeroHint
+                  .replace('{code}', activeBranch.code)
+                  .replace('{name}', activeBranch.name)}
               </p>
             </div>
           </div>
@@ -642,14 +744,14 @@ export default function MastersPage() {
               className="mst-link-btn primary"
               onClick={() => (tab === 'categories' ? startNewCategory() : startNewDish())}
             >
-              <IconPlus /> {tab === 'categories' ? 'Category' : t.menuItem}
+              <IconPlus /> {tab === 'categories' ? t.category : t.menuItem}
             </button>
           </div>
         </header>
 
         <section className="mst-board">
           <div className="mst-toolbar">
-            <nav className="mst-tabs" aria-label="Masters sections">
+            <nav className="mst-tabs" aria-label={t.mstSectionsAria}>
               <button
                 type="button"
                 className={tab === 'categories' ? 'on' : ''}
@@ -658,7 +760,7 @@ export default function MastersPage() {
                   closeEditor()
                 }}
               >
-                <IconFolders /> Categories
+                <IconFolders /> {t.categories}
               </button>
               <button
                 type="button"
@@ -670,17 +772,19 @@ export default function MastersPage() {
               >
                 <IconPlate /> {t.menuItems}
               </button>
-            </nav>
-            <nav className="mst-toolbar-links" aria-label="Related masters">
-              <Link to="/settings/departments">Departments</Link>
-              <Link to="/settings/menu-details">{t.menuTaxPhotos}</Link>
+              <button type="button" onClick={goDepartments}>
+                {t.departments}
+              </button>
+              <button type="button" onClick={goTaxPhotos}>
+                {t.menuTaxPhotos}
+              </button>
             </nav>
             <button
               type="button"
               className="mst-add-btn"
               onClick={() => (tab === 'categories' ? startNewCategory() : startNewDish())}
             >
-              <IconPlus /> {tab === 'categories' ? 'Category' : t.menuItem}
+              <IconPlus /> {tab === 'categories' ? t.category : t.menuItem}
             </button>
           </div>
 
@@ -690,16 +794,16 @@ export default function MastersPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder={tab === 'categories' ? 'Search categories…' : `Search ${t.menuItems.toLowerCase()}…`}
-                aria-label={tab === 'categories' ? 'Search categories' : `Search ${t.menuItems.toLowerCase()}`}
+                placeholder={tab === 'categories' ? t.mstSearchCategories : t.mstSearchMenuItems}
+                aria-label={tab === 'categories' ? t.mstSearchCategories : t.mstSearchMenuItems}
               />
             </label>
-            <div className="mst-status-pills" role="tablist" aria-label="Status filter">
+            <div className="mst-status-pills" role="tablist" aria-label={t.mstStatusFilterAria}>
               {(
                 [
-                  ['all', 'All', statusCounts.all],
-                  ['active', 'Active', statusCounts.active],
-                  ['inactive', 'Inactive', statusCounts.inactive],
+                  ['all', t.all, statusCounts.all],
+                  ['active', t.active, statusCounts.active],
+                  ['inactive', t.inactive, statusCounts.inactive],
                 ] as const
               ).map(([id, label, count]) => (
                 <button
@@ -716,17 +820,17 @@ export default function MastersPage() {
             {tab === 'categories' ? (
               <div className="mst-pick">
                 <MesaSelect
-                  aria-label="Filter by dish count"
+                  aria-label={t.mstFilterDishCountAria}
                   value={catDishFilter}
                   onChange={(v) => setCatDishFilter(v as CatDishFilter)}
-                  options={CAT_DISH_OPTIONS}
+                  options={catDishOptions}
                 />
               </div>
             ) : (
               <>
                 <div className="mst-pick">
                   <MesaSelect
-                    aria-label="Filter by category"
+                    aria-label={t.mstFilterCategoryAria}
                     value={categoryFilter}
                     onChange={setCategoryFilter}
                     options={categoryOptions}
@@ -734,18 +838,18 @@ export default function MastersPage() {
                 </div>
                 <div className="mst-pick">
                   <MesaSelect
-                    aria-label="Filter by flags"
+                    aria-label={t.mstFilterFlagsAria}
                     value={flagFilter}
                     onChange={(v) => setFlagFilter(v as FlagFilter)}
-                    options={FLAG_OPTIONS}
+                    options={flagOptions}
                   />
                 </div>
                 <div className="mst-pick">
                   <MesaSelect
-                    aria-label="Sort dishes"
+                    aria-label={t.mstSortDishesAria}
                     value={dishSort}
                     onChange={(v) => setDishSort(v as DishSort)}
-                    options={DISH_SORT_OPTIONS}
+                    options={dishSortOptions}
                   />
                 </div>
               </>
@@ -755,7 +859,7 @@ export default function MastersPage() {
             </span>
             {filtersActive ? (
               <button type="button" className="mst-reset" onClick={resetFilters}>
-                Clear
+                {t.clear}
               </button>
             ) : null}
           </div>
@@ -763,20 +867,18 @@ export default function MastersPage() {
           {tab === 'categories' ? (
             filteredCats.length === 0 ? (
               <div className="mst-empty">
-                <strong>{categories.length === 0 ? 'No categories yet' : 'No categories match'}</strong>
+                <strong>{categories.length === 0 ? t.mstNoCategoriesYet : t.mstNoCategoriesMatch}</strong>
                 <p>
-                  {categories.length === 0
-                    ? 'Create a category to start building the menu.'
-                    : 'Try another search or clear the filters.'}
+                  {categories.length === 0 ? t.mstNoCategoriesHint : t.mstTryClearFilters}
                 </p>
                 <div className="mst-empty-actions">
                   {filtersActive ? (
                     <button type="button" className="mst-btn ghost" onClick={resetFilters}>
-                      Clear filters
+                      {t.clearFilters}
                     </button>
                   ) : null}
                   <button type="button" className="mst-add-btn" onClick={startNewCategory}>
-                    <IconPlus /> Category
+                    <IconPlus /> {t.category}
                   </button>
                 </div>
               </div>
@@ -785,25 +887,29 @@ export default function MastersPage() {
                 <div className="mst-table-wrap">
                   <table className="mst-table">
                     <colgroup>
-                      <col className="mst-col-name" />
-                      <col className="mst-col-dishes" />
-                      <col className="mst-col-sort" />
-                      <col className="mst-col-status" />
-                      <col className="mst-col-action" />
-                    </colgroup>
+                  <col className="mst-col-name" />
+                  <col className="mst-col-type" />
+                  <col className="mst-col-dishes" />
+                  <col className="mst-col-sort" />
+                  <col className="mst-col-status" />
+                  <col className="mst-col-action" />
+                </colgroup>
                     <thead>
                       <tr>
-                        <th>Category</th>
+                        <th>{t.category}</th>
+                        <th>{t.type}</th>
                         <th>{t.menuItems}</th>
-                        <th>Sort</th>
-                        <th>Status</th>
-                        <th aria-label="Actions" />
+                        <th>{t.sort}</th>
+                        <th>{t.status}</th>
+                        <th aria-label={t.edit} />
                       </tr>
                     </thead>
                     <tbody>
                       {(pageSlice as MenuCategory[]).map((cat) => {
                         const count = dishCountByCat.get(cat.id) ?? 0
                         const tone = toneForCategory(cat)
+                        const path = categoryPathLabel(cat, catById)
+                        const isSub = Boolean(cat.parentId)
                         return (
                           <tr
                             key={cat.id}
@@ -816,10 +922,15 @@ export default function MastersPage() {
                                   {categoryGlyph(cat.name)}
                                 </span>
                                 <div className="mst-name-text">
-                                  <strong title={cat.name}>{cat.name}</strong>
+                                  <strong title={path.full}>{path.full}</strong>
                                   {cat.alias ? <span>{cat.alias}</span> : null}
                                 </div>
                               </div>
+                            </td>
+                            <td>
+                              <span className={`mst-type-pill${isSub ? ' sub' : ' main'}`}>
+                                {isSub ? t.mstSub : t.mstMain}
+                              </span>
                             </td>
                             <td>
                               <span className="mst-chip mesa-ltr-nums">{count}</span>
@@ -827,7 +938,7 @@ export default function MastersPage() {
                             <td className="mesa-ltr-nums">{cat.sort}</td>
                             <td>
                               <span className={`mst-status ${cat.active ? 'ok' : 'off'}`}>
-                                {cat.active ? 'Active' : 'Inactive'}
+                                {cat.active ? t.active : t.inactive}
                               </span>
                             </td>
                             <td>
@@ -835,8 +946,8 @@ export default function MastersPage() {
                                 <button
                                   type="button"
                                   className="mst-icon-btn"
-                                  title="Edit category"
-                                  aria-label={`Edit ${cat.name}`}
+                                  title={t.mstEditCategoryTitle}
+                                  aria-label={`${t.edit} ${cat.name}`}
                                   onClick={() => openCategory(cat)}
                                 >
                                   <IconEdit />
@@ -853,16 +964,14 @@ export default function MastersPage() {
             )
           ) : filteredDishes.length === 0 ? (
             <div className="mst-empty">
-              <strong>{dishes.length === 0 ? 'No dishes yet' : 'No dishes match'}</strong>
+              <strong>{dishes.length === 0 ? t.mstNoDishesYet : t.mstNoDishesMatch}</strong>
               <p>
-                {dishes.length === 0
-                  ? 'Add a dish under a category for the POS menu.'
-                  : 'Try another search or clear the filters.'}
+                {dishes.length === 0 ? t.mstNoDishesHint : t.mstTryClearFilters}
               </p>
               <div className="mst-empty-actions">
                 {filtersActive ? (
                   <button type="button" className="mst-btn ghost" onClick={resetFilters}>
-                    Clear filters
+                    {t.clearFilters}
                   </button>
                 ) : null}
                 <button type="button" className="mst-add-btn" onClick={startNewDish}>
@@ -885,18 +994,19 @@ export default function MastersPage() {
                 <thead>
                   <tr>
                     <th>{t.menuItem}</th>
-                    <th>Code</th>
-                    <th>Category</th>
-                    <th>Price</th>
-                    <th>Flags</th>
-                    <th>Status</th>
-                    <th aria-label="Actions" />
+                    <th>{t.code}</th>
+                    <th>{t.category}</th>
+                    <th>{t.price}</th>
+                    <th>{t.flags}</th>
+                    <th>{t.status}</th>
+                    <th aria-label={t.edit} />
                   </tr>
                 </thead>
                 <tbody>
                   {(pageSlice as MasterDish[]).map((dish) => {
                     const cat = catById.get(dish.categoryId)
                     const tone = cat ? toneForCategory(cat) : '#0f766e'
+                    const path = categoryPathLabel(cat, catById)
                     return (
                       <tr
                         key={dish.id}
@@ -912,7 +1022,7 @@ export default function MastersPage() {
                               <strong title={dish.name}>
                                 {dish.name}
                                 {dish.popular ? (
-                                  <i className="mst-star" title="Popular">
+                                  <i className="mst-star" title={t.popular}>
                                     <IconStar />
                                   </i>
                                 ) : null}
@@ -921,13 +1031,18 @@ export default function MastersPage() {
                           </div>
                         </td>
                         <td className="mesa-ltr-nums">{dish.code || '—'}</td>
-                        <td>{dish.category || '—'}</td>
+                        <td>
+                          <div className="mst-cat-cell" title={path.full}>
+                            <strong>{path.main}</strong>
+                            {path.sub ? <span>{path.sub}</span> : null}
+                          </div>
+                        </td>
                         <td className="mesa-ltr-nums">{money(dish.price)}</td>
                         <td>
                           <div className="mst-flags">
-                            {dish.customizer ? <span className="mst-flag">Options</span> : null}
+                            {dish.customizer ? <span className="mst-flag">{t.options}</span> : null}
                             {(dish.recipe?.length ?? 0) > 0 ? (
-                              <span className="mst-flag recipe">Recipe</span>
+                              <span className="mst-flag recipe">{t.recipe}</span>
                             ) : null}
                             {!dish.customizer && !(dish.recipe?.length ?? 0) ? (
                               <em className="mst-muted">—</em>
@@ -936,7 +1051,7 @@ export default function MastersPage() {
                         </td>
                         <td>
                           <span className={`mst-status ${dish.active ? 'ok' : 'off'}`}>
-                            {dish.active ? 'Active' : 'Inactive'}
+                            {dish.active ? t.active : t.inactive}
                           </span>
                         </td>
                         <td>
@@ -944,8 +1059,8 @@ export default function MastersPage() {
                             <button
                               type="button"
                               className="mst-icon-btn"
-                              title="Edit dish"
-                              aria-label={`Edit ${dish.name}`}
+                              title={t.mstEditDishTitle}
+                              aria-label={`${t.edit} ${dish.name}`}
                               onClick={() => openDish(dish)}
                             >
                               <IconEdit />
@@ -963,8 +1078,8 @@ export default function MastersPage() {
           {list.length > 0 ? (
             <div className="mst-pager">
               <span className="mesa-ltr-nums">
-                {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, list.length)} of{' '}
-                {list.length}
+                {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, list.length)}{' '}
+                {t.expensePagerOf} {list.length}
               </span>
               <div className="mst-pager-actions">
                 <button
@@ -973,7 +1088,7 @@ export default function MastersPage() {
                   disabled={safePage <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                 >
-                  Prev
+                  {t.expensePagerPrev}
                 </button>
                 {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
                   <button
@@ -992,7 +1107,7 @@ export default function MastersPage() {
                   disabled={safePage >= pageCount}
                   onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                 >
-                  Next
+                  {t.expensePagerNext}
                 </button>
               </div>
             </div>
@@ -1020,19 +1135,19 @@ export default function MastersPage() {
                   {categoryGlyph(editingCat.name || 'Category')}
                 </span>
                 <div>
-                  <h2>{isNew ? 'New category' : 'Edit category'}</h2>
-                  <p>Shown as a department on the POS menu.</p>
+                  <h2>{isNew ? t.mstNewCategory : t.mstEditCategory}</h2>
+                  <p>{t.mstCategoryModalHint}</p>
                 </div>
               </div>
               <button type="button" className="mst-btn ghost" onClick={closeEditor}>
-                Close
+                {t.close}
               </button>
             </div>
 
             <div className="mst-form">
               <label className="mst-field mst-span-2">
                 <span>
-                  Name <i>*</i>
+                  {t.name} <i>*</i>
                 </span>
                 <input
                   className="mst-input"
@@ -1042,7 +1157,7 @@ export default function MastersPage() {
                 />
               </label>
               <label className="mst-field">
-                <span>Sort</span>
+                <span>{t.sort}</span>
                 <input
                   className="mst-input mesa-ltr-nums"
                   type="number"
@@ -1053,7 +1168,7 @@ export default function MastersPage() {
                 />
               </label>
               <div className="mst-field">
-                <span>Active</span>
+                <span>{t.active}</span>
                 <button
                   type="button"
                   role="switch"
@@ -1062,7 +1177,7 @@ export default function MastersPage() {
                   onClick={() => setEditingCat({ ...editingCat, active: !editingCat.active })}
                 >
                   <i aria-hidden />
-                  <strong>{editingCat.active ? 'On' : 'Off'}</strong>
+                  <strong>{editingCat.active ? t.onLabel : t.offLabel}</strong>
                 </button>
               </div>
             </div>
@@ -1070,22 +1185,22 @@ export default function MastersPage() {
             <div className="mst-modal-actions">
               {!isNew ? (
                 <button type="button" className="mst-btn danger" onClick={removeCat}>
-                  Delete
+                  {t.delete}
                 </button>
               ) : (
                 <span />
               )}
               <div className="mst-modal-actions-end">
                 <button type="button" className="mst-btn ghost" onClick={closeEditor}>
-                  Cancel
+                  {t.cancel}
                 </button>
                 <button type="button" className="mst-btn primary" onClick={saveCat}>
-                  Save
+                  {t.save}
                 </button>
               </div>
             </div>
             <p className="mst-hint">
-              For button colours & images use <Link to="/settings/departments">Departments</Link>.
+              {t.mstDeptColorsHint} <Link to="/settings/departments">{t.departments}</Link>.
             </p>
           </div>
         </div>
@@ -1115,19 +1230,19 @@ export default function MastersPage() {
                   <IconPlate />
                 </span>
                 <div>
-                  <h2>{isNew ? 'New dish' : 'Edit dish'}</h2>
-                  <p>Price, category, options & recipe for POS.</p>
+                  <h2>{isNew ? t.mstNewDish : t.mstEditDish}</h2>
+                  <p>{t.mstDishModalHint}</p>
                 </div>
               </div>
               <button type="button" className="mst-btn ghost" onClick={closeEditor}>
-                Close
+                {t.close}
               </button>
             </div>
 
             <div className="mst-form">
               <label className="mst-field mst-span-2">
                 <span>
-                  Name <i>*</i>
+                  {t.name} <i>*</i>
                 </span>
                 <input
                   className="mst-input"
@@ -1137,7 +1252,7 @@ export default function MastersPage() {
                 />
               </label>
               <label className="mst-field">
-                <span>Code</span>
+                <span>{t.code}</span>
                 <input
                   className="mst-input mesa-ltr-nums"
                   value={editingDish.code}
@@ -1147,7 +1262,7 @@ export default function MastersPage() {
                 />
               </label>
               <label className="mst-field">
-                <span>Price (SAR)</span>
+                <span>{t.price} (SAR)</span>
                 <input
                   className="mst-input mesa-ltr-nums"
                   type="number"
@@ -1160,7 +1275,7 @@ export default function MastersPage() {
                 />
               </label>
               <label className="mst-field mst-span-2">
-                <span>Category</span>
+                <span>{t.category}</span>
                 <MesaSelect
                   value={editingDish.categoryId}
                   onChange={(v) => {
@@ -1171,14 +1286,11 @@ export default function MastersPage() {
                       category: cat?.name ?? editingDish.category,
                     })
                   }}
-                  options={sortedCats.map((c) => ({
-                    value: c.id,
-                    label: c.active ? c.name : `${c.name} (off)`,
-                  }))}
+                  options={dishCategoryOptions}
                 />
               </label>
               <div className="mst-field">
-                <span>Popular</span>
+                <span>{t.popular}</span>
                 <button
                   type="button"
                   role="switch"
@@ -1187,11 +1299,11 @@ export default function MastersPage() {
                   onClick={() => setEditingDish({ ...editingDish, popular: !editingDish.popular })}
                 >
                   <i aria-hidden />
-                  <strong>{editingDish.popular ? 'On' : 'Off'}</strong>
+                  <strong>{editingDish.popular ? t.onLabel : t.offLabel}</strong>
                 </button>
               </div>
               <div className="mst-field">
-                <span>Active on POS</span>
+                <span>{t.mstActiveOnPos}</span>
                 <button
                   type="button"
                   role="switch"
@@ -1200,11 +1312,11 @@ export default function MastersPage() {
                   onClick={() => setEditingDish({ ...editingDish, active: !editingDish.active })}
                 >
                   <i aria-hidden />
-                  <strong>{editingDish.active ? 'On' : 'Off'}</strong>
+                  <strong>{editingDish.active ? t.onLabel : t.offLabel}</strong>
                 </button>
               </div>
               <div className="mst-field mst-span-2">
-                <span>Custom options</span>
+                <span>{t.mstCustomOptions}</span>
                 <button
                   type="button"
                   role="switch"
@@ -1218,26 +1330,201 @@ export default function MastersPage() {
                   }
                 >
                   <i aria-hidden />
-                  <strong>{editingDish.customizer ? 'Enabled' : 'Off'}</strong>
+                  <strong>{editingDish.customizer ? t.enabled : t.offLabel}</strong>
                 </button>
               </div>
             </div>
 
             {editingDish.customizer ? (
-              <div className="mst-block">
-                <strong>Variations</strong>
-                <p>
-                  {editingDish.customizer.variations
-                    .map((v) => `${v.name} ${money(v.price)}`)
-                    .join(' · ')}
+              <div className="mst-block mst-customizer-editor">
+                <strong>Custom options setup</strong>
+                <p className="mst-hint">
+                  POS shows these as size buttons + toppings. Base dish price is used only when no
+                  variation is selected.
                 </p>
+
+                <div className="mst-cz-section">
+                  <div className="mst-cz-head">
+                    <strong>Variations (size / price)</strong>
+                    <button
+                      type="button"
+                      className="mst-btn ghost"
+                      onClick={() => {
+                        const cz = editingDish.customizer!
+                        setEditingDish({
+                          ...editingDish,
+                          customizer: {
+                            ...cz,
+                            variations: [
+                              ...cz.variations,
+                              { id: newId('v'), name: 'New size', price: editingDish.price },
+                            ],
+                          },
+                        })
+                      }}
+                    >
+                      + Size
+                    </button>
+                  </div>
+                  {editingDish.customizer.variations.map((v, vi) => (
+                    <div key={v.id} className="mst-recipe-row">
+                      <input
+                        className="mst-input"
+                        value={v.name}
+                        aria-label={`Variation ${vi + 1} name`}
+                        placeholder="Small / Medium / Large"
+                        onChange={(e) => {
+                          const cz = editingDish.customizer!
+                          setEditingDish({
+                            ...editingDish,
+                            customizer: {
+                              ...cz,
+                              variations: cz.variations.map((row, i) =>
+                                i === vi ? { ...row, name: e.target.value } : row,
+                              ),
+                            },
+                          })
+                        }}
+                      />
+                      <input
+                        className="mst-input mesa-ltr-nums"
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        value={v.price}
+                        aria-label={`Variation ${vi + 1} price`}
+                        title="Variation price"
+                        onChange={(e) => {
+                          const cz = editingDish.customizer!
+                          const price = Number(e.target.value) || 0
+                          setEditingDish({
+                            ...editingDish,
+                            customizer: {
+                              ...cz,
+                              variations: cz.variations.map((row, i) =>
+                                i === vi ? { ...row, price } : row,
+                              ),
+                            },
+                          })
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="mst-btn ghost"
+                        title="Remove size"
+                        aria-label="Remove size"
+                        disabled={(editingDish.customizer?.variations.length ?? 0) <= 1}
+                        onClick={() => {
+                          const cz = editingDish.customizer!
+                          setEditingDish({
+                            ...editingDish,
+                            customizer: {
+                              ...cz,
+                              variations: cz.variations.filter((_, i) => i !== vi),
+                            },
+                          })
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
                 {withAddonGroups(editingDish.customizer).map((g, gi) => (
-                  <div key={g.id} className="mst-topping-group">
-                    <p>
-                      <strong>{g.name}</strong> (min {g.min} / max {g.max})
-                    </p>
+                  <div key={g.id} className="mst-topping-group mst-cz-section">
+                    <div className="mst-cz-head">
+                      <input
+                        className="mst-input"
+                        value={g.name}
+                        aria-label={`Addon group ${gi + 1} name`}
+                        placeholder="Group name (Addons, Cheese…)"
+                        onChange={(e) => {
+                          const groups = withAddonGroups(editingDish.customizer!)
+                          setEditingDish({
+                            ...editingDish,
+                            customizer: {
+                              ...editingDish.customizer!,
+                              addonGroups: groups.map((grp, gIdx) =>
+                                gIdx === gi ? { ...grp, name: e.target.value } : grp,
+                              ),
+                            },
+                          })
+                        }}
+                      />
+                      <label className="mst-cz-minmax">
+                        Min
+                        <input
+                          className="mst-input mesa-ltr-nums"
+                          type="number"
+                          min={0}
+                          value={g.min}
+                          onChange={(e) => {
+                            const groups = withAddonGroups(editingDish.customizer!)
+                            const min = Math.max(0, Number(e.target.value) || 0)
+                            setEditingDish({
+                              ...editingDish,
+                              customizer: {
+                                ...editingDish.customizer!,
+                                addonGroups: groups.map((grp, gIdx) =>
+                                  gIdx === gi ? { ...grp, min, max: Math.max(min, grp.max) } : grp,
+                                ),
+                              },
+                            })
+                          }}
+                        />
+                      </label>
+                      <label className="mst-cz-minmax">
+                        Max
+                        <input
+                          className="mst-input mesa-ltr-nums"
+                          type="number"
+                          min={0}
+                          value={g.max}
+                          onChange={(e) => {
+                            const groups = withAddonGroups(editingDish.customizer!)
+                            const max = Math.max(0, Number(e.target.value) || 0)
+                            setEditingDish({
+                              ...editingDish,
+                              customizer: {
+                                ...editingDish.customizer!,
+                                addonGroups: groups.map((grp, gIdx) =>
+                                  gIdx === gi ? { ...grp, max, min: Math.min(grp.min, max) } : grp,
+                                ),
+                              },
+                            })
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="mst-btn ghost"
+                        title="Remove group"
+                        aria-label="Remove group"
+                        disabled={withAddonGroups(editingDish.customizer!).length <= 1}
+                        onClick={() => {
+                          const groups = withAddonGroups(editingDish.customizer!)
+                          setEditingDish({
+                            ...editingDish,
+                            customizer: {
+                              ...editingDish.customizer!,
+                              addonGroups: groups.filter((_, gIdx) => gIdx !== gi),
+                            },
+                          })
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="mst-cz-col-labels" aria-hidden>
+                      <span>Addon name</span>
+                      <span>Price</span>
+                      <span />
+                    </div>
+
                     {g.addons.length === 0 ? (
-                      <p>No toppings yet — pick from the list below.</p>
+                      <p className="mst-hint">No addons yet — use + Add topping below.</p>
                     ) : (
                       g.addons.map((a, ai) => (
                         <div key={a.id} className="mst-recipe-row">
@@ -1273,6 +1560,7 @@ export default function MastersPage() {
                             min={0}
                             value={a.price}
                             aria-label={`Topping ${ai + 1} price`}
+                            title="Addon price"
                             onChange={(e) => {
                               const groups = withAddonGroups(editingDish.customizer!)
                               const price = Number(e.target.value) || 0
@@ -1322,55 +1610,91 @@ export default function MastersPage() {
                         </div>
                       ))
                     )}
+
+                    <div className="mst-topping-pick">
+                      <MesaSelect
+                        value=""
+                        placeholder="+ Add topping"
+                        aria-label={`Add topping to ${g.name}`}
+                        options={toppingPickOptions}
+                        onChange={(v) => {
+                          if (!v || !editingDish.customizer) return
+                          if (v === '__custom__') {
+                            setEditingDish(
+                              appendTopping(editingDish, { name: 'New topping', price: 0 }, gi),
+                            )
+                            return
+                          }
+                          if (v.startsWith('ing:')) {
+                            const id = v.slice('ing:'.length)
+                            const item = ingredients.find((i) => i.id === id)
+                            if (!item) return
+                            setEditingDish(
+                              appendTopping(editingDish, { name: item.name, price: 0 }, gi),
+                            )
+                            return
+                          }
+                          if (v.startsWith('stock:')) {
+                            const id = v.slice('stock:'.length)
+                            const item = stock.find((s) => s.id === id)
+                            if (!item) return
+                            setEditingDish(
+                              appendTopping(editingDish, { name: item.name, price: 0 }, gi),
+                            )
+                            return
+                          }
+                          if (v.startsWith('name:')) {
+                            const rest = v.slice('name:'.length)
+                            const lastColon = rest.lastIndexOf(':')
+                            const rawName = lastColon >= 0 ? rest.slice(0, lastColon) : rest
+                            const rawPrice = lastColon >= 0 ? rest.slice(lastColon + 1) : '0'
+                            let name = rawName
+                            try {
+                              name = decodeURIComponent(rawName)
+                            } catch {
+                              /* keep raw */
+                            }
+                            setEditingDish(
+                              appendTopping(
+                                editingDish,
+                                { name, price: Number(rawPrice) || 0 },
+                                gi,
+                              ),
+                            )
+                          }
+                        }}
+                      />
+                    </div>
                   </div>
                 ))}
-                <div className="mst-topping-pick">
-                  <MesaSelect
-                    value=""
-                    placeholder="+ Add topping"
-                    aria-label="Add topping"
-                    options={toppingPickOptions}
-                    onChange={(v) => {
-                      if (!v || !editingDish.customizer) return
-                      if (v === '__custom__') {
-                        setEditingDish(appendTopping(editingDish, { name: 'New topping', price: 0 }))
-                        return
-                      }
-                      if (v.startsWith('ing:')) {
-                        const id = v.slice('ing:'.length)
-                        const item = ingredients.find((i) => i.id === id)
-                        if (!item) return
-                        setEditingDish(appendTopping(editingDish, { name: item.name, price: 0 }))
-                        return
-                      }
-                      if (v.startsWith('stock:')) {
-                        const id = v.slice('stock:'.length)
-                        const item = stock.find((s) => s.id === id)
-                        if (!item) return
-                        setEditingDish(appendTopping(editingDish, { name: item.name, price: 0 }))
-                        return
-                      }
-                      if (v.startsWith('name:')) {
-                        const rest = v.slice('name:'.length)
-                        const lastColon = rest.lastIndexOf(':')
-                        const rawName = lastColon >= 0 ? rest.slice(0, lastColon) : rest
-                        const rawPrice = lastColon >= 0 ? rest.slice(lastColon + 1) : '0'
-                        let name = rawName
-                        try {
-                          name = decodeURIComponent(rawName)
-                        } catch {
-                          /* keep raw */
-                        }
-                        setEditingDish(
-                          appendTopping(editingDish, {
-                            name,
-                            price: Number(rawPrice) || 0,
-                          }),
-                        )
-                      }
-                    }}
-                  />
-                </div>
+
+                <button
+                  type="button"
+                  className="mst-btn ghost"
+                  onClick={() => {
+                    const groups = withAddonGroups(editingDish.customizer!)
+                    setEditingDish({
+                      ...editingDish,
+                      customizer: {
+                        ...editingDish.customizer!,
+                        addonGroups: [
+                          ...groups,
+                          {
+                            id: newId('g'),
+                            name: 'New group',
+                            appendVariationName: false,
+                            min: 0,
+                            max: 1,
+                            addons: [],
+                          },
+                        ],
+                      },
+                    })
+                  }}
+                >
+                  + Addon group
+                </button>
+
                 {!ingredients.length ? (
                   <p className="mst-hint">
                     Tip: add items in{' '}
@@ -1446,17 +1770,17 @@ export default function MastersPage() {
             <div className="mst-modal-actions">
               {!isNew ? (
                 <button type="button" className="mst-btn danger" onClick={removeDish}>
-                  Delete
+                  {t.delete}
                 </button>
               ) : (
                 <span />
               )}
               <div className="mst-modal-actions-end">
                 <button type="button" className="mst-btn ghost" onClick={closeEditor}>
-                  Cancel
+                  {t.cancel}
                 </button>
                 <button type="button" className="mst-btn primary" onClick={saveDishForm}>
-                  Save
+                  {t.save}
                 </button>
               </div>
             </div>

@@ -109,12 +109,39 @@ export type MasterDish = {
   hsn?: string
   details?: string
   productType?: 'single' | 'combo'
-  /** Tax rate ids from tax master */
+  /** Tax rate ids from tax master — at most one id (single rate per item). Empty = company default. */
   taxIds?: string[]
   /** Allowed discount rate ids from discount master (empty = all active) */
   discountIds?: string[]
   /** Product photo (data URL) shown on the POS menu */
   imageDataUrl?: string
+  /** When false, item is ready-to-serve and skips KOT (canned drinks, pre-packaged). Default: kitchen. */
+  requiresKitchen?: boolean
+}
+
+/**
+ * Price shown on the menu grid.
+ * With variations, chargeable amount is variation (+ addons); tile shows the lowest size
+ * as "from X" when sizes differ.
+ */
+export function menuDisplayPrice(dish: Pick<MasterDish, 'price' | 'customizer'>): {
+  amount: number
+  from: boolean
+} {
+  const vars = dish.customizer?.variations?.filter((v) => Number.isFinite(v.price)) ?? []
+  if (!vars.length) return { amount: Number(dish.price) || 0, from: false }
+  const amount = Math.min(...vars.map((v) => Number(v.price) || 0))
+  const from = vars.some((v) => (Number(v.price) || 0) !== amount)
+  return { amount, from }
+}
+
+/** Keep product.price aligned with the default (first) variation when options exist. */
+export function withSyncedBasePrice(dish: MasterDish): MasterDish {
+  const first = dish.customizer?.variations?.[0]
+  if (!first || !Number.isFinite(first.price)) return dish
+  const next = Math.round(Number(first.price) * 100) / 100
+  if (dish.price === next) return dish
+  return { ...dish, price: next }
 }
 
 /** Normalize PLU / dish code for uniqueness checks. */
@@ -303,7 +330,7 @@ export const seedDishes: MasterDish[] = [
   { id: 'm-pizza-fav1', code: '805', name: 'Four Cheese',       categoryId: 'cat-pizza-fav',     category: 'Favorite Items', price: 52, popular: true, active: true, recipe: [{ stockId: 's5', qty: 0.8 }] },
   // Beverages › Cold Drinks
   { id: 'm9',  code: '401', name: 'House Lemonade',    categoryId: 'cat-drinks', category: 'Cold Drinks',  price: 16.88, popular: true, active: true },
-  { id: 'm11', code: '403', name: 'Sparkling Water',   categoryId: 'cat-drinks', category: 'Cold Drinks',  price: 13.12,               active: true },
+  { id: 'm11', code: '403', name: 'Sparkling Water',   categoryId: 'cat-drinks', category: 'Cold Drinks',  price: 13.12, requiresKitchen: false, active: true },
   { id: 'm42', code: '404', name: 'Fresh Orange Juice',categoryId: 'cat-drinks', category: 'Cold Drinks',  price: 18,    popular: true, active: true },
   // Beverages › Hot Drinks
   { id: 'm10', code: '402', name: 'Espresso',          categoryId: 'cat-hot',    category: 'Hot Drinks',   price: 11.25,               active: true },

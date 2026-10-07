@@ -1,3 +1,4 @@
+import { getActiveBranchId } from './company'
 import type { StockItem } from './mock'
 import { tenantGetItem, tenantSetItem } from './repos/db'
 
@@ -11,6 +12,8 @@ export type YieldLink = {
   label: string
   note?: string
   active?: boolean
+  /** Branch that owns this conversion. */
+  branchId?: string
 }
 
 export type YieldConversion = {
@@ -22,26 +25,18 @@ export type YieldConversion = {
 export const YIELD_LINKS_KEY = 'mesa-yield-links'
 export const YIELD_LINKS_CHANGED = 'mesa:yield-links-changed'
 
-export const SEED_YIELD_LINKS: YieldLink[] = [
-  {
-    id: 'yl-potato-fry',
-    fromSku: 'PRD-POT-RAW',
-    toSku: 'PRD-POT-FRY',
-    defaultYieldPct: 85,
-    label: 'Whole potato → fry cut',
-    note: 'Peel & cut; ~15% trim waste',
-    active: true,
-  },
-  {
-    id: 'yl-paneer-portion',
-    fromSku: 'DRY-PAN-BLK',
-    toSku: 'DRY-PAN-CKB',
-    defaultYieldPct: 100,
-    label: 'Paneer block → tikka cubes',
-    note: 'Portion bulk block for line cooks',
-    active: true,
-  },
-]
+/** Demo pairs — never auto-seed into production storage. */
+const SEED_YIELD_IDS = new Set(['yl-potato-fry', 'yl-paneer-portion'])
+
+export function isSeedYieldLink(row: { id?: string; fromSku?: string; toSku?: string }): boolean {
+  if (row.id && SEED_YIELD_IDS.has(String(row.id))) return true
+  const from = String(row.fromSku || '').trim().toUpperCase()
+  const to = String(row.toSku || '').trim().toUpperCase()
+  return (
+    (from === 'PRD-POT-RAW' && to === 'PRD-POT-FRY') ||
+    (from === 'DRY-PAN-BLK' && to === 'DRY-PAN-CKB')
+  )
+}
 
 function normalizeYieldLink(row: YieldLink): YieldLink {
   return {
@@ -52,41 +47,64 @@ function normalizeYieldLink(row: YieldLink): YieldLink {
     label: String(row.label ?? '').trim(),
     note: row.note?.trim() || undefined,
     active: row.active !== false,
+    branchId: row.branchId ? String(row.branchId) : undefined,
   }
 }
 
-export function loadYieldLinks(): YieldLink[] {
+/** All stored links (all branches), seeds stripped. */
+export function loadAllYieldLinks(): YieldLink[] {
   try {
     const raw = tenantGetItem(YIELD_LINKS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as YieldLink[]
-      if (Array.isArray(parsed) && parsed.length) {
-        return parsed.map(normalizeYieldLink)
+      if (Array.isArray(parsed)) {
+        const cleaned = parsed.map(normalizeYieldLink).filter((r) => !isSeedYieldLink(r))
+        if (cleaned.length !== parsed.length) {
+          tenantSetItem(YIELD_LINKS_KEY, JSON.stringify(cleaned))
+        }
+        return cleaned
       }
     }
   } catch {
-    /* use seed */
+    /* empty */
   }
-  return SEED_YIELD_LINKS.map((r) => ({ ...r }))
+  return []
 }
 
-export function activeYieldLinks(): YieldLink[] {
-  return loadYieldLinks().filter((l) => l.active !== false)
+/** Links for a branch (defaults to active). Unscoped leftovers are ignored. */
+export function loadYieldLinks(branchId = getActiveBranchId()): YieldLink[] {
+  return loadAllYieldLinks()
+    .filter((r) => r.branchId === branchId)
+    .sort((a, b) => a.label.localeCompare(b.label))
 }
 
-export function saveYieldLinks(rows: YieldLink[]) {
-  tenantSetItem(YIELD_LINKS_KEY, JSON.stringify(rows.map(normalizeYieldLink)))
+export function activeYieldLinks(branchId = getActiveBranchId()): YieldLink[] {
+  return loadYieldLinks(branchId).filter((l) => l.active !== false)
+}
+
+export function saveYieldLinks(rows: YieldLink[], branchId = getActiveBranchId()) {
+  const scoped = rows
+    .map((r) => normalizeYieldLink({ ...r, branchId: r.branchId ?? branchId }))
+    .filter((r) => !isSeedYieldLink(r) && r.branchId === branchId)
+  const others = loadAllYieldLinks().filter(
+    (r) => r.branchId && r.branchId !== branchId && !isSeedYieldLink(r),
+  )
+  tenantSetItem(YIELD_LINKS_KEY, JSON.stringify([...others, ...scoped]))
   window.dispatchEvent(new Event(YIELD_LINKS_CHANGED))
 }
 
-export function upsertYieldLink(row: YieldLink) {
-  const doc = normalizeYieldLink(row)
-  const rows = loadYieldLinks()
-  saveYieldLinks([doc, ...rows.filter((r) => r.id !== doc.id)])
+export function upsertYieldLink(row: YieldLink, branchId = getActiveBranchId()) {
+  if (isSeedYieldLink(row)) return
+  const doc = normalizeYieldLink({ ...row, branchId })
+  const rows = loadYieldLinks(branchId)
+  saveYieldLinks([doc, ...rows.filter((r) => r.id !== doc.id)], branchId)
 }
 
-export function deleteYieldLink(id: string) {
-  saveYieldLinks(loadYieldLinks().filter((r) => r.id !== id))
+export function deleteYieldLink(id: string, branchId = getActiveBranchId()) {
+  saveYieldLinks(
+    loadYieldLinks(branchId).filter((r) => r.id !== id),
+    branchId,
+  )
 }
 
 export function isYieldPairTaken(
@@ -100,10 +118,13 @@ export function isYieldPairTaken(
   )
 }
 
-export function yieldConversionsForStock(stock: StockItem[]): YieldConversion[] {
+export function yieldConversionsForStock(
+  stock: StockItem[],
+  branchId = getActiveBranchId(),
+): YieldConversion[] {
   const bySku = new Map(stock.map((s) => [s.sku, s]))
   const out: YieldConversion[] = []
-  for (const link of activeYieldLinks()) {
+  for (const link of activeYieldLinks(branchId)) {
     const from = bySku.get(link.fromSku)
     const to = bySku.get(link.toSku)
     if (!from || !to) continue
@@ -114,8 +135,12 @@ export function yieldConversionsForStock(stock: StockItem[]): YieldConversion[] 
   return out.sort((a, b) => a.link.label.localeCompare(b.link.label))
 }
 
-export function findYieldLink(fromSku: string, toSku: string): YieldLink | undefined {
-  return activeYieldLinks().find((l) => l.fromSku === fromSku && l.toSku === toSku)
+export function findYieldLink(
+  fromSku: string,
+  toSku: string,
+  branchId = getActiveBranchId(),
+): YieldLink | undefined {
+  return activeYieldLinks(branchId).find((l) => l.fromSku === fromSku && l.toSku === toSku)
 }
 
 export function conversionLabel(c: YieldConversion): string {

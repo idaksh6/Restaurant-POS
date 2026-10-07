@@ -1,15 +1,16 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { money } from '../data/mock'
 import { filterByActiveTimetables } from '../data/menuTimetable'
 import type { MasterDish, MenuItem } from '../data/masters'
+import { menuDisplayPrice } from '../data/masters'
 import { localizedName } from '../lib/branding'
 import { useI18n } from '../locale/i18n'
 import { useMasters } from '../state/MastersContext'
 import { useCatalog } from '../state/CatalogContext'
 import { usePos } from '../state/PosContext'
 import CustomizerModal from './CustomizerModal'
+import { ITEM_NOTE_SUGGESTIONS } from '../data/itemNotes'
 
-const quickNotes = ['No onion', 'Extra spicy', 'Allergy', 'Well done', 'On the side']
 const RECENT_KEY = 'mesa-recent-items'
 
 type Props = {
@@ -25,7 +26,7 @@ function loadRecent(): string[] {
   }
 }
 
-export default function MenuPicker({ onAdd }: Props) {
+function MenuPicker({ onAdd }: Props) {
   const { lang, t } = useI18n()
   const { flash } = usePos()
   const { categories, activeDishes } = useMasters()
@@ -50,14 +51,23 @@ export default function MenuPicker({ onAdd }: Props) {
   const [noteItem, setNoteItem]         = useState<MasterDish | null>(null)
   const [customItem, setCustomItem]     = useState<MasterDish | null>(null)
   const [note, setNote]                 = useState('')
+  const [clockTick, setClockTick]       = useState(() => Date.now())
   const codeRef = useRef<HTMLInputElement>(null)
   const itemsRef = useRef<HTMLDivElement>(null)
   const itemsScrollRef = useRef(0)
 
+  // Re-evaluate menu schedules as the clock crosses time windows.
+  useEffect(() => {
+    const id = window.setInterval(() => setClockTick(Date.now()), 30_000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  // Restore scroll only when the visible item list changes — not on every parent re-render
+  // (ticket tax/totals updates must not flash the menu).
   useLayoutEffect(() => {
     const el = itemsRef.current
     if (el) el.scrollTop = itemsScrollRef.current
-  })
+  }, [selectedMain, selectedSub, query, activeDishes])
 
   // When main changes, reset sub to __all__
   useEffect(() => { setSelectedSub('__all__') }, [selectedMain])
@@ -67,8 +77,8 @@ export default function MenuPicker({ onAdd }: Props) {
   }, [mainCats, selectedMain])
 
   const timetable = useMemo(
-    () => filterByActiveTimetables([], [], timetables),
-    [timetables],
+    () => filterByActiveTimetables([], [], timetables, new Date(clockTick)),
+    [timetables, clockTick],
   )
 
   const timetableDishes = useMemo(() => {
@@ -77,14 +87,35 @@ export default function MenuPicker({ onAdd }: Props) {
     const catSet = new Set(timetable.categoryIds)
     return activeDishes.filter((item) => {
       if (prodSet.size && prodSet.has(item.id)) return true
-      if (!catSet.size) return prodSet.size ? false : true
+      if (!catSet.size) return false
       const sub = subCats.find((s) => s.id === item.categoryId)
       return (
         catSet.has(item.categoryId) ||
-        (sub?.parentId ? catSet.has(sub.parentId) : false)
+        (sub?.parentId ? catSet.has(sub.parentId) : false) ||
+        (sub ? catSet.has(sub.id) : false)
       )
     })
   }, [activeDishes, subCats, timetable])
+
+  const visibleMainCats = useMemo(() => {
+    if (!timetable.restricted) return mainCats
+    return mainCats.filter((main) =>
+      timetableDishes.some((item) => {
+        if (item.categoryId === main.id) return true
+        const sub = subCats.find((s) => s.id === item.categoryId)
+        return sub?.parentId === main.id
+      }),
+    )
+  }, [mainCats, subCats, timetable.restricted, timetableDishes])
+
+  // Keep selection valid when timetable hides the current main.
+  useEffect(() => {
+    if (selectedMain === '__fav__' || selectedMain === '__recent__') return
+    if (!visibleMainCats.length) return
+    if (!visibleMainCats.some((c) => c.id === selectedMain)) {
+      setSelectedMain(visibleMainCats[0].id)
+    }
+  }, [visibleMainCats, selectedMain])
 
   function underSelectedMain(item: (typeof activeDishes)[number]) {
     if (item.categoryId === selectedMain) return true
@@ -119,12 +150,15 @@ export default function MenuPicker({ onAdd }: Props) {
   }, [timetableDishes, recentIds, query])
 
   const filtered = useMemo(() => {
+    const q = query.trim()
+    // Typed search is global — ignore Favorite / Recent / category tabs.
+    if (q) return timetableDishes.filter((item) => matchesQuery(item))
     if (selectedMain === '__fav__') return favoriteItems
     if (selectedMain === '__recent__') return recentItems
     return timetableDishes.filter((item) => {
       if (!underSelectedMain(item)) return false
       if (selectedSub !== '__all__' && item.categoryId !== selectedSub) return false
-      return matchesQuery(item)
+      return true
     })
   }, [timetableDishes, selectedMain, selectedSub, query, favoriteItems, recentItems])
 
@@ -150,7 +184,7 @@ export default function MenuPicker({ onAdd }: Props) {
   function confirmAdd(item: MasterDish, itemNote?: string) {
     remember(item)
     onAdd(item, itemNote)
-    flash(t.itemAdded)
+    flash(`${localizedName(item, lang)} · ${t.itemAdded}`, 'ok', 1400)
   }
 
   function tryAdd(item: MasterDish, itemNote?: string) {
@@ -214,27 +248,27 @@ export default function MenuPicker({ onAdd }: Props) {
           </svg>
           <input
             className="search"
-            placeholder="Search name, category, or code…"
+            placeholder={t.searchMenu}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search menu"
+            aria-label={t.searchMenu}
           />
         </label>
         <div className="mp-code-row">
           <label className="mp-plu-field">
-            <span>PLU</span>
+            <span>{t.mpPlu}</span>
             <input
               ref={codeRef}
               className="search code-input"
-              placeholder="e.g. 801"
+              placeholder={t.mpPluPlaceholder}
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
               onKeyDown={(e) => { if (e.key === 'Enter') submitCode() }}
-              aria-label="Quick code PLU"
+              aria-label={t.quickCode}
             />
           </label>
           <button type="button" className="btn btn-teal mp-add-code" onClick={submitCode}>
-            Add
+            {t.mpAdd}
           </button>
           {codeMsg ? <span className="code-msg">{codeMsg}</span> : null}
         </div>
@@ -248,7 +282,7 @@ export default function MenuPicker({ onAdd }: Props) {
             onClick={() => setSelectedMain('__fav__')}
           >
             <CatGlyph name="favorite" />
-            <span>Favorite</span>
+            <span>{t.mpFavorite}</span>
             {favoriteItems.length ? <span className="mp-sub-count">{favoriteItems.length}</span> : null}
           </button>
           <button
@@ -257,13 +291,20 @@ export default function MenuPicker({ onAdd }: Props) {
             onClick={() => setSelectedMain('__recent__')}
           >
             <CatGlyph name="recent" />
-            <span>Recent</span>
+            <span>{t.mpRecent}</span>
             {recentItems.length ? <span className="mp-sub-count">{recentItems.length}</span> : null}
           </button>
           <div className="mp-nav-split" aria-hidden />
-          {mainCats.map((mc) => {
+          {visibleMainCats.map((mc) => {
             const open = selectedMain === mc.id
-            const kids = subCats.filter((s) => s.parentId === mc.id)
+            // "All" is reserved for the synthetic __all__ filter — never list a real category with that name
+            const kids = subCats.filter(
+              (s) =>
+                s.parentId === mc.id &&
+                s.name.trim().toLowerCase() !== 'all' &&
+                localizedName(s, lang).trim().toLowerCase() !== 'all' &&
+                (!timetable.restricted || (subCounts[s.id] ?? 0) > 0),
+            )
             return (
               <div key={mc.id} className={`mp-nav-block${open ? ' open' : ''}`}>
                 <button
@@ -281,7 +322,7 @@ export default function MenuPicker({ onAdd }: Props) {
                       className={`mp-sub-btn${selectedSub === '__all__' ? ' active' : ''}`}
                       onClick={() => setSelectedSub('__all__')}
                     >
-                      <span className="mp-sub-name">All</span>
+                      <span className="mp-sub-name">{t.mpAll}</span>
                       {subCounts.__all__ ? <span className="mp-sub-count">{subCounts.__all__}</span> : null}
                     </button>
                     {kids.map((sc) => (
@@ -314,16 +355,16 @@ export default function MenuPicker({ onAdd }: Props) {
             <div className="ticket-empty">
               <strong>
                 {selectedMain === '__fav__'
-                  ? 'No favorites yet'
+                  ? t.mpNoFavorites
                   : selectedMain === '__recent__'
-                    ? 'No recent items'
-                    : 'No items found'}
+                    ? t.mpNoRecent
+                    : t.mpNoItems}
               </strong>
               {selectedMain === '__fav__'
-                ? 'Mark a product as Popular / favorite in Products.'
+                ? t.mpFavHint
                 : selectedMain === '__recent__'
-                  ? 'Items you add to a ticket will show here.'
-                  : 'Add dishes in Masters.'}
+                  ? t.mpRecentHint
+                  : t.mpMastersHint}
             </div>
           ) : grouped ? (
             // grouped by sub-cat
@@ -399,14 +440,43 @@ export default function MenuPicker({ onAdd }: Props) {
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />
-            <div className="menu-tabs">
-              {quickNotes.map((n) => (
-                <button key={n} type="button" onClick={() => setNote(n)}>{n}</button>
-              ))}
+            <div className="menu-tabs mp-note-chips" role="group" aria-label="Note suggestions">
+              {ITEM_NOTE_SUGGESTIONS.map((n) => {
+                const parts = note
+                  .split(',')
+                  .map((p) => p.trim())
+                  .filter(Boolean)
+                const active = parts.some((p) => p.toLowerCase() === n.toLowerCase())
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    className={active ? 'active' : ''}
+                    aria-pressed={active}
+                    onClick={() => {
+                      if (!note.trim()) {
+                        setNote(n)
+                        return
+                      }
+                      if (active) {
+                        setNote(
+                          parts
+                            .filter((p) => p.toLowerCase() !== n.toLowerCase())
+                            .join(', '),
+                        )
+                        return
+                      }
+                      setNote(`${note.trim()}, ${n}`)
+                    }}
+                  >
+                    {n}
+                  </button>
+                )
+              })}
             </div>
             <div className="action-row">
-              <button type="button" className="btn btn-ghost" onClick={() => { tryAdd(noteItem); setNoteItem(null) }}>Add plain</button>
-              <button type="button" className="btn btn-primary" onClick={() => { tryAdd(noteItem, note.trim() || undefined); setNoteItem(null); setNote('') }}>Add with note</button>
+              <button type="button" className="btn btn-ghost" onClick={() => { tryAdd(noteItem); setNoteItem(null); setNote('') }}>{t.mpAddPlain}</button>
+              <button type="button" className="btn btn-primary" onClick={() => { tryAdd(noteItem, note.trim() || undefined); setNoteItem(null); setNote('') }}>{t.mpAddWithNote}</button>
             </div>
           </div>
         </div>
@@ -414,6 +484,8 @@ export default function MenuPicker({ onAdd }: Props) {
     </div>
   )
 }
+
+export default memo(MenuPicker)
 
 function CatGlyph({ name }: { name: string }) {
   const n = name.toLowerCase()
@@ -484,45 +556,83 @@ function ItemCard({
   onCustomize: (item: MasterDish) => void
   onNote: (item: MasterDish) => void
 }) {
+  const { t } = useI18n()
   const label = localizedName(item, lang)
   const mark = item.code || (item.name.replace(/[^A-Za-z]/g, '').slice(0, 2) || '•').toUpperCase()
+  const display = menuDisplayPrice(item)
+  const hasOptions = Boolean(item.customizer)
   return (
-    <div className={`mp-item-wrap${item.popular ? ' is-popular' : ''}`}>
-      {item.popular ? <span className="mp-item-badge popular">Popular</span> : null}
-      <button type="button" className="mp-item" onClick={() => item.customizer ? onCustomize(item) : onAdd(item)}>
-        <span className={`mp-item-thumb${item.imageDataUrl ? ' has-photo' : ''}`} aria-hidden>
-          {item.imageDataUrl ? <img src={item.imageDataUrl} alt="" /> : mark}
+    <div
+      className={`mp-item-wrap${item.popular ? ' is-popular' : ''}${hasOptions ? ' has-options' : ''}`}
+    >
+      {item.popular ? (
+        <span className="mp-item-popular-badge" title={t.mpFavorite} aria-label={t.mpFavorite}>
+          {t.mpFavorite}
         </span>
-        <em className="item-code">{item.code}</em>
-        <strong>{label}</strong>
-        <span className="mp-item-meta">
-          <span className="mp-item-price">{money(item.price, lang)}</span>
-          {item.customizer ? <span className="mp-item-tag custom">Custom</span> : null}
-        </span>
-      </button>
-      <button
-        type="button"
-        className="mp-note-btn"
-        title={item.customizer ? 'Customize options' : 'Add with note'}
-        onClick={(e) => {
-          e.stopPropagation()
-          item.customizer ? onCustomize(item) : onNote(item)
-        }}
-      >
-        {item.customizer ? 'Opts' : 'Note'}
-      </button>
-      <button
-        type="button"
-        className="mp-add-btn"
-        title="Add to order"
-        onClick={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          item.customizer ? onCustomize(item) : onAdd(item)
-        }}
-      >
-        +
-      </button>
+      ) : null}
+      <div className="mp-item-row">
+        <button type="button" className="mp-item" onClick={() => (hasOptions ? onCustomize(item) : onAdd(item))}>
+          <span className={`mp-item-thumb${item.imageDataUrl ? ' has-photo' : ''}`} aria-hidden>
+            {item.imageDataUrl ? <img src={item.imageDataUrl} alt="" /> : mark}
+          </span>
+          <em className="item-code">{item.code}</em>
+          <strong>{label}</strong>
+          <span className="mp-item-meta">
+            <span className="mp-item-price">
+              {display.from ? <span className="mp-price-from">from </span> : null}
+              {money(display.amount, lang)}
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="mp-add-btn"
+          title={t.mpAddToOrder}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            hasOptions ? onCustomize(item) : onAdd(item)
+          }}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          className={`mp-note-btn${hasOptions ? ' is-opts' : ''}`}
+          title={hasOptions ? t.mpCustomize : t.mpAddWithNote}
+          onClick={(e) => {
+            e.stopPropagation()
+            hasOptions ? onCustomize(item) : onNote(item)
+          }}
+        >
+          {hasOptions ? (
+            <>
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M4 7h10M14 7a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0ZM4 17h6M10 17a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0ZM20 17h-4M4 12h16"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+              {t.mpCustomize}
+            </>
+          ) : (
+            <>
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M5 6.5h14v11H5v-11Z"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                />
+                <path d="M8 10h8M8 13.5h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              {t.taNoteLabel}
+            </>
+          )}
+        </button>
+      </div>
     </div>
   )
 }

@@ -9,6 +9,7 @@ import {
   getPermissions,
   loadManagedRoles,
   navMeta,
+  navRequiredByFlags,
   normalizePrivileges,
   privilegesWithFlagToggle,
   privilegesWithNavToggle,
@@ -20,9 +21,11 @@ import {
 } from '../auth/roles'
 import { HubFooter, HubHeader } from '../components/HubChrome'
 import AccessDenied from '../components/AccessDenied'
+import ArabicTextInput from '../components/ArabicTextInput'
 import Req from '../components/Req'
 import { useDeleteConfirm } from '../hooks/useDeleteConfirm'
 import { useI18n } from '../locale/i18n'
+import { latinToArabic } from '../lib/arabicTransliterate'
 import { loadManagedUsers } from '../data/staffUsers'
 import {
   apiAccessReady,
@@ -151,6 +154,50 @@ export default function RolesPage() {
       return {
         ...prev,
         privileges: privilegesWithFlagToggle(prev.privileges, key),
+      }
+    })
+  }
+
+  function setAllScreens(on: boolean) {
+    if (!editing || editing.key === 'admin') return
+    setEditing((prev) => {
+      if (!prev) return prev
+      const screenKeys = allNavKeys.filter((k) => k !== 'home')
+      if (on) {
+        return {
+          ...prev,
+          privileges: normalizePrivileges({
+            ...prev.privileges,
+            nav: ['home', ...screenKeys],
+          }),
+        }
+      }
+      return {
+        ...prev,
+        privileges: normalizePrivileges({
+          ...prev.privileges,
+          nav: ['home', ...navRequiredByFlags(prev.privileges)],
+        }),
+      }
+    })
+  }
+
+  function setAllActions(on: boolean) {
+    if (!editing || editing.key === 'admin') return
+    setEditing((prev) => {
+      if (!prev) return prev
+      const nextFlags = { ...prev.privileges }
+      for (const { key } of accessFlagLabels) {
+        nextFlags[key] = on
+      }
+      const screens = allNavKeys.filter((k) => k !== 'home')
+      return {
+        ...prev,
+        privileges: normalizePrivileges({
+          ...nextFlags,
+          // Select-all actions: keep/open all screens; clear actions: keep current screen picks
+          nav: on ? ['home', ...screens] : prev.privileges.nav,
+        }),
       }
     })
   }
@@ -352,17 +399,25 @@ export default function RolesPage() {
                   autoFocus={isNew}
                   value={editing.name}
                   disabled={locked}
-                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                  onChange={(e) => {
+                    const name = e.target.value
+                    setEditing({
+                      ...editing,
+                      name,
+                      nameAr: locked ? editing.nameAr : latinToArabic(name),
+                    })
+                  }}
                 />
               </label>
               <label>
                 <span>Arabic name</span>
-                <input
-                  className="search"
-                  dir="rtl"
+                <ArabicTextInput
                   value={editing.nameAr}
                   disabled={locked}
-                  onChange={(e) => setEditing({ ...editing, nameAr: e.target.value })}
+                  mode="ar"
+                  autoComplete="off"
+                  placeholder="Fills from Role name · edit anytime"
+                  onChange={(nameAr) => setEditing({ ...editing, nameAr })}
                 />
               </label>
               {isNew ? (
@@ -388,7 +443,17 @@ export default function RolesPage() {
               <p className="zk-access-note">Admin always has full access. Create a custom role to limit screens.</p>
             ) : (
               <>
-                <h3 className="zk-access-h">{t.screens}</h3>
+                <div className="zk-access-h-row">
+                  <h3 className="zk-access-h">{t.screens}</h3>
+                  <div className="zk-access-bulk">
+                    <button type="button" className="zk-access-bulk-btn" onClick={() => setAllScreens(true)}>
+                      {t.selectAll}
+                    </button>
+                    <button type="button" className="zk-access-bulk-btn" onClick={() => setAllScreens(false)}>
+                      {t.clearAll}
+                    </button>
+                  </div>
+                </div>
                 <div className="zk-access-nav">
                   {allNavKeys
                     .filter((k) => k !== 'home')
@@ -403,7 +468,17 @@ export default function RolesPage() {
                       </button>
                     ))}
                 </div>
-                <h3 className="zk-access-h">{t.actions}</h3>
+                <div className="zk-access-h-row">
+                  <h3 className="zk-access-h">{t.actions}</h3>
+                  <div className="zk-access-bulk">
+                    <button type="button" className="zk-access-bulk-btn" onClick={() => setAllActions(true)}>
+                      {t.selectAll}
+                    </button>
+                    <button type="button" className="zk-access-bulk-btn" onClick={() => setAllActions(false)}>
+                      {t.clearAll}
+                    </button>
+                  </div>
+                </div>
                 <p className="zk-access-note">{t.actionsAutoScreensHint}</p>
                 <div className="zk-access-flags">
                   {accessFlagLabels.map(({ key, label, hint }) => (

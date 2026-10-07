@@ -72,7 +72,8 @@ export function saveAllReceipts(rows: StockReceipt[]) {
 }
 
 export function receiptsForBranch(rows: StockReceipt[], branchId = getActiveBranchId()) {
-  return rows.filter((r) => !r.branchId || r.branchId === branchId)
+  // Strict branch match — never show unscoped / other-branch ghosts.
+  return rows.filter((r) => r.branchId === branchId)
 }
 
 export function loadReceipts(branchId = getActiveBranchId()): StockReceipt[] {
@@ -94,9 +95,10 @@ export function mergeRemoteReceipts(
   pending: StockReceipt[] = [],
 ): StockReceipt[] {
   const others = all.filter((r) => r.branchId && r.branchId !== branchId)
-  const localBranch = all.filter((r) => !r.branchId || r.branchId === branchId)
+  const localBranch = all.filter((r) => r.branchId === branchId)
   const byId = new Map<string, StockReceipt>()
-  const source = remote.length ? remote : localBranch
+  // Prefer server list for this branch when present (same pattern as ingredients).
+  const source = remote.length ? remote.filter((r) => !r.branchId || r.branchId === branchId) : localBranch
   for (const row of source) {
     byId.set(row.id, { ...row, branchId: row.branchId ?? branchId })
   }
@@ -117,6 +119,14 @@ export function nextReceiveNumber(rows: StockReceipt[]) {
   const nums = rows.map((r) => Number(r.receiveNumber)).filter((n) => !Number.isNaN(n))
   const max = nums.length ? Math.max(...nums) : 0
   return String(max + 1)
+}
+
+/** Ensure receive # is unique within the branch list (bumps if already used). */
+export function uniqueReceiveNumber(rows: StockReceipt[], preferred: string): string {
+  const want = preferred.trim()
+  const taken = new Set(rows.map((r) => String(r.receiveNumber).trim()))
+  if (want && !taken.has(want)) return want
+  return nextReceiveNumber(rows)
 }
 
 type CostHist = Record<string, number[]>

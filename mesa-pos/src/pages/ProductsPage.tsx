@@ -1,17 +1,17 @@
 import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import ArabicTextInput from '../components/ArabicTextInput'
+import DishCustomizerEditor from '../components/DishCustomizerEditor'
 import MesaSelect from '../components/MesaSelect'
 import { getPermissions } from '../auth/roles'
 import { HubFooter, HubHeader } from '../components/HubChrome'
 import { useDeleteConfirm } from '../hooks/useDeleteConfirm'
-import { settingsHubPath } from '../lib/settingsHub'
 import { localizedName } from '../lib/branding'
 import { useI18n } from '../locale/i18n'
 import type { MasterDish } from '../data/masters'
-import { isDishCodeTaken, nextUniqueDishCode, recipeLineIngredientId } from '../data/masters'
+import { isDishCodeTaken, nextUniqueDishCode, recipeLineIngredientId, withSyncedBasePrice } from '../data/masters'
 import { money } from '../data/mock'
-import { activeTaxes, defaultTaxIds } from '../data/tax'
+import { activeTaxes, companyDefaultTaxPercent, normalizeTaxIds } from '../data/tax'
 import { nextUnitCode, type MeasureUnit } from '../data/units'
 import { getActiveBranchId } from '../data/company'
 import { useAuth } from '../state/AuthContext'
@@ -20,7 +20,15 @@ import { useMasters } from '../state/MastersContext'
 import { usePos } from '../state/PosContext'
 import { useSync } from '../sync/SyncContext'
 
-type Tab = 'basic' | 'tax' | 'recipe' | 'discount'
+type Tab = 'basic' | 'tax' | 'recipe' | 'options' | 'discount'
+
+function IconPopularStar() {
+  return (
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden>
+      <path d="m12 3.4 2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 8.6l5-.7L12 3.4Z" />
+    </svg>
+  )
+}
 
 function emptyDish(
   categoryId: string,
@@ -133,7 +141,7 @@ export default function ProductsPage() {
     }
     setIsNew(true)
     setTab('basic')
-    setEditing(emptyDish(cat.id, cat.name, nextCode(), units[0]?.id, defaultTaxIds(taxes)))
+    setEditing(emptyDish(cat.id, cat.name, nextCode(), units[0]?.id, []))
   }
 
   function startEdit(dish: MasterDish) {
@@ -212,7 +220,15 @@ export default function ProductsPage() {
     }
     const cost = Number(editing.cost) || 0
     const price = Number(editing.price) || 0
-    await saveDish({ ...editing, name: editing.name.trim(), cost, price })
+    await saveDish(
+      withSyncedBasePrice({
+        ...editing,
+        name: editing.name.trim(),
+        cost,
+        price,
+        taxIds: normalizeTaxIds(editing.taxIds),
+      }),
+    )
     setEditing(null)
     flash(isNew ? 'Menu item saved' : 'Menu item updated')
   }
@@ -255,7 +271,7 @@ export default function ProductsPage() {
 
   return (
     <div className="zk-products">
-      <HubHeader closeTo={settingsHubPath('products')} />
+      <HubHeader closeTo="/masters?tab=dishes" />
 
       <div className="zk-products-bar">
         <h1>{t.menuDetails}</h1>
@@ -366,6 +382,11 @@ export default function ProductsPage() {
                   <span className={`zk-product-badge${dish.active ? '' : ' off'}`}>
                     {dish.active ? 'Active' : 'Inactive'}
                   </span>
+                  {dish.popular ? (
+                    <span className="zk-product-popular" title="Popular" aria-label="Popular">
+                      <IconPopularStar />
+                    </span>
+                  ) : null}
                   <strong>{localizedName(dish, lang)}</strong>
                   <span className="zk-product-meta">
                     {dish.code} · {dish.category}
@@ -380,7 +401,7 @@ export default function ProductsPage() {
         </section>
       </div>
 
-      <HubFooter backTo={settingsHubPath('products')} backLabel={t.products} />
+      <HubFooter backTo="/masters?tab=dishes" backLabel={t.menuItems} />
 
       {editing ? (
         <div className="zk-products-modal" role="dialog" aria-modal="true">
@@ -404,6 +425,7 @@ export default function ProductsPage() {
               {(
                 [
                   ['basic', 'Basic'],
+                  ['options', 'Options'],
                   ['tax', 'Tax'],
                   ['recipe', 'Recipe'],
                   ['discount', 'Discount'],
@@ -421,6 +443,7 @@ export default function ProductsPage() {
                   {id === 'recipe' && (editing.recipe?.length ?? 0) > 0
                     ? ` (${editing.recipe!.length})`
                     : ''}
+                  {id === 'options' && editing.customizer ? ' ✓' : ''}
                 </button>
               ))}
             </div>
@@ -551,6 +574,25 @@ export default function ProductsPage() {
                         />
                       </label>
                       <label className="zk-products-span-2">
+                        <span>Kitchen (KOT)</span>
+                        <label className="zk-products-check">
+                          <input
+                            type="checkbox"
+                            checked={editing.requiresKitchen !== false}
+                            onChange={(e) =>
+                              setEditing({
+                                ...editing,
+                                requiresKitchen: e.target.checked,
+                              })
+                            }
+                          />
+                          <span>
+                            Send to kitchen when ordered — uncheck for ready-to-serve items (canned
+                            drinks, pre-packaged)
+                          </span>
+                        </label>
+                      </label>
+                      <label className="zk-products-span-2">
                         <span>Item details</span>
                         <input
                           className="search"
@@ -614,6 +656,15 @@ export default function ProductsPage() {
                       />
                       Popular / favorite on POS
                     </label>
+                    <button
+                      type="button"
+                      className="zk-products-options-jump"
+                      onClick={() => setTab('options')}
+                    >
+                      {editing.customizer
+                        ? 'Custom options enabled — open Options tab to edit sizes & toppings →'
+                        : 'Need pizza sizes / toppings? Open the Options tab →'}
+                    </button>
                   </section>
 
                   <section className="zk-products-section zk-products-media">
@@ -662,12 +713,22 @@ export default function ProductsPage() {
                 </div>
               ) : null}
 
+              {tab === 'options' ? (
+                <DishCustomizerEditor
+                  dish={editing}
+                  onChange={setEditing}
+                  ingredients={ingredients}
+                  dishes={dishes}
+                  variant="products"
+                />
+              ) : null}
+
               {tab === 'tax' ? (
                 <div className="zk-products-note">
-                  <strong>Tax rates</strong>
+                  <strong>Tax rate</strong>
                   <p>
-                    Choose which rates apply to this menu item. Ticket settle still uses company VAT
-                    rules; these tags travel with the menu master.
+                    Pick one rate for this item. If you leave company default, the POS uses the
+                    default rate from Tax / Company settings when calculating VAT.
                   </p>
                   {selectableTaxes.length === 0 ? (
                     <div className="zk-products-tax-empty">
@@ -675,24 +736,33 @@ export default function ProductsPage() {
                       <Link to="/settings/tax">Manage tax master →</Link>
                     </div>
                   ) : (
-                    <ul className="zk-products-tax-list">
+                    <ul className="zk-products-tax-list" role="radiogroup" aria-label="Item tax rate">
+                      <li>
+                        <label
+                          className={`zk-products-tax-row${!editing.taxIds?.length ? ' on' : ''}`}
+                        >
+                          <input
+                            type="radio"
+                            name="product-tax"
+                            checked={!editing.taxIds?.length}
+                            onChange={() => setEditing({ ...editing, taxIds: [] })}
+                          />
+                          <span className="zk-products-tax-name">Company default</span>
+                          <span className="zk-products-tax-pct">
+                            {companyDefaultTaxPercent(taxes).toFixed(2)}%
+                          </span>
+                        </label>
+                      </li>
                       {selectableTaxes.map((tx) => {
-                        const on = (editing.taxIds ?? []).includes(tx.id)
+                        const on = (editing.taxIds ?? [])[0] === tx.id
                         return (
                           <li key={tx.id}>
                             <label className={`zk-products-tax-row${on ? ' on' : ''}`}>
                               <input
-                                type="checkbox"
+                                type="radio"
+                                name="product-tax"
                                 checked={on}
-                                onChange={() => {
-                                  const cur = editing.taxIds ?? []
-                                  setEditing({
-                                    ...editing,
-                                    taxIds: on
-                                      ? cur.filter((id) => id !== tx.id)
-                                      : [...cur, tx.id],
-                                  })
-                                }}
+                                onChange={() => setEditing({ ...editing, taxIds: [tx.id] })}
                               />
                               <span className="zk-products-tax-name">{tx.name}</span>
                               <span className="zk-products-tax-pct">{tx.percent.toFixed(2)}%</span>

@@ -8,6 +8,7 @@ import { enqueueOutbox, clearOutboxEntity, loadOutbox } from '../sync/outbox'
 import {
   apiGetZatcaConfig,
   apiGetZatcaInvoice,
+  apiListZatcaInvoices,
   apiSubmitZatcaInvoice,
   apiZatcaReady,
   type ZatcaPhase2Config,
@@ -69,6 +70,18 @@ export function isZatcaEnabled() {
   }
 }
 
+/** Phase 1 TLV QR when ZATCA is on, or when company has a valid VAT ID (KSA settle slips). */
+export function canEmitPhase1Qr() {
+  if (isZatcaEnabled()) return true
+  try {
+    const company = loadCompanyProfile()
+    if (company.enableTax === false) return false
+    return normalizeSellerVat(company.taxId || '').length >= 10
+  } catch {
+    return false
+  }
+}
+
 export function peekLastZatcaInvoice() {
   return lastInvoice
 }
@@ -76,6 +89,11 @@ export function peekLastZatcaInvoice() {
 export function getZatcaInvoice(uuid: string): ZatcaInvoice | undefined {
   if (lastInvoice?.invoiceUuid === uuid) return lastInvoice
   return loadStore().find((r) => r.invoiceUuid === uuid)
+}
+
+/** Local Phase 2 invoice queue (newest first). */
+export function listLocalZatcaInvoices(): ZatcaInvoice[] {
+  return loadStore()
 }
 
 function loadStore(): ZatcaInvoice[] {
@@ -133,10 +151,12 @@ export function buildZatcaTlvBase64(input: {
   if (vat.length < 10) throw new Error('Seller VAT too short')
   const total = Number(input.totalSar).toFixed(2)
   const tax = Number(input.vatSar).toFixed(2)
+  // ZATCA QR timestamp: ISO 8601 seconds precision (no milliseconds)
+  const timestamp = input.timestamp.replace(/\.\d+(Z?)$/, '$1')
   const parts = [
     tlvTag(1, input.sellerName.trim() || 'Seller'),
     tlvTag(2, vat),
-    tlvTag(3, input.timestamp),
+    tlvTag(3, timestamp),
     tlvTag(4, total),
     tlvTag(5, tax),
   ]
@@ -153,28 +173,71 @@ export function buildZatcaTlvBase64(input: {
   return btoa(bin)
 }
 
+/** Phase 2 TLV (tags 1–9, ~500 chars) needs a ~90-module QR — much denser than Phase 1. */
+export function isDenseZatcaQr(tlvBase64: string | undefined | null) {
+  return Boolean(tlvBase64 && tlvBase64.length > 300)
+}
+
 function qrDataUrlSync(tlvBase64: string): string {
   const qr = QRCode.create(tlvBase64, { errorCorrectionLevel: 'M' })
   const size = qr.modules.size
   const cell = 4
+  // QR spec quiet zone: 4 modules of white on every side — without it phone
+  // scanners struggle to lock on, especially with the dense Phase 2 payload.
+  const margin = 4
+  const px = (size + margin * 2) * cell
   const canvas = document.createElement('canvas')
-  canvas.width = size * cell
-  canvas.height = size * cell
+  canvas.width = px
+  canvas.height = px
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas unavailable')
   ctx.fillStyle = '#fff'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.fillRect(0, 0, px, px)
   ctx.fillStyle = '#000'
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      if (qr.modules.get(x, y)) ctx.fillRect(x * cell, y * cell, cell, cell)
+      if (qr.modules.get(x, y)) ctx.fillRect((x + margin) * cell, (y + margin) * cell, cell, cell)
     }
   }
   return canvas.toDataURL('image/png')
 }
 
+function mapRemoteStatus(status: string): ZatcaPhase2Status {
+  if (status === 'reported' || status === 'sandbox' || status === 'failed' || status === 'queued' || status === 'pending') {
+    return status
+  }
+  return 'pending'
+}
+
+/** Prefer Phase-2 stamped TLV (tags 1–9) when the certified gateway returns it. */
+function applyRemoteQr(invoiceUuid: string, remote: {
+  qrPhase2Base64?: string | null
+  tlvBase64?: string | null
+  invoiceHash?: string | null
+  zatcaUuid?: string | null
+  status?: string
+  message?: string | null
+}) {
+  const phase2Tlv = remote.qrPhase2Base64?.trim()
+  const patch: Partial<ZatcaInvoice> = {
+    phase2Status: remote.status ? mapRemoteStatus(remote.status) : undefined,
+    phase2Message: remote.message ?? undefined,
+    zatcaUuid: remote.zatcaUuid ?? undefined,
+    invoiceHash: remote.invoiceHash ?? undefined,
+  }
+  if (phase2Tlv && typeof document !== 'undefined') {
+    try {
+      patch.tlvBase64 = phase2Tlv
+      patch.qrDataUrl = qrDataUrlSync(phase2Tlv)
+    } catch {
+      /* keep Phase 1 QR */
+    }
+  }
+  return patchInvoice(invoiceUuid, patch)
+}
+
 export function prepareZatcaPhase1(payload: ZatcaPayload): ZatcaInvoice | null {
-  if (!isZatcaEnabled()) return null
+  if (!canEmitPhase1Qr()) return null
   if (typeof document === 'undefined') return null
   try {
     const company = loadCompanyProfile()
@@ -208,13 +271,6 @@ export function prepareZatcaPhase1(payload: ZatcaPayload): ZatcaInvoice | null {
   }
 }
 
-function mapRemoteStatus(status: string): ZatcaPhase2Status {
-  if (status === 'reported' || status === 'sandbox' || status === 'failed' || status === 'queued' || status === 'pending') {
-    return status
-  }
-  return 'pending'
-}
-
 export function isZatcaSubmitComplete(invoiceUuid: string) {
   const z = getZatcaInvoice(invoiceUuid)
   return z?.phase2Status === 'sandbox' || z?.phase2Status === 'reported'
@@ -238,12 +294,7 @@ export async function reconcileZatcaOutbox() {
       let remote = await apiGetZatcaInvoice(op.entityId)
       if (remote?.status === 'sandbox' || remote?.status === 'reported') {
         clearOutboxEntity(op.entityId, 'zatca.submit')
-        patchInvoice(op.entityId, {
-          phase2Status: mapRemoteStatus(remote.status),
-          phase2Message: remote.message ?? undefined,
-          zatcaUuid: remote.zatcaUuid ?? undefined,
-          invoiceHash: remote.invoiceHash ?? undefined,
-        })
+        applyRemoteQr(op.entityId, remote)
         continue
       }
       remote = await apiSubmitZatcaInvoice({
@@ -256,12 +307,7 @@ export async function reconcileZatcaOutbox() {
         tlvBase64: payload.tlvBase64 ? String(payload.tlvBase64) : undefined,
       })
       clearOutboxEntity(op.entityId, 'zatca.submit')
-      patchInvoice(op.entityId, {
-        phase2Status: mapRemoteStatus(remote.status),
-        phase2Message: remote.message ?? undefined,
-        zatcaUuid: remote.zatcaUuid ?? undefined,
-        invoiceHash: remote.invoiceHash ?? undefined,
-      })
+      applyRemoteQr(op.entityId, remote)
     } catch {
       /* keep queued — push may retry */
     }
@@ -285,12 +331,7 @@ export function queueZatcaPhase2(invoice: ZatcaInvoice) {
     void apiSubmitZatcaInvoice(payload)
       .then((remote) => {
         clearOutboxEntity(invoice.invoiceUuid, 'zatca.submit')
-        patchInvoice(invoice.invoiceUuid, {
-          phase2Status: mapRemoteStatus(remote.status),
-          phase2Message: remote.message ?? undefined,
-          zatcaUuid: remote.zatcaUuid ?? undefined,
-          invoiceHash: remote.invoiceHash ?? undefined,
-        })
+        applyRemoteQr(invoice.invoiceUuid, remote)
       })
       .catch(() => {
         enqueueOutbox('zatca.submit', invoice.invoiceUuid, payload, getDeviceId(), null)
@@ -342,17 +383,130 @@ export function newZatcaInvoiceUuid(seed?: string) {
   return `inv-${seed ?? 'x'}-${Date.now()}`
 }
 
+/** Build / refresh the local invoice row from the server copy (stamped Phase 2 QR wins). */
+export function applyRemoteZatcaInvoice(
+  invoiceUuid: string,
+  remote: {
+    status?: string
+    totalSar?: number
+    vatSar?: number
+    sellerVat?: string
+    sellerName?: string | null
+    timestamp?: string
+    qrPhase2Base64?: string | null
+    tlvBase64?: string | null
+    invoiceHash?: string | null
+    zatcaUuid?: string | null
+    message?: string | null
+  },
+): ZatcaInvoice | null {
+  const existing = getZatcaInvoice(invoiceUuid)
+  if (existing) return applyRemoteQr(invoiceUuid, remote)
+  if (typeof document === 'undefined') return null
+  const tlv = remote.qrPhase2Base64?.trim() || remote.tlvBase64?.trim()
+  if (!tlv) return null
+  try {
+    const row: ZatcaInvoice = {
+      invoiceUuid,
+      totalSar: Number(remote.totalSar ?? 0),
+      vatSar: Number(remote.vatSar ?? 0),
+      sellerVat: normalizeSellerVat(remote.sellerVat ?? ''),
+      sellerName: (remote.sellerName ?? '').trim(),
+      timestamp: remote.timestamp ?? new Date().toISOString(),
+      tlvBase64: tlv,
+      qrDataUrl: qrDataUrlSync(tlv),
+      createdAt: new Date().toISOString(),
+      phase2Status: remote.status ? mapRemoteStatus(remote.status) : undefined,
+      phase2Message: remote.message ?? undefined,
+      zatcaUuid: remote.zatcaUuid ?? undefined,
+      invoiceHash: remote.invoiceHash ?? undefined,
+    }
+    saveInvoice(row)
+    return row
+  } catch {
+    return null
+  }
+}
+
+/** Fetch the server copy of an invoice and cache it locally (returns the merged row). */
+export async function hydrateZatcaFromRemote(invoiceUuid: string): Promise<ZatcaInvoice | null> {
+  if (!apiZatcaReady()) return getZatcaInvoice(invoiceUuid) ?? null
+  try {
+    const remote = await apiGetZatcaInvoice(invoiceUuid)
+    if (!remote) return getZatcaInvoice(invoiceUuid) ?? null
+    return applyRemoteZatcaInvoice(invoiceUuid, remote) ?? getZatcaInvoice(invoiceUuid) ?? null
+  } catch {
+    return getZatcaInvoice(invoiceUuid) ?? null
+  }
+}
+
+function sameMoney(a: number, b: number) {
+  return Math.abs(Number(a) - Number(b)) < 0.006
+}
+
+/**
+ * Legacy ledger rows (before invoiceUuid was stored): find the invoice issued at
+ * settle by matching totals + time (±10 min) in the local store, then the server.
+ */
+export async function resolveZatcaForSale(sale: {
+  invoiceUuid?: string
+  total: number
+  tax: number
+  at: string
+}): Promise<string | undefined> {
+  if (sale.invoiceUuid) return sale.invoiceUuid
+  const saleMs = Date.parse(sale.at)
+  const near = (ts: string | undefined) => {
+    const ms = Date.parse(ts ?? '')
+    return Number.isFinite(ms) && Number.isFinite(saleMs) && Math.abs(ms - saleMs) <= 10 * 60_000
+  }
+  const local = loadStore().find(
+    (r) => sameMoney(r.totalSar, sale.total) && sameMoney(r.vatSar, sale.tax) && near(r.timestamp),
+  )
+  if (local) return local.invoiceUuid
+  if (!apiZatcaReady()) return undefined
+  try {
+    const rows = await apiListZatcaInvoices(200)
+    const hit = rows.find(
+      (r) => sameMoney(r.totalSar, sale.total) && sameMoney(r.vatSar, sale.tax) && near(r.timestamp),
+    )
+    if (!hit) return undefined
+    applyRemoteZatcaInvoice(hit.id, hit)
+    return hit.id
+  } catch {
+    return undefined
+  }
+}
+
 export function attachZatcaToReceipt<
   T extends {
     kind?: 'paid' | 'guest' | 'ebill'
+    total?: number
+    tax?: number
     zatcaQrDataUrl?: string
     invoiceUuid?: string
     zatcaPhase2Status?: ZatcaPhase2Status
     zatcaPhase2Message?: string
   },
->(receipt: T): T {
+>(receipt: T, opts: { createIfMissing?: boolean } = {}): T {
   if (receipt.kind === 'guest' || receipt.kind === 'ebill') return receipt
-  const z = receipt.invoiceUuid ? getZatcaInvoice(receipt.invoiceUuid) : peekLastZatcaInvoice()
+  if (receipt.zatcaQrDataUrl) return receipt
+  let z = receipt.invoiceUuid ? getZatcaInvoice(receipt.invoiceUuid) : peekLastZatcaInvoice()
+  // Reprints carry the settle-time id: never mint a replacement QR — the modal
+  // hydrates the reported (Phase 2) copy from the server instead.
+  if (!z && receipt.invoiceUuid) return receipt
+  if (!z && opts.createIfMissing === false) return receipt
+  if (!z && typeof receipt.total === 'number') {
+    const company = loadCompanyProfile()
+    z =
+      prepareZatcaPhase1({
+        invoiceUuid: newZatcaInvoiceUuid(),
+        totalSar: receipt.total,
+        vatSar: Number(receipt.tax) || 0,
+        sellerVat: company.taxId,
+        sellerName: company.companyName,
+      }) ?? null
+  }
   if (!z) return receipt
   return {
     ...receipt,

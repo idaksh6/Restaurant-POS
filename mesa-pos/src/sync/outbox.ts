@@ -302,12 +302,118 @@ export function clearAckedOutbox() {
  * Drop non-critical poison ops. Optionally requeue the rest (hydrate / manual sync).
  * Do NOT requeue on every automatic flush — that loops rejected ops forever.
  */
+/** Catalog kinds that are branch-scoped (must carry branchId on SyncOps). */
+const BRANCH_SCOPED_CATALOG = new Set([
+  'expenseDetail',
+  'timetable',
+  'extraCharge',
+  'deliveryRider',
+  'printStation',
+  'tableArea',
+  'beveragePrice',
+  'ingredient',
+  'stockLocation',
+  'yieldLink',
+])
+
+/**
+ * Stamp active branch onto payloads that the API requires.
+ * Do NOT stamp company-wide catalog (tax, unit, giftCard, …) — peers on other
+ * branches must still receive those SyncOps via pull (`branchId IS NULL`).
+ */
+export function withBranchStamped(op: OutboxOp): OutboxOp {
+  const bid = op.branchId || getActiveBranchId()
+  if (!bid) return op
+  const payload = op.payload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return op.branchId ? op : { ...op, branchId: bid }
+  }
+  const p = { ...(payload as Record<string, unknown>) }
+  if (op.type === 'foodVoucher.upsert') {
+    const batch = { ...((p.batch as Record<string, unknown> | undefined) ?? p) }
+    if (!batch.branchId) batch.branchId = bid
+    if (p.batch && typeof p.batch === 'object') p.batch = batch
+    else Object.assign(p, batch)
+    if (!p.branchId) p.branchId = bid
+    return { ...op, branchId: bid, payload: p }
+  }
+  if (op.type === 'masters.upsert') {
+    if (p.kind === 'dish' && p.dish && typeof p.dish === 'object') {
+      const dish = { ...(p.dish as Record<string, unknown>) }
+      if (!dish.branchId) dish.branchId = bid
+      return { ...op, branchId: bid, payload: { ...p, dish } }
+    }
+    if (p.kind === 'category' && p.cat && typeof p.cat === 'object') {
+      const cat = { ...(p.cat as Record<string, unknown>) }
+      if (!cat.branchId) cat.branchId = bid
+      return { ...op, branchId: bid, payload: { ...p, cat } }
+    }
+  }
+  if (op.type === 'catalog.upsert') {
+    const kind = String(p.kind ?? '')
+    const row =
+      p.row && typeof p.row === 'object' && !Array.isArray(p.row)
+        ? { ...(p.row as Record<string, unknown>) }
+        : null
+    if (!BRANCH_SCOPED_CATALOG.has(kind)) {
+      // Company-wide: keep SyncOp visible on every branch pull.
+      return { ...op, branchId: undefined, payload: p }
+    }
+    if (row) {
+      if (!row.branchId) row.branchId = bid
+      return { ...op, branchId: op.branchId ?? bid, payload: { ...p, row } }
+    }
+    if (!p.branchId) {
+      return { ...op, branchId: bid, payload: { ...p, branchId: bid } }
+    }
+    return { ...op, branchId: op.branchId ?? bid, payload: p }
+  }
+  if (op.type === 'catalog.delete') {
+    const kind = String(p.kind ?? '')
+    if (!BRANCH_SCOPED_CATALOG.has(kind)) {
+      return { ...op, branchId: undefined, payload: p }
+    }
+    return { ...op, branchId: op.branchId ?? bid, payload: p }
+  }
+  // Branch-scoped ops that already have branchId — leave as-is.
+  if (op.branchId) return op
+  // Default: stamp for branch-required entity types only.
+  const needsBranch = new Set<OutboxOpType>([
+    'ticket.create',
+    'ticket.update',
+    'ticket.settle',
+    'ticket.line.upsert',
+    'ticket.line.void',
+    'kot.send',
+    'kot.status',
+    'customer.upsert',
+    'foodVoucher.upsert',
+    'foodVoucher.delete',
+    'foodVoucher.redeem',
+    'stock.adjust',
+    'masters.upsert',
+    'masters.delete',
+    'day.close',
+    'day.reopen',
+    'shift.upsert',
+    'receipt.upsert',
+    'po.upsert',
+    'stockTransfer.upsert',
+    'ledger.upsert',
+    'floor.upsert',
+    'audit.upsert',
+    'seq.upsert',
+  ])
+  if (!needsBranch.has(op.type)) return op
+  return { ...op, branchId: bid }
+}
+
 /** Drop redundant master-data ops when online (REST already persisted them). */
 export function pruneRedundantOutbox() {
   if (!apiMastersReady()) return loadOutbox()
   const ops = loadOutbox()
   const next = ops.filter((op) => {
-    if (op.status !== 'pending' && op.status !== 'syncing') return true
+    if (op.status !== 'pending' && op.status !== 'syncing' && op.status !== 'poison') return true
     if (op.type === 'zatca.submit' && zatcaInvoiceSynced(op.entityId)) return false
     if (!PRUNE_WHEN_ONLINE.has(op.type)) return true
     // Keep qty-changing stock adjusts that may not have reached the server yet.
@@ -354,6 +460,24 @@ export function sanitizePoisonOutbox(opts?: { requeue?: boolean }) {
       }
       return []
     }
+    // Beverage catalog — local list already saved; drop stuck poison (or retry once when forced).
+    {
+      const catalogKind = String((op.payload as { kind?: unknown })?.kind ?? '')
+      if (
+        (op.type === 'catalog.upsert' || op.type === 'catalog.delete') &&
+        (catalogKind === 'beverageQty' || catalogKind === 'beveragePrice')
+      ) {
+        changed = true
+        if (requeue) {
+          return [{ ...withBranchStamped(op), status: 'pending' as const, lastError: undefined }]
+        }
+        return []
+      }
+    }
+    if (/Unknown catalog kind/i.test(String(op.lastError ?? '')) && /beverage/i.test(String(op.lastError ?? ''))) {
+      changed = true
+      return []
+    }
     // PrintStation.templateId migration lag — retry once the column exists.
     if (
       (op.type === 'catalog.upsert' || op.type === 'catalog.delete') &&
@@ -371,9 +495,22 @@ export function sanitizePoisonOutbox(opts?: { requeue?: boolean }) {
       changed = true
       return []
     }
+    // Gift card redeem already applied server-side (or card empty/gone) — replay is meaningless.
+    if (
+      op.type === 'giftCard.redeem' &&
+      /nothing to redeem|not found/i.test(String(op.lastError ?? ''))
+    ) {
+      changed = true
+      return []
+    }
+    // Old ops rejected for missing branchId — stamp active branch and retry.
+    if (/branchId required/i.test(String(op.lastError ?? ''))) {
+      changed = true
+      return [{ ...withBranchStamped(op), status: 'pending' as const, lastError: undefined }]
+    }
     if (!requeue) return [op]
     changed = true
-    return [{ ...op, status: 'pending' as const, lastError: undefined }]
+    return [{ ...withBranchStamped(op), status: 'pending' as const, lastError: undefined }]
   })
   if (changed) {
     saveOutbox(next)

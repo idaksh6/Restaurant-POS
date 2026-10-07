@@ -4,9 +4,13 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { getPermissions } from '../auth/roles'
 import { HubAddButton, HubFooter, HubHeader } from '../components/HubChrome'
 import SuccessModal from '../components/SuccessModal'
-import MesaSelect from '../components/MesaSelect'
-import Req from '../components/Req'
+import AgentPanel, { AgentBanner } from '../components/printers/AgentPanel'
+import AssignmentPanel from '../components/printers/AssignmentPanel'
+import PrinterTable from '../components/printers/PrinterTable'
+import PrinterWizard, { type WizardStep } from '../components/printers/PrinterWizard'
+import { loadTableAreas } from '../data/tableAreas'
 import { useDeleteConfirm } from '../hooks/useDeleteConfirm'
+import { usePrinterHealth } from '../hooks/usePrinterHealth'
 import { getActiveBranchId } from '../data/company'
 import {
   PAPER_WIDTH_PRESETS,
@@ -16,8 +20,13 @@ import {
   templatesForKind,
   type PrintTemplateId,
 } from '../data/printTemplates'
-import { type PrintKind, type PrintStation } from '../data/printers'
-import { hasNativePrintBridge, listOsPrinters, previewSlipHtml, type OsPrinter } from '../hardware/printer'
+import {
+  DEFAULT_PRINTER_OPTIONS,
+  hasPurpose,
+  type PrintPurpose,
+  type PrintStation,
+} from '../data/printers'
+import { previewSlipHtml, testPrintStation } from '../hardware/printer'
 import { settingsHubPath } from '../lib/settingsHub'
 import { messages, useI18n } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
@@ -26,36 +35,39 @@ import { useCatalog } from '../state/CatalogContext'
 import { useMasters } from '../state/MastersContext'
 import { usePos } from '../state/PosContext'
 
-type Focus = 'receipt' | 'kot' | 'map' | 'template'
+type Focus = 'printers' | 'map' | 'template' | 'agent'
+type TypeFilter = 'all' | PrintPurpose
 
 function parseFocus(value: string | null): Focus {
-  if (value === 'kot' || value === 'map' || value === 'template') return value
-  return 'receipt'
+  if (value === 'map' || value === 'template' || value === 'agent') return value
+  return 'printers'
 }
 
-function blank(kind: PrintKind, sort: number): PrintStation {
+function parseFilter(value: string | null): TypeFilter {
+  return value === 'kot' || value === 'bill' || value === 'receipt' ? value : 'all'
+}
+
+function blank(purposes: PrintPurpose[], sort: number): PrintStation {
+  const kot = purposes.length === 1 && purposes[0] === 'kot'
   return {
-    id: `prn-${kind}-${Date.now()}`,
+    id: `prn-${kot ? 'kot' : 'receipt'}-${Date.now()}`,
     branchId: getActiveBranchId(),
-    kind,
-    name: kind === 'kot' ? 'Kitchen' : 'Front receipt',
-    target: 'browser',
+    kind: kot ? 'kot' : 'receipt',
+    name: kot ? 'Kitchen Printer' : purposes.includes('bill') ? 'Bill Printer' : 'Receipt Printer',
+    target: '',
     copies: 1,
     paperWidthMm: 80,
-    templateId: kind === 'kot' ? 'kitchen' : 'classic',
-    header: kind === 'receipt' ? 'MESA' : '',
-    footer: kind === 'receipt' ? messages().printThanks : '',
+    templateId: kot ? 'kitchen' : 'classic',
+    header: kot ? '' : 'MESA',
+    footer: kot ? '' : messages().printThanks,
     active: true,
     sort,
+    purposes,
+    connection: 'usb',
+    port: 9100,
+    options: { ...DEFAULT_PRINTER_OPTIONS },
+    isDefault: false,
   }
-}
-
-function deptLabel(
-  categories: { id: string; name: string }[],
-  departmentId?: string,
-) {
-  if (!departmentId) return 'All departments'
-  return categories.find((c) => c.id === departmentId)?.name ?? 'Unknown department'
 }
 
 export default function PrintersPage() {
@@ -67,250 +79,196 @@ export default function PrintersPage() {
   const { printStations: rows, savePrintStation, deletePrintStation } = useCatalog()
   const canAccess = user ? getPermissions(user.role).canMasters || user.role === 'admin' : false
   const [searchParams, setSearchParams] = useSearchParams()
-  const focus = parseFocus(searchParams.get('focus'))
+  const rawFocus = searchParams.get('focus')
+  const focus = parseFocus(rawFocus)
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>(() =>
+    parseFilter(searchParams.get('type') ?? (rawFocus === 'kot' || rawFocus === 'receipt' ? rawFocus : null)),
+  )
+  const [wizard, setWizard] = useState<{ row: PrintStation; isNew: boolean; step?: WizardStep } | null>(null)
+  const [areasVersion, setAreasVersion] = useState(0)
+  useEffect(() => {
+    const bump = () => setAreasVersion((v) => v + 1)
+    window.addEventListener('mesa:table-areas-changed', bump)
+    return () => window.removeEventListener('mesa:table-areas-changed', bump)
+  }, [])
+  const areas = useMemo(
+    () => loadTableAreas(activeBranchId).filter((a) => a.active).map((a) => ({ id: a.id, name: a.name })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeBranchId, areasVersion],
+  )
+  const wizardCategories = useMemo(
+    () =>
+      categories
+        .filter((c) => c.active !== false)
+        .map((c) => ({ id: c.id, name: c.name, parentId: c.parentId || undefined })),
+    [categories],
+  )
   const [editing, setEditing] = useState<PrintStation | null>(null)
-  const [isNew, setIsNew] = useState(false)
   const [previewing, setPreviewing] = useState<PrintStation | null>(null)
   const [successMsg, setSuccessMsg] = useState('')
-  const [osPrinters, setOsPrinters] = useState<OsPrinter[]>([])
-  const nativeBridge = hasNativePrintBridge()
+  const [testingId, setTestingId] = useState<string | null>(null)
   const { askDelete, deleteConfirmDialog } = useDeleteConfirm()
 
-  const listKind: PrintKind = focus === 'kot' || focus === 'map' ? 'kot' : 'receipt'
-
-  useEffect(() => {
-    if (!nativeBridge) return
-    let cancelled = false
-    void listOsPrinters().then((rows) => {
-      if (!cancelled) setOsPrinters(rows)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [nativeBridge])
-
-  const targetOptions = useMemo(() => {
-    const opts = [{ value: 'browser', label: nativeBridge ? 'Browser / print dialog' : 'browser' }]
-    for (const p of osPrinters) {
-      const name = p.name || p.displayName
-      if (!name || opts.some((o) => o.value === name)) continue
-      opts.push({
-        value: name,
-        label: p.isDefault ? `${p.displayName || name} (default)` : p.displayName || name,
-      })
-    }
-    if (editing?.target && !opts.some((o) => o.value === editing.target)) {
-      opts.push({ value: editing.target, label: editing.target })
-    }
-    return opts
-  }, [osPrinters, editing?.target, nativeBridge])
-
-  const shown = useMemo(
-    () =>
-      [...rows.filter((r) => r.kind === listKind)].sort(
-        (a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.name.localeCompare(b.name),
-      ),
-    [rows, listKind],
+  const branchRows = useMemo(
+    () => [...rows].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.name.localeCompare(b.name)),
+    [rows],
   )
+  const health = usePrinterHealth(branchRows, canAccess)
+  const shown = useMemo(
+    () => (typeFilter === 'all' ? branchRows : branchRows.filter((r) => hasPurpose(r, typeFilter))),
+    [branchRows, typeFilter],
+  )
+  const receiptRows = useMemo(() => branchRows.filter((r) => !r.purposes.every((p) => p === 'kot')), [branchRows])
+  const kotRows = useMemo(() => branchRows.filter((r) => hasPurpose(r, 'kot')), [branchRows])
 
   const unmappedDepts = useMemo(() => {
     if (focus !== 'map') return []
-    const mapped = new Set(shown.map((p) => p.departmentId).filter(Boolean))
-    return categories.filter((c) => c.active !== false && !mapped.has(c.id))
-  }, [focus, shown, categories])
-
-  useEffect(() => {
-    setIsNew(false)
-    setEditing(null)
-    setPreviewing(null)
-  }, [focus, activeBranchId])
-
-  const title =
-    focus === 'kot'
-      ? 'KOT Printer'
-      : focus === 'map'
-        ? 'Printer Mapping'
-        : focus === 'template'
-          ? 'Print designs'
-          : 'Receipt Printer'
-
-  const subtitle =
-    focus === 'kot'
-      ? 'Kitchen printers for this branch. Route by department under Printer Mapping.'
-      : focus === 'map'
-        ? 'Assign KOT printers to departments so tickets print to the right kitchen.'
-        : focus === 'template'
-          ? 'Preview a design, then Edit to apply it on a receipt printer (header, footer, paper size).'
-          : 'Front-of-house receipt printers for this branch.'
+    const mapped = new Set(kotRows.map((p) => p.departmentId).filter(Boolean))
+    return categories.filter((c) => c.active !== false && !c.parentId && !mapped.has(c.id))
+  }, [focus, kotRows, categories])
 
   function setFocus(next: Focus) {
-    setSearchParams(next === 'receipt' ? {} : { focus: next }, { replace: true })
+    setSearchParams(next === 'printers' ? {} : { focus: next }, { replace: true })
   }
 
-  function openEditor(row: PrintStation, asNew = false) {
-    setIsNew(asNew)
+  function nextSort() {
+    return Math.max(0, ...rows.map((r) => r.sort ?? 0)) + 1
+  }
+
+  function openWizard(row: PrintStation, isNew: boolean, step?: WizardStep) {
+    setWizard({ row, isNew, step })
+  }
+
+  function startNew(purposes?: PrintPurpose[]) {
+    const p = purposes ?? (typeFilter === 'all' ? ['kot'] : [typeFilter])
+    const row = blank(p, nextSort())
+    if (focus === 'map' && unmappedDepts[0]) {
+      row.departmentId = unmappedDepts[0].id
+      row.name = `${unmappedDepts[0].name} Printer`
+    }
+    openWizard(row, true)
+  }
+
+  function persist(row: PrintStation, isNew: boolean) {
+    if (row.isDefault) {
+      for (const other of rows) {
+        if (other.id !== row.id && other.isDefault && other.purposes.some((p) => row.purposes.includes(p))) {
+          savePrintStation({ ...other, isDefault: false })
+        }
+      }
+    }
+    savePrintStation({ ...row, branchId: row.branchId ?? activeBranchId })
+    setWizard(null)
+    setSuccessMsg(isNew ? 'Printer saved' : 'Printer updated')
+    flash(isNew ? 'Printer saved' : 'Printer updated')
+    void health.refresh()
+  }
+
+  function toggleActive(row: PrintStation) {
+    savePrintStation({ ...row, active: !row.active })
+    flash(row.active ? `${row.name} disabled` : `${row.name} enabled`)
+  }
+
+  function remove(row: PrintStation) {
+    askDelete({
+      name: row.name,
+      onConfirm: () => {
+        deletePrintStation(row.id)
+        flash('Printer removed')
+      },
+    })
+  }
+
+  async function runTestPrint(row: PrintStation) {
+    setTestingId(row.id)
+    flash(`Sending test print to ${row.name}…`)
+    try {
+      const res = await testPrintStation(row, lang)
+      if (!res.ok) flash(`✕ ${res.error}${res.hint ? ` — ${res.hint}` : ''}`)
+      else if (res.mode === 'agent' || res.mode === 'silent') flash(`✓ Test print sent to ${row.name}`)
+      else if (res.mode === 'pdf') flash('Test slip opened as PDF')
+      else flash('Test print opened — choose the thermal printer in the dialog')
+    } finally {
+      setTestingId(null)
+      void health.refresh()
+    }
+  }
+
+  // ----- templates (existing design editor) -----
+  function openEditor(row: PrintStation) {
     setEditing({
       ...row,
       paperWidthMm: Number(row.paperWidthMm) || 80,
       copies: Math.max(1, Number(row.copies) || 1),
-      templateId: normalizeTemplateId(row.templateId, listKind),
+      templateId: normalizeTemplateId(row.templateId, 'receipt'),
     })
-  }
-
-  function closeEditor() {
-    setEditing(null)
-    setIsNew(false)
   }
 
   function openPreview(row: PrintStation) {
-    setPreviewing({
-      ...row,
-      paperWidthMm: Number(row.paperWidthMm) || 80,
-      templateId: normalizeTemplateId(row.templateId, listKind),
-    })
-  }
-
-  function closePreview() {
-    setPreviewing(null)
+    const kind = row.purposes.every((p) => p === 'kot') ? 'kot' : 'receipt'
+    setPreviewing({ ...row, paperWidthMm: Number(row.paperWidthMm) || 80, templateId: normalizeTemplateId(row.templateId, kind) })
   }
 
   function openDesignPreview(templateId: PrintTemplateId) {
-    const base =
-      shown.find((r) => r.active) ||
-      shown[0] ||
-      blank('receipt', Math.max(0, ...rows.map((r) => r.sort ?? 0)) + 1)
+    const base = receiptRows.find((r) => r.active) || receiptRows[0] || blank(['receipt'], nextSort())
     openPreview({
       ...base,
       templateId,
-      paperWidthMm: Number(base.paperWidthMm) || 80,
       header: base.header || 'MESA',
       footer: base.footer || messages().printThanks,
     })
   }
 
   function editDesign(templateId: PrintTemplateId) {
-    const base = shown.find((r) => r.active) || shown[0]
+    const base = receiptRows.find((r) => r.active) || receiptRows[0]
     if (!base) {
-      const row = blank('receipt', Math.max(0, ...rows.map((r) => r.sort ?? 0)) + 1)
+      const row = blank(['receipt'], nextSort())
       row.templateId = templateId
-      openEditor(row, true)
-      flash('Create this receipt printer, then save to use the design')
+      openWizard(row, true)
+      flash('Create a receipt printer to use this design')
       return
     }
     openEditor({ ...base, templateId })
   }
 
-  function startNew() {
-    if (focus === 'template') {
-      const row = blank('receipt', Math.max(0, ...rows.map((r) => r.sort ?? 0)) + 1)
-      openEditor(row, true)
-      return
-    }
-    const kind: PrintKind = focus === 'map' || focus === 'kot' ? 'kot' : 'receipt'
-    const row = blank(kind, Math.max(0, ...shown.map((r) => r.sort ?? 0)) + 1)
-    if (focus === 'map' && unmappedDepts[0]) {
-      row.departmentId = unmappedDepts[0].id
-      row.name = `${unmappedDepts[0].name} KOT`
-    }
-    openEditor(row, true)
-  }
-
-  function save() {
-    if (!editing?.name.trim()) {
-      flash('Printer name is required')
-      return
-    }
-    const row: PrintStation = {
+  function saveTemplate() {
+    if (!editing) return
+    savePrintStation({
       ...editing,
-      branchId: editing.branchId ?? activeBranchId,
-      kind: listKind,
-      name: editing.name.trim(),
-      target: editing.target.trim() || 'browser',
       copies: Math.max(1, Number(editing.copies) || 1),
       paperWidthMm: Number(editing.paperWidthMm) || 80,
-      templateId: normalizeTemplateId(editing.templateId, listKind),
-      departmentId: listKind === 'kot' ? editing.departmentId || undefined : undefined,
-      header: editing.header ?? '',
-      footer: editing.footer ?? '',
-    }
-    savePrintStation(row)
-    closeEditor()
-    setSuccessMsg(isNew ? 'Printer saved' : 'Printer updated')
-    flash(isNew ? 'Printer saved' : 'Printer updated')
-  }
-
-  function remove() {
-    if (!editing || isNew) return
-    askDelete({
-      name: editing.name,
-      onConfirm: () => {
-        deletePrintStation(editing.id)
-        closeEditor()
-        flash('Printer removed')
-      },
+      templateId: normalizeTemplateId(editing.templateId, 'receipt'),
     })
+    setEditing(null)
+    setSuccessMsg('Printer updated')
+    flash('Printer updated')
   }
 
-  const showAdd = focus !== 'template' || shown.length === 0
-  const formTitle =
-    focus === 'template'
-      ? isNew
-        ? 'New receipt template'
-        : 'Edit print template'
-      : focus === 'map'
-        ? isNew
-          ? 'Map new KOT printer'
-          : 'Edit mapping'
-        : isNew
-          ? 'New printer'
-          : 'Edit printer'
-
-  const templateOptions = templatesForKind(listKind)
+  const previewKind = previewing && previewing.purposes.every((p) => p === 'kot') ? 'kot' : 'receipt'
   const previewHtml = useMemo(() => {
     if (!previewing) return ''
-    if (focus !== 'template' && focus !== 'receipt' && focus !== 'kot') return ''
     return previewSlipHtml({
       brand: previewing.header || previewing.name || 'MESA',
       footer: previewing.footer,
       paperWidthMm: previewing.paperWidthMm,
-      templateId: normalizeTemplateId(previewing.templateId, listKind),
-      kind: listKind,
+      templateId: normalizeTemplateId(previewing.templateId, previewKind),
+      kind: previewKind,
       lang,
     })
-  }, [previewing, focus, listKind, lang])
+  }, [previewing, previewKind, lang])
 
-  const sectionCards = useMemo(
-    () =>
-      (
-        [
-          {
-            id: 'receipt' as const,
-            label: 'Receipt',
-            blurb: 'Front-of-house receipt printers',
-            count: rows.filter((r) => r.kind === 'receipt').length,
-          },
-          {
-            id: 'kot' as const,
-            label: 'KOT',
-            blurb: 'Kitchen ticket printers',
-            count: rows.filter((r) => r.kind === 'kot').length,
-          },
-          {
-            id: 'map' as const,
-            label: 'Mapping',
-            blurb: 'Route KOT printers by department',
-            count: rows.filter((r) => r.kind === 'kot').length,
-          },
-          {
-            id: 'template' as const,
-            label: 'Template',
-            blurb: 'Layout, header, footer, and paper size',
-            count: rows.filter((r) => r.kind === 'receipt').length,
-          },
-        ] as const
-      ),
-    [rows],
-  )
+  const agentOnline = Boolean(health.agent)
+  const sectionCards: { id: Focus; label: string; blurb: string; badge: string }[] = [
+    { id: 'printers', label: 'Printers', blurb: 'KOT, bill and receipt printers', badge: String(branchRows.length) },
+    { id: 'map', label: 'Assignment', blurb: 'Order type, area & category routing', badge: String(branchRows.filter((r) => r.active).length) },
+    { id: 'template', label: 'Templates', blurb: 'Layout, header, footer, paper', badge: String(receiptRows.length) },
+    {
+      id: 'agent',
+      label: 'Print Agent',
+      blurb: 'Local agent on this computer',
+      badge: health.agentChecking ? '…' : agentOnline ? 'On' : 'Off',
+    },
+  ]
 
   if (!canAccess) {
     return (
@@ -334,14 +292,10 @@ export default function PrintersPage() {
       <div className="zk-prn-bar">
         <div className="zk-prn-bar-copy">
           <h1>Printers</h1>
-          <p>Choose a section, then manage printers for this branch.</p>
+          <p>Manage thermal printers for KOT, Bill and Receipt printing.</p>
         </div>
-        {showAdd ? (
-          <HubAddButton
-            title={focus === 'map' ? 'Add mapped printer' : 'Add printer'}
-            className="zk-et-add"
-            onClick={startNew}
-          />
+        {focus === 'printers' || focus === 'map' ? (
+          <HubAddButton title="Add printer" className="zk-et-add" onClick={() => startNew(focus === 'map' ? ['kot'] : undefined)} />
         ) : null}
       </div>
 
@@ -357,7 +311,7 @@ export default function PrintersPage() {
           >
             <div className="zk-prn-section-card-top">
               <strong>{sec.label}</strong>
-              <span className="zk-prn-badge">{sec.count}</span>
+              <span className={`zk-prn-badge${sec.id === 'agent' && !agentOnline ? ' muted' : ''}`}>{sec.badge}</span>
             </div>
             <small>{sec.blurb}</small>
           </button>
@@ -366,26 +320,80 @@ export default function PrintersPage() {
 
       <div className="zk-prn-body">
         <div className="zk-prn-gallery">
-          <div className="zk-prn-gallery-head">
-            <div>
-              <h2>{title}</h2>
-              <p>{subtitle}</p>
-            </div>
-          </div>
+          {focus === 'printers' ? (
+            <>
+              {branchRows.some((r) => r.connection !== 'browser') ? (
+                <AgentBanner error={health.agentError} checking={health.checking} onRetry={() => void health.refresh()} />
+              ) : null}
+              <div className="zk-pm-toolbar">
+                <div className="zk-pm-filters" role="tablist" aria-label="Printer type">
+                  {(['all', 'kot', 'bill', 'receipt'] as TypeFilter[]).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      role="tab"
+                      aria-selected={typeFilter === f}
+                      className={`zk-pm-filter${typeFilter === f ? ' on' : ''}`}
+                      onClick={() => setTypeFilter(f)}
+                    >
+                      {f === 'all' ? 'All' : f === 'kot' ? 'KOT' : f === 'bill' ? 'Bill' : 'Receipt'}
+                    </button>
+                  ))}
+                </div>
+                {agentOnline ? (
+                  <button type="button" className="zk-pm-btn" onClick={() => void health.refresh()} disabled={health.checking}>
+                    {health.checking ? 'Checking…' : 'Check status'}
+                  </button>
+                ) : null}
+              </div>
 
-          {focus === 'map' && unmappedDepts.length > 0 ? (
-            <p className="zk-prn-hint">
-              Unmapped: {unmappedDepts.map((d) => d.name).join(', ')}
-            </p>
+              {shown.length === 0 ? (
+                <div className="zk-prn-empty panel">
+                  <strong>{typeFilter === 'all' ? 'No printers yet' : `No ${typeFilter === 'kot' ? 'KOT' : typeFilter} printers`}</strong>
+                  <span>Add your kitchen, bill and receipt printers for this branch.</span>
+                  <div className="zk-prn-empty-actions">
+                    <button type="button" className="btn btn-primary" onClick={() => startNew()}>
+                      Add printer
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <PrinterTable
+                  printers={shown}
+                  health={health.health}
+                  agentError={health.agentError}
+                  agentChecking={health.agentChecking}
+                  testingId={testingId}
+                  onEdit={(p) => openWizard(p, false)}
+                  onTest={(p) => void runTestPrint(p)}
+                  onToggle={toggleActive}
+                  onDelete={remove}
+                />
+              )}
+            </>
+          ) : null}
+
+          {focus === 'map' ? (
+            <AssignmentPanel
+              printers={branchRows}
+              categories={wizardCategories}
+              areas={areas}
+              onEdit={(p) => openWizard(p, false, 'routing')}
+              onAdd={() => startNew(['kot'])}
+            />
           ) : null}
 
           {focus === 'template' ? (
             <>
+              <div className="zk-prn-gallery-head">
+                <div>
+                  <h2>Print designs</h2>
+                  <p>Preview a design, then Edit to apply it on a receipt printer (header, footer, paper size).</p>
+                </div>
+              </div>
               <div className="zk-prn-cards zk-prn-design-cards">
                 {PRINT_TEMPLATES.filter((t) => t.kinds.includes('receipt')).map((tpl) => {
-                  const inUse = shown.some(
-                    (r) => normalizeTemplateId(r.templateId, 'receipt') === tpl.id,
-                  )
+                  const inUse = receiptRows.some((r) => normalizeTemplateId(r.templateId, 'receipt') === tpl.id)
                   return (
                     <article key={tpl.id} className={`zk-prn-card zk-prn-design${inUse ? ' in-use' : ''}`}>
                       <div className="zk-prn-card-top">
@@ -394,18 +402,10 @@ export default function PrintersPage() {
                       </div>
                       <small>{tpl.blurb}</small>
                       <div className="zk-prn-card-actions">
-                        <button
-                          type="button"
-                          className="zk-prn-card-btn"
-                          onClick={() => openDesignPreview(tpl.id)}
-                        >
+                        <button type="button" className="zk-prn-card-btn" onClick={() => openDesignPreview(tpl.id)}>
                           Preview
                         </button>
-                        <button
-                          type="button"
-                          className="zk-prn-card-btn primary"
-                          onClick={() => editDesign(tpl.id)}
-                        >
+                        <button type="button" className="zk-prn-card-btn primary" onClick={() => editDesign(tpl.id)}>
                           Edit
                         </button>
                       </div>
@@ -413,34 +413,22 @@ export default function PrintersPage() {
                   )
                 })}
               </div>
-              {shown.length > 0 ? (
+              {receiptRows.length > 0 ? (
                 <div className="zk-prn-assigned">
                   <h3>Receipt printers using designs</h3>
                   <div className="zk-prn-cards">
-                    {shown.map((r) => (
+                    {receiptRows.map((r) => (
                       <article key={r.id} className={`zk-prn-card${r.active ? '' : ' off'}`}>
                         <div className="zk-prn-card-top">
                           <strong>{r.name}</strong>
-                          <span className="zk-prn-badge">
-                            {templateLabel(normalizeTemplateId(r.templateId, 'receipt'))}
-                          </span>
+                          <span className="zk-prn-badge">{templateLabel(normalizeTemplateId(r.templateId, 'receipt'))}</span>
                         </div>
-                        <small>
-                          {Number(r.paperWidthMm) || 80}mm · {r.target}
-                        </small>
+                        <small>{Number(r.paperWidthMm) || 80}mm</small>
                         <div className="zk-prn-card-actions">
-                          <button
-                            type="button"
-                            className="zk-prn-card-btn"
-                            onClick={() => openPreview(r)}
-                          >
+                          <button type="button" className="zk-prn-card-btn" onClick={() => openPreview(r)}>
                             Preview
                           </button>
-                          <button
-                            type="button"
-                            className="zk-prn-card-btn primary"
-                            onClick={() => openEditor(r)}
-                          >
+                          <button type="button" className="zk-prn-card-btn primary" onClick={() => openEditor(r)}>
                             Edit
                           </button>
                         </div>
@@ -449,68 +437,35 @@ export default function PrintersPage() {
                   </div>
                 </div>
               ) : (
-                <p className="zk-prn-hint">
-                  No receipt printer yet — tap Edit on a design to create one, or use + above.
-                </p>
+                <p className="zk-prn-hint">No receipt printer yet — tap Edit on a design to create one.</p>
               )}
             </>
-          ) : shown.length === 0 ? (
-            <div className="zk-prn-empty panel">
-              <strong>
-                {focus === 'map'
-                  ? 'No KOT printers to map'
-                  : `No ${listKind === 'kot' ? 'KOT' : 'receipt'} printers`}
-              </strong>
-              <span>
-                {focus === 'map'
-                  ? 'Add a KOT printer, then map a department.'
-                  : 'Tap + to add a printer for this branch.'}
-              </span>
-              <div className="zk-prn-empty-actions">
-                <button type="button" className="btn btn-primary" onClick={startNew}>
-                  Add printer
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="zk-prn-cards">
-              {shown.map((r) => (
-                <article key={r.id} className={`zk-prn-card${r.active ? '' : ' off'}`}>
-                  <div className="zk-prn-card-top">
-                    <strong>{r.name}</strong>
-                    <span className={`zk-prn-badge${r.active ? '' : ' muted'}`}>
-                      {r.active ? 'Active' : 'Inactive'}
-                    </span>
-                  </div>
-                  <small>
-                    {focus === 'map'
-                      ? deptLabel(categories, r.departmentId)
-                      : `${r.target} · ${Number(r.paperWidthMm) || 80}mm`}
-                  </small>
-                  <div className="zk-prn-card-actions">
-                    {(focus === 'receipt' || focus === 'kot') && (
-                      <button
-                        type="button"
-                        className="zk-prn-card-btn"
-                        onClick={() => openPreview(r)}
-                      >
-                        Preview
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="zk-prn-card-btn primary"
-                      onClick={() => openEditor(r)}
-                    >
-                      Edit
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
+          ) : null}
+
+          {focus === 'agent' ? (
+            <AgentPanel
+              agent={health.agent}
+              agentError={health.agentError}
+              checking={health.checking}
+              onRetry={() => void health.refresh()}
+            />
+          ) : null}
         </div>
       </div>
+
+      {wizard ? (
+        <PrinterWizard
+          key={wizard.row.id}
+          initial={wizard.row}
+          isNew={wizard.isNew}
+          initialStep={wizard.step}
+          categories={wizardCategories}
+          areas={areas}
+          lang={lang}
+          onSave={(row) => persist(row, wizard.isNew)}
+          onCancel={() => setWizard(null)}
+        />
+      ) : null}
 
       {editing
         ? createPortal(
@@ -519,18 +474,15 @@ export default function PrintersPage() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="zk-prn-modal-title"
-              onClick={closeEditor}
+              onClick={() => setEditing(null)}
             >
-              <div
-                className="modal-card zk-prn-modal"
-                onClick={(e) => e.stopPropagation()}
-              >
+              <div className="modal-card zk-prn-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="zk-prn-modal-head">
                   <div>
-                    <p className="zk-prn-kicker">{formTitle}</p>
+                    <p className="zk-prn-kicker">Edit print template</p>
                     <h2 id="zk-prn-modal-title">{editing.name.trim() || 'Untitled'}</h2>
                   </div>
-                  <button type="button" className="btn btn-ghost" onClick={closeEditor}>
+                  <button type="button" className="btn btn-ghost" onClick={() => setEditing(null)}>
                     Close
                   </button>
                 </div>
@@ -538,206 +490,80 @@ export default function PrintersPage() {
                 <div className="zk-prn-modal-body">
                   <div className="zk-prn-editor">
                     <div className="zk-prn-section">
-                      <h3>Printer</h3>
-                      {focus !== 'template' ? (
+                      <h3>Layout</h3>
+                      <div className="zk-prn-tpl-grid" role="listbox" aria-label="Thermal templates">
+                        {templatesForKind('receipt').map((tpl) => {
+                          const selected = normalizeTemplateId(editing.templateId, 'receipt') === tpl.id
+                          return (
+                            <button
+                              key={tpl.id}
+                              type="button"
+                              role="option"
+                              aria-selected={selected}
+                              className={`zk-prn-tpl-card${selected ? ' on' : ''}`}
+                              onClick={() => setEditing({ ...editing, templateId: tpl.id as PrintTemplateId })}
+                            >
+                              <strong>{tpl.name}</strong>
+                              <small>{tpl.blurb}</small>
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <div className="zk-prn-fields-row">
                         <label>
-                          Name <Req />
+                          Header
                           <input
                             className="search"
-                            value={editing.name}
-                            onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                            autoFocus={focus !== 'map'}
+                            value={editing.header}
+                            onChange={(e) => setEditing({ ...editing, header: e.target.value })}
+                            autoFocus
                           />
                         </label>
-                      ) : (
                         <label>
-                          Name
-                          <input className="search" value={editing.name} readOnly />
-                        </label>
-                      )}
-
-                      {focus === 'receipt' || focus === 'kot' || focus === 'map' ? (
-                        <label>
-                          Target
-                          {nativeBridge && targetOptions.length > 1 ? (
-                            <MesaSelect
-                              value={editing.target || 'browser'}
-                              onChange={(v) => setEditing({ ...editing, target: v || 'browser' })}
-                              options={targetOptions}
-                            />
-                          ) : (
-                            <input
-                              className="search"
-                              value={editing.target}
-                              onChange={(e) => setEditing({ ...editing, target: e.target.value })}
-                              placeholder="browser or printer name"
-                            />
-                          )}
-                          <small className="zk-prn-field-hint">
-                            {nativeBridge
-                              ? 'Choose a Windows printer for silent print, or Browser for PDF.'
-                              : 'Use browser, or the Mesa desktop app for named printers.'}
-                          </small>
-                        </label>
-                      ) : null}
-
-                      {focus === 'map' || focus === 'kot' ? (
-                        <label>
-                          Department
-                          <MesaSelect
-                            value={editing.departmentId ?? ''}
-                            onChange={(v) =>
-                              setEditing({ ...editing, departmentId: v || undefined })
-                            }
-                            options={[
-                              { value: '', label: 'All departments (default)' },
-                              ...categories.map((c) => ({ value: c.id, label: c.name })),
-                            ]}
+                          Footer
+                          <input
+                            className="search"
+                            value={editing.footer}
+                            onChange={(e) => setEditing({ ...editing, footer: e.target.value })}
                           />
                         </label>
-                      ) : null}
-
-                      {focus !== 'template' ? (
-                        <label>
-                          Status
-                          <MesaSelect
-                            value={editing.active ? 'active' : 'inactive'}
-                            onChange={(v) => setEditing({ ...editing, active: v === 'active' })}
-                            options={[
-                              { value: 'active', label: 'Active' },
-                              { value: 'inactive', label: 'Inactive' },
-                            ]}
-                          />
-                        </label>
-                      ) : null}
+                      </div>
                     </div>
 
-                    {focus === 'template' || focus === 'receipt' || focus === 'kot' ? (
-                      <>
-                        <div className="zk-prn-section">
-                          <h3>Layout</h3>
-                          <div className="zk-prn-tpl-grid" role="listbox" aria-label="Thermal templates">
-                            {templateOptions.map((tpl) => {
-                              const selected =
-                                normalizeTemplateId(editing.templateId, listKind) === tpl.id
-                              return (
-                                <button
-                                  key={tpl.id}
-                                  type="button"
-                                  role="option"
-                                  aria-selected={selected}
-                                  className={`zk-prn-tpl-card${selected ? ' on' : ''}`}
-                                  onClick={() =>
-                                    setEditing({
-                                      ...editing,
-                                      templateId: tpl.id as PrintTemplateId,
-                                    })
-                                  }
-                                >
-                                  <strong>{tpl.name}</strong>
-                                  <small>{tpl.blurb}</small>
-                                </button>
-                              )
-                            })}
-                          </div>
-                          {(focus === 'template' || focus === 'receipt') && (
-                            <div className="zk-prn-fields-row">
-                              <label>
-                                Header
-                                <input
-                                  className="search"
-                                  value={editing.header}
-                                  onChange={(e) =>
-                                    setEditing({ ...editing, header: e.target.value })
-                                  }
-                                  autoFocus={focus === 'template'}
-                                />
-                              </label>
-                              <label>
-                                Footer
-                                <input
-                                  className="search"
-                                  value={editing.footer}
-                                  onChange={(e) =>
-                                    setEditing({ ...editing, footer: e.target.value })
-                                  }
-                                />
-                              </label>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="zk-prn-section">
-                          <h3>Paper</h3>
-                          <div className="zk-prn-size-row">
-                            {PAPER_WIDTH_PRESETS.map((mm) => (
-                              <button
-                                key={mm}
-                                type="button"
-                                className={`zk-prn-size-chip${
-                                  Number(editing.paperWidthMm) === mm ? ' on' : ''
-                                }`}
-                                onClick={() => setEditing({ ...editing, paperWidthMm: mm })}
-                              >
-                                {mm}mm
-                              </button>
-                            ))}
-                          </div>
-                          <div className="zk-prn-fields-row">
-                            <label>
-                              Width (mm)
-                              <input
-                                className="search"
-                                inputMode="numeric"
-                                value={String(
-                                  Number.isFinite(Number(editing.paperWidthMm))
-                                    ? Number(editing.paperWidthMm) || 80
-                                    : 80,
-                                )}
-                                onChange={(e) => {
-                                  const raw = e.target.value.replace(/[^\d]/g, '')
-                                  if (raw === '') {
-                                    setEditing({ ...editing, paperWidthMm: 80 })
-                                    return
-                                  }
-                                  setEditing({
-                                    ...editing,
-                                    paperWidthMm: Math.max(48, Math.min(120, Number(raw) || 80)),
-                                  })
-                                }}
-                              />
-                            </label>
-                            <label>
-                              Copies
-                              <input
-                                className="search"
-                                inputMode="numeric"
-                                value={String(Math.max(1, Number(editing.copies) || 1))}
-                                onChange={(e) =>
-                                  setEditing({
-                                    ...editing,
-                                    copies: Math.max(1, Number(e.target.value) || 1),
-                                  })
-                                }
-                              />
-                            </label>
-                          </div>
-                        </div>
-                      </>
-                    ) : null}
+                    <div className="zk-prn-section">
+                      <h3>Paper</h3>
+                      <div className="zk-prn-size-row">
+                        {PAPER_WIDTH_PRESETS.map((mm) => (
+                          <button
+                            key={mm}
+                            type="button"
+                            className={`zk-prn-size-chip${Number(editing.paperWidthMm) === mm ? ' on' : ''}`}
+                            onClick={() => setEditing({ ...editing, paperWidthMm: mm })}
+                          >
+                            {mm}mm
+                          </button>
+                        ))}
+                      </div>
+                      <div className="zk-prn-fields-row">
+                        <label>
+                          Copies
+                          <input
+                            className="search"
+                            inputMode="numeric"
+                            value={String(Math.max(1, Number(editing.copies) || 1))}
+                            onChange={(e) => setEditing({ ...editing, copies: Math.max(1, Number(e.target.value) || 1) })}
+                          />
+                        </label>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 <div className="zk-prn-actions">
-                  <button type="button" className="zk-prn-action primary" onClick={save}>
+                  <button type="button" className="zk-prn-action primary" onClick={saveTemplate}>
                     Save
                   </button>
-                  {!isNew && focus !== 'template' ? (
-                    <button type="button" className="zk-prn-action danger" onClick={remove}>
-                      Delete
-                    </button>
-                  ) : null}
-                  <button type="button" className="zk-prn-action" onClick={closeEditor}>
+                  <button type="button" className="zk-prn-action" onClick={() => setEditing(null)}>
                     Cancel
                   </button>
                 </div>
@@ -754,22 +580,19 @@ export default function PrintersPage() {
               role="dialog"
               aria-modal="true"
               aria-labelledby="zk-prn-preview-title"
-              onClick={closePreview}
+              onClick={() => setPreviewing(null)}
             >
-              <div
-                className="modal-card zk-prn-preview-modal"
-                onClick={(e) => e.stopPropagation()}
-              >
+              <div className="modal-card zk-prn-preview-modal" onClick={(e) => e.stopPropagation()}>
                 <div className="zk-prn-modal-head">
                   <div>
                     <p className="zk-prn-kicker">Preview</p>
                     <h2 id="zk-prn-preview-title">{previewing.name}</h2>
                     <small className="zk-prn-preview-meta">
                       {Number(previewing.paperWidthMm) || 80}mm ·{' '}
-                      {templateLabel(normalizeTemplateId(previewing.templateId, listKind))}
+                      {templateLabel(normalizeTemplateId(previewing.templateId, previewKind))}
                     </small>
                   </div>
-                  <button type="button" className="btn btn-ghost" onClick={closePreview}>
+                  <button type="button" className="btn btn-ghost" onClick={() => setPreviewing(null)}>
                     Close
                   </button>
                 </div>
@@ -777,9 +600,7 @@ export default function PrintersPage() {
                   <iframe
                     title="Thermal template preview"
                     className="zk-prn-preview-frame"
-                    style={{
-                      width: `${Math.round(((Number(previewing.paperWidthMm) || 80) * 96) / 25.4)}px`,
-                    }}
+                    style={{ width: `${Math.round(((Number(previewing.paperWidthMm) || 80) * 96) / 25.4)}px` }}
                     srcDoc={previewHtml}
                   />
                 </div>
@@ -788,13 +609,15 @@ export default function PrintersPage() {
                     type="button"
                     className="zk-prn-action primary"
                     onClick={() => {
-                      closePreview()
-                      openEditor(previewing)
+                      const row = previewing
+                      setPreviewing(null)
+                      if (rows.some((r) => r.id === row.id)) openEditor(row)
+                      else editDesign(row.templateId)
                     }}
                   >
                     Edit
                   </button>
-                  <button type="button" className="zk-prn-action" onClick={closePreview}>
+                  <button type="button" className="zk-prn-action" onClick={() => setPreviewing(null)}>
                     Close
                   </button>
                 </div>
@@ -806,9 +629,7 @@ export default function PrintersPage() {
 
       <HubFooter backTo={settingsHubPath('printer')} backLabel="Printer" />
       {deleteConfirmDialog}
-      {successMsg ? (
-        <SuccessModal message={successMsg} onClose={() => setSuccessMsg('')} />
-      ) : null}
+      {successMsg ? <SuccessModal message={successMsg} onClose={() => setSuccessMsg('')} /> : null}
     </div>
   )
 }

@@ -1,0 +1,196 @@
+/* Kitchen / KDS — sticky chrome, scrollable board */
+
+/* Active tab count: base used background:currentColor after color:#fff (invisible). */
+.zk-kds .kds-tab.tone-board.on em { color: #fff; background: #c45c26; }
+.zk-kds .kds-tab.tone-queued.on em { color: #fff; background: #e67700; }
+.zk-kds .kds-tab.tone-cooking.on em { color: #fff; background: #d9480f; }
+.zk-kds .kds-tab.tone-ready.on em { color: #fff; background: #2b8a3e; }
+
+.app-shell:has(.zk-kds) {
+  height: 100% !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+}
+
+.app-shell:has(.zk-kds) .main-stage {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  padding: 0 !important;
+}
+
+.app-shell:has(.zk-kds) .main-stage > .zk-kds {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  overflow: hidden !important;
+}
+
+.zk-kds.zk-dept {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.zk-kds .zk-dash-header.zk-dash-header-bar {
+  flex-shrink: 0 !important;
+}
+
+.zk-kds > .kds-page-inner {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+  margin: 0.55rem 0.8rem 0.35rem !important;
+}
+
+.zk-kds .kds-hero,
+.zk-kds .kds-filters {
+  flex-shrink: 0 !important;
+}
+
+.zk-kds .kds-body {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  align-items: stretch !important;
+}
+
+.zk-kds .kds-tree {
+  position: static !important;
+  top: auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.zk-kds .kds-board {
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.zk-kds .kds-board-head {
+  flex-shrink: 0 !important;
+}
+
+.zk-kds .kds-empty,
+.zk-kds .kds-grid {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+.zk-kds > .zk-hub-foot {
+  flex-shrink: 0 !important;
+  position: relative !important;
+  margin-top: 0 !important;
+}
+
+@media (max-width: 960px) {
+  .app-shell:has(.zk-kds) {
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-shell:has(.zk-kds) .side-nav {
+    display: none !important;
+  }
+
+  .app-shell:has(.zk-kds) .main-stage {
+    min-height: 100dvh !important;
+  }
+
+  .zk-kds > .kds-page-inner {
+    margin: 0.45rem 0.5rem 0.35rem !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .zk-kds .kds-hero {
+    padding: 0.65rem 0.75rem !important;
+  }
+
+  .zk-kds .kds-filters {
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .zk-kds .kds-tab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .zk-kds .kds-body {
+    flex: 0 0 auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    display: flex !important;
+    flex-direction: column !important;
+    grid-template-columns: 1fr !important;
+    gap: 0.65rem !important;
+  }
+
+  .zk-kds .kds-tree,
+  .zk-kds .kds-board {
+    height: auto !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  .zk-kds .kds-empty,
+  .zk-kds .kds-grid {
+    overflow: visible !important;
+    flex: none !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .zk-kds .kds-hero-stats .kds-stat em {
+    display: none;
+  }
+}
+
+.zk-kds .kds-line {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+.zk-kds .kds-line-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.zk-kds .kds-line-actions .btn {
+  min-height: 2.1rem;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.8rem;
+}
+.zk-kds .kds-line.status-ready {
+  opacity: 0.72;
+}
+.zk-kds .kds-boards {
+  margin-bottom: 0.35rem;
+  gap: 0.35rem;
+}
+.zk-kds .kds-tree-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  opacity: 0.75;
+  padding: 0.75rem;
+}

@@ -11,7 +11,7 @@ import { dismissBootSplashAfterPaint } from '../lib/bootSplash'
 type Field = 'username' | 'pin' | 'vat'
 
 export default function LoginPage() {
-  const { login, loginRider, companyId, selectedCompany, activateTerminal, refreshStaff } = useAuth()
+  const { login, loginRider, companyId, selectedCompany, activateTerminal, clearTerminalBinding, refreshStaff } = useAuth()
   const { connectivity, recheckConnection } = useSync()
   const { t, lang } = useI18n()
   const navigate = useNavigate()
@@ -106,6 +106,14 @@ export default function LoginPage() {
       } else {
         navigate('/', { replace: true })
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t.wrongCredentials
+      setError(message)
+      if (/license expired|suspended|not activated/i.test(message)) {
+        clearTerminalBinding()
+      }
+      setPin('')
+      pinRef.current?.focus()
     } finally {
       setBusy(false)
     }
@@ -121,7 +129,8 @@ export default function LoginPage() {
       vatRef.current?.focus()
       return
     }
-    if (vat.replace(/\s/g, '').length < 10) {
+    const codeLen = vat.replace(/[^a-zA-Z0-9]/g, '').length
+    if (codeLen < 3) {
       setInvalid({ vat: t.vatTooShort })
       setError(t.vatTooShort)
       vatRef.current?.focus()
@@ -215,9 +224,10 @@ export default function LoginPage() {
                   clearAlerts()
                   setTaxId(e.target.value)
                 }}
-                placeholder="3xxxxxxxxxxxxxxx003"
+                placeholder={t.companyCodePh}
                 autoComplete="off"
-                inputMode="numeric"
+                autoCapitalize="characters"
+                spellCheck={false}
                 aria-invalid={Boolean(invalid.vat)}
                 aria-describedby={invalid.vat ? 'login-vat-err' : undefined}
               />
@@ -294,8 +304,9 @@ export default function LoginPage() {
                   ref={pinRef}
                   className="login-secret"
                   type={showPin ? 'text' : 'password'}
-                  autoComplete="one-time-code"
-                  inputMode="numeric"
+                  autoComplete={riderMode ? 'one-time-code' : 'current-password'}
+                  inputMode={riderMode ? 'numeric' : 'text'}
+                  enterKeyHint="done"
                   value={pin}
                   maxLength={riderMode ? 4 : 64}
                   placeholder={riderMode ? '••••' : t.enterPin}

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { getPermissions } from '../auth/roles'
-import AccountsShell from '../components/AccountsShell'
+import ExpensesShell from '../components/ExpensesShell'
 import AccessDenied from '../components/AccessDenied'
 import Req from '../components/Req'
 import { useDeleteConfirm } from '../hooks/useDeleteConfirm'
@@ -73,7 +73,7 @@ export default function ExpenseTypesPage() {
   const sorted = [...rows].sort((a, b) => a.sort - b.sort)
 
   return (
-    <AccountsShell
+    <ExpensesShell
       active="expense-types"
       title={t.expenseTypes}
       subtitle={t.expenseTypesHint}
@@ -119,34 +119,34 @@ export default function ExpenseTypesPage() {
             )}
           </div>
 
-          <section className="bo-panel" style={{ minHeight: 280 }}>
+          <section className="bo-panel zk-exp-type-editor" style={{ minHeight: 280 }}>
             {editing ? (
-              <div style={{ padding: '0.85rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                <h2 style={{ margin: 0, fontFamily: 'var(--font-display)' }}>
-                  {isNew ? 'New expense type' : 'Edit expense type'}
-                </h2>
-                <label>
-                  Expense Type Name <Req />
+              <div className="zk-exp-type-form">
+                <h2>{isNew ? 'New expense type' : 'Edit expense type'}</h2>
+                <label className="zk-exp-field">
+                  <span className="zk-exp-label">
+                    Expense Type Name <Req />
+                  </span>
                   <input
-                    className="search"
+                    className="search zk-exp-input"
                     value={editing.name}
                     onChange={(e) => setEditing({ ...editing, name: e.target.value })}
                     placeholder="e.g. Rent"
                     autoFocus
                   />
                 </label>
-                <label>
-                  Description
+                <label className="zk-exp-field">
+                  <span className="zk-exp-label">Description</span>
                   <textarea
-                    className="search"
+                    className="search zk-exp-input zk-exp-narration-input"
                     value={editing.description ?? ''}
                     onChange={(e) => setEditing({ ...editing, description: e.target.value })}
                     placeholder="Optional notes"
                     rows={4}
                   />
                 </label>
-                <label>
-                  Status
+                <label className="zk-exp-field">
+                  <span className="zk-exp-label">Status</span>
                   <MesaSelect
                     value={editing.active ? 'active' : 'inactive'}
                     onChange={(v) => setEditing({ ...editing, active: v === 'active' })}
@@ -156,7 +156,7 @@ export default function ExpenseTypesPage() {
                     ]}
                   />
                 </label>
-                <div className="zk-exp-sheet-actions" style={{ padding: 0, border: 'none', background: 'transparent' }}>
+                <div className="zk-exp-sheet-actions zk-exp-type-actions">
                   <button type="button" className="zk-exp-btn primary" onClick={save}>
                     {t.update}
                   </button>
@@ -187,6 +187,6 @@ export default function ExpenseTypesPage() {
         </div>
       </div>
       {deleteConfirmDialog}
-    </AccountsShell>
+    </ExpensesShell>
   )
 }

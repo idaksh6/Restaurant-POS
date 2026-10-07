@@ -118,6 +118,17 @@ export function peekDishes(): MasterDish[] {
   }
 }
 
+export function peekCategories(): MenuCategory[] {
+  try {
+    const raw = tenantGetItem('mesa-master-categories')
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as MenuCategory[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 function snapshotCategories(rows: MenuCategory[]) {
   tenantSetItem('mesa-master-categories', JSON.stringify(rows))
 }

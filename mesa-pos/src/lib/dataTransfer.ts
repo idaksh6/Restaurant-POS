@@ -8,15 +8,17 @@ export type TransferTableId =
   | 'customer'
   | 'vendor'
   | 'side-dish'
+  | 'stock'
   | 'ingredients'
   | 'recipe'
 
 export const transferTables: { id: TransferTableId; label: string }[] = [
   { id: 'department', label: 'Department' },
-  { id: 'products', label: 'Products' },
+  { id: 'products', label: 'Products (menu)' },
   { id: 'customer', label: 'Customer' },
   { id: 'vendor', label: 'Vendor' },
   { id: 'side-dish', label: 'Side Dish' },
+  { id: 'stock', label: 'Stock items' },
   { id: 'ingredients', label: 'Ingredients' },
   { id: 'recipe', label: 'Recipe' },
 ]
@@ -146,16 +148,35 @@ export const templates: Record<TransferTableId, { headers: string[]; sample: str
     sample: [['Appu', '0500000000', 'Riyadh', 'appu@example.com']],
   },
   vendor: {
-    headers: ['Name', 'Phone', 'Email', 'City', 'Active'],
-    sample: [['SupplierA', '+966 50 000 0000', 'a@vendor.com', 'Riyadh', '1']],
+    headers: ['Name', 'Phone', 'Phone2', 'Email', 'TaxId', 'City', 'Address', 'Active'],
+    sample: [
+      ['SupplierA', '+966500000000', '', 'a@vendor.com', '300000000000003', 'Riyadh', 'Olaya St', '1'],
+    ],
   },
   'side-dish': {
     headers: ['ProductName', 'Alias_Name', 'upc_code', 'Department', 'Sale_Price', 'Active'],
     sample: [['Fries', 'Fries', 'SIDE01', 'Sides', '15', '1']],
   },
+  stock: {
+    headers: [
+      'Name',
+      'SKU',
+      'Category',
+      'Unit',
+      'Qty',
+      'Reorder',
+      'Cost',
+      'Vendor',
+      'Active',
+    ],
+    sample: [
+      ['Chicken Breast', 'MEAT-CHK-BR', 'Meat', 'kg', '22', '12', '6.4', 'Al Nakheel Meats', '1'],
+      ['Arborio Rice', 'DRY-ARB-1', 'Dry Goods', 'kg', '4.2', '6', '3.1', 'Riyadh Dry Store', '1'],
+    ],
+  },
   ingredients: {
-    headers: ['Name', 'Unit', 'Qty', 'Reorder', 'Cost'],
-    sample: [['Tomato', 'kg', '20', '5', '4']],
+    headers: ['Name', 'SKU', 'Unit', 'Qty', 'Reorder', 'Cost', 'Vendor', 'Category'],
+    sample: [['Tomato', 'PRD-TOM', 'kg', '20', '5', '4', 'Farm Fresh KSA', 'Produce']],
   },
   recipe: {
     headers: ['ProductCode', 'ProductName', 'Ingredient', 'Qty'],
@@ -165,7 +186,29 @@ export const templates: Record<TransferTableId, { headers: string[]; sample: str
 
 export function templateCsv(table: TransferTableId) {
   const t = templates[table]
-  return toCsv(t.headers, t.sample)
+  // UTF-8 BOM so Excel opens Arabic / macros-friendly CSV correctly
+  return `\uFEFF${toCsv(t.headers, t.sample)}`
+}
+
+/** Read CSV text or first sheet of an Excel workbook (.xlsx / .xls). */
+export async function parseSpreadsheetFile(file: File): Promise<string[][]> {
+  const name = file.name.toLowerCase()
+  if (name.endsWith('.xlsx') || name.endsWith('.xls') || name.endsWith('.xlsm')) {
+    const XLSX = await import('xlsx')
+    const buf = await file.arrayBuffer()
+    const wb = XLSX.read(buf, { type: 'array' })
+    const sheet = wb.Sheets[wb.SheetNames[0]]
+    const matrix = XLSX.utils.sheet_to_json<(string | number | null | undefined)[]>(sheet, {
+      header: 1,
+      defval: '',
+      raw: false,
+    }) as unknown as string[][]
+    return matrix
+      .map((r) => r.map((c) => String(c ?? '').trim()))
+      .filter((r) => r.some((c) => c !== ''))
+  }
+  const text = await file.text()
+  return parseCsv(text)
 }
 
 /** Keys used for full JSON backup */
@@ -187,6 +230,8 @@ export const backupKeys = [
   'mesa-active-branch-id',
   'mesa-company-details',
   'mesa-tax-rates',
+  'mesa-beverage-qtys',
+  'mesa-beverage-prices',
   'mesa-menu-timetables',
   'mesa-sales-ledger',
   'mesa-day-closed',

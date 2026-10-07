@@ -18,14 +18,22 @@ export type MenuTimetable = {
 const KEY = 'mesa-menu-timetables'
 const DEMO_IDS = new Set(['mt-1'])
 
+/** Local calendar day YYYY-MM-DD (not UTC — important for KSA / branch time). */
+export function localDayKey(at = new Date()) {
+  const y = at.getFullYear()
+  const m = String(at.getMonth() + 1).padStart(2, '0')
+  const d = String(at.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
 function today() {
-  return new Date().toISOString().slice(0, 10)
+  return localDayKey()
 }
 
 function plusDays(n: number) {
   const d = new Date()
   d.setDate(d.getDate() + n)
-  return d.toISOString().slice(0, 10)
+  return localDayKey(d)
 }
 
 export function isDemoTimetable(id: string) {
@@ -155,13 +163,14 @@ function toMinutes(t: string) {
 
 export function isTimetableActiveNow(t: MenuTimetable, at = new Date()) {
   if (!t.active) return false
-  const day = at.toISOString().slice(0, 10)
-  if (day < t.validFrom || day > t.validTo) return false
+  const day = localDayKey(at)
+  if (t.validFrom && day < t.validFrom) return false
+  if (t.validTo && day > t.validTo) return false
   const mins = at.getHours() * 60 + at.getMinutes()
-  const from = toMinutes(t.timeFrom)
-  const to = toMinutes(t.timeTo)
+  const from = toMinutes(t.timeFrom || '00:00')
+  const to = toMinutes(t.timeTo || '23:59')
   if (from <= to) return mins >= from && mins <= to
-  // overnight window
+  // overnight window (e.g. 22:00 → 02:00)
   return mins >= from || mins <= to
 }
 

@@ -1,0 +1,261 @@
+/* Flash toast — compact card, physical top-right */
+
+.flash-toast-host {
+  position: fixed;
+  top: max(0.75rem, env(safe-area-inset-top, 0px));
+  right: max(0.85rem, env(safe-area-inset-right, 0px));
+  left: auto;
+  z-index: 10050;
+  pointer-events: none;
+  width: fit-content;
+  max-width: min(22rem, calc(100vw - 1.5rem));
+  transform: none;
+}
+
+html[dir='rtl'] .flash-toast-host {
+  right: auto;
+  left: max(0.85rem, env(safe-area-inset-left, 0px));
+}
+
+.flash-toast-host.show .flash-toast {
+  animation: flash-toast-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.flash-toast-host.hide .flash-toast {
+  animation: flash-toast-out 0.2s ease both;
+}
+
+.flash-toast {
+  pointer-events: auto;
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: min(22rem, calc(100vw - 1.5rem));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.75rem 0.7rem 0.8rem;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.65) inset,
+    0 10px 28px rgba(18, 32, 28, 0.14),
+    0 2px 6px rgba(18, 32, 28, 0.06);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.flash-toast.ok {
+  color: #12201c;
+  background: linear-gradient(165deg, #f4fbf6 0%, #e8f4ee 100%);
+  border-color: color-mix(in srgb, var(--ok, #1f7a45) 28%, #cfe3d6);
+}
+
+.flash-toast.err {
+  color: #3b1410;
+  background: linear-gradient(165deg, #fff8f7 0%, #fdeceb 100%);
+  border-color: color-mix(in srgb, var(--danger, #b42318) 28%, #f0c2bc);
+}
+
+.flash-toast-icon {
+  width: 2.15rem;
+  height: 2.15rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(18, 32, 28, 0.08);
+}
+
+.flash-toast-icon svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.flash-toast.ok .flash-toast-icon {
+  background: #1f7a45;
+  color: #fff;
+}
+
+.flash-toast.err .flash-toast-icon {
+  background: #b42318;
+  color: #fff;
+}
+
+.flash-toast-copy {
+  min-width: 0;
+  display: grid;
+  gap: 0.1rem;
+}
+
+.flash-toast-kicker {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.72;
+}
+
+.flash-toast.ok .flash-toast-kicker {
+  color: #1f7a45;
+}
+
+.flash-toast.err .flash-toast-kicker {
+  color: #b42318;
+}
+
+.flash-toast-copy strong {
+  display: block;
+  margin: 0;
+  font-family: var(--font-body, inherit);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-word;
+  color: inherit;
+}
+
+.flash-toast-copy p {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.35;
+  opacity: 0.78;
+  word-break: break-word;
+}
+
+.flash-toast-close {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  background: rgba(18, 32, 28, 0.06);
+  color: #5f7169;
+  font-size: 1.15rem;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.flash-toast.err .flash-toast-close {
+  background: rgba(180, 35, 24, 0.08);
+  color: #8a2b22;
+}
+
+.flash-toast-close:hover {
+  background: rgba(18, 32, 28, 0.12);
+  color: #12201c;
+}
+
+@keyframes flash-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(0.85rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes flash-toast-out {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(0.55rem) scale(0.98);
+  }
+}
+
+html[dir='rtl'] .flash-toast-host.show .flash-toast {
+  animation-name: flash-toast-in-rtl;
+}
+
+html[dir='rtl'] .flash-toast-host.hide .flash-toast {
+  animation-name: flash-toast-out-rtl;
+}
+
+@keyframes flash-toast-in-rtl {
+  from {
+    opacity: 0;
+    transform: translateX(-0.85rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes flash-toast-out-rtl {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-0.55rem) scale(0.98);
+  }
+}
+
+@media (max-width: 960px) {
+  .flash-toast-host {
+    top: auto;
+    bottom: calc(max(0.85rem, env(safe-area-inset-bottom, 0px)) + 3.5rem);
+    right: max(0.65rem, env(safe-area-inset-right, 0px));
+    left: auto;
+    max-width: min(20rem, calc(100vw - 1.25rem));
+  }
+
+  html[dir='rtl'] .flash-toast-host {
+    right: auto;
+    left: max(0.65rem, env(safe-area-inset-left, 0px));
+  }
+
+  .flash-toast {
+    max-width: min(20rem, calc(100vw - 1.25rem));
+  }
+
+  .flash-toast-host.show .flash-toast {
+    animation-name: flash-toast-in-mobile;
+  }
+
+  .flash-toast-host.hide .flash-toast {
+    animation-name: flash-toast-out-mobile;
+  }
+}
+
+@keyframes flash-toast-in-mobile {
+  from {
+    opacity: 0;
+    transform: translateY(0.7rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes flash-toast-out-mobile {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: translateY(0.45rem) scale(0.98);
+  }
+}
+
+/* Legacy modal styles — keep hidden if old class names linger */
+.flash-popup {
+  display: none !important;
+}

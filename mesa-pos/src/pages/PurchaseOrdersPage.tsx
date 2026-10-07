@@ -5,6 +5,7 @@ import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
 import MesaSelect from '../components/MesaSelect'
 import type { POLine, PurchaseOrder } from '../data/purchasing'
+import { getActiveBranchId } from '../data/company'
 import { money } from '../data/mock'
 import {
   canonicalizeIngredientCategory,
@@ -17,7 +18,7 @@ import {
   normalizeIngredient,
 } from '../data/ingredients'
 import type { Ingredient } from '../data/ingredients'
-import { useI18n } from '../locale/i18n'
+import { useI18n, type Dict } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
 import { usePos } from '../state/PosContext'
 import { usePurchasing } from '../state/PurchasingContext'
@@ -34,17 +35,16 @@ type QuickItemDraft = {
   error: string
 }
 
+type QuickVendorDraft = {
+  name: string
+  phone: string
+  city: string
+  email: string
+  error: string
+}
+
 const PAGE_SIZE = 8
 const QUICK_UNITS = ['kg', 'g', 'L', 'ml', 'pcs', 'box', 'case'] as const
-
-const STATUS_TABS: { id: StatusFilter; label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'draft', label: 'Draft' },
-  { id: 'ordered', label: 'Ordered' },
-  { id: 'partial', label: 'Partial' },
-  { id: 'received', label: 'Received' },
-  { id: 'cancelled', label: 'Cancelled' },
-]
 
 function PoIcon({ children }: { children: ReactNode }) {
   return (
@@ -139,12 +139,30 @@ function poTotal(po: PurchaseOrder) {
   return po.lines.reduce((sum, l) => sum + l.qtyOrdered * l.unitCost, 0)
 }
 
+function statusLabel(status: PurchaseOrder['status'], t: Dict) {
+  if (status === 'draft') return t.poTabDraft
+  if (status === 'ordered') return t.poTabOrdered
+  if (status === 'partial') return t.poTabPartial
+  if (status === 'received') return t.poTabReceived
+  return t.poTabCancelled
+}
+
 export default function PurchaseOrdersPage() {
   const { t } = useI18n()
   const { user } = useAuth()
   const canManage = user ? getPermissions(user.role).canManageStock : false
   const { stock, flash, ingredients, saveIngredient } = usePos()
-  const { suppliers, purchaseOrders, createPO, markOrdered, cancelPO, receivePO } = usePurchasing()
+  const { suppliers, purchaseOrders, createPO, markOrdered, cancelPO, receivePO, saveSupplier } =
+    usePurchasing()
+
+  const statusTabs: { id: StatusFilter; label: string }[] = [
+    { id: 'all', label: t.all },
+    { id: 'draft', label: t.poTabDraft },
+    { id: 'ordered', label: t.poTabOrdered },
+    { id: 'partial', label: t.poTabPartial },
+    { id: 'received', label: t.poTabReceived },
+    { id: 'cancelled', label: t.poTabCancelled },
+  ]
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -160,6 +178,7 @@ export default function PurchaseOrdersPage() {
     { stockId: stock[0]?.id ?? 's1', qtyOrdered: 5, unitCost: stock[0]?.cost ?? 0 },
   ])
   const [quickItem, setQuickItem] = useState<QuickItemDraft | null>(null)
+  const [quickVendor, setQuickVendor] = useState<QuickVendorDraft | null>(null)
 
   const ingredientByStockId = useMemo(() => {
     const map = new Map<string, (typeof ingredients)[0]>()
@@ -295,24 +314,63 @@ export default function PurchaseOrdersPage() {
     })
   }
 
+  function openQuickVendor() {
+    setQuickVendor({
+      name: '',
+      phone: '',
+      city: '',
+      email: '',
+      error: '',
+    })
+  }
+
+  function saveQuickVendor() {
+    if (!quickVendor) return
+    const name = quickVendor.name.trim()
+    if (name.length < 2) {
+      setQuickVendor({ ...quickVendor, error: t.vendorNameRequired })
+      return
+    }
+    if (suppliers.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) {
+      setQuickVendor({
+        ...quickVendor,
+        error: t.poVendorExists.replace('{name}', name),
+      })
+      return
+    }
+    const id = `sup-${Date.now()}`
+    saveSupplier({
+      id,
+      name,
+      phone: quickVendor.phone.trim(),
+      email: quickVendor.email.trim() || undefined,
+      city: quickVendor.city.trim(),
+      active: true,
+    })
+    setSupplierId(id)
+    setShowAllStock(true)
+    setQuickVendor(null)
+    flash(t.poVendorAdded.replace('{name}', name))
+  }
+
   function saveQuickItem() {
     if (!quickItem) return
     const name = quickItem.name.trim()
     if (!name) {
-      setQuickItem({ ...quickItem, error: 'Item name is required' })
+      setQuickItem({ ...quickItem, error: t.poItemNameRequired })
       return
     }
     if (isIngredientNameTaken(ingredients, name)) {
       setQuickItem({
         ...quickItem,
-        error: `Item “${name}” already exists — pick it from the list instead`,
+        error: t.poItemExists.replace('{name}', name),
       })
       return
     }
     if (stock.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) {
       setQuickItem({
         ...quickItem,
-        error: `Stock item “${name}” already exists — pick it from the list instead`,
+        error: t.poStockExists.replace('{name}', name),
       })
       return
     }
@@ -320,14 +378,14 @@ export default function PurchaseOrdersPage() {
     if (isIngredientSkuTaken(ingredients, sku)) {
       setQuickItem({
         ...quickItem,
-        error: `SKU “${sku}” already exists — enter a unique code`,
+        error: t.poSkuExists.replace('{sku}', sku),
       })
       return
     }
     if (stock.some((s) => s.sku.trim().toLowerCase() === sku.toLowerCase())) {
       setQuickItem({
         ...quickItem,
-        error: `SKU “${sku}” already exists on stock — enter a unique code`,
+        error: t.poSkuExistsStock.replace('{sku}', sku),
       })
       return
     }
@@ -343,6 +401,7 @@ export default function PurchaseOrdersPage() {
       category,
       unit,
       active: true,
+      branchId: getActiveBranchId(),
       vendorId: supplierId || undefined,
       vendor: vendorName,
       vendorLinks: supplierId
@@ -365,7 +424,7 @@ export default function PurchaseOrdersPage() {
       ),
     )
     setQuickItem(null)
-    flash(`Item “${name}” added`)
+    flash(t.poItemAdded.replace('{name}', name))
   }
 
   useEffect(() => {
@@ -479,12 +538,12 @@ export default function PurchaseOrdersPage() {
 
   function submitNew() {
     if (!supplierId || draftLines.length === 0) {
-      flash('Pick vendor and at least one line')
+      flash(t.poPickVendorLine)
       return
     }
     const lines = draftLines.filter((l) => l.qtyOrdered > 0)
     if (!lines.length) {
-      flash('Add ordered qty')
+      flash(t.poAddOrderedQty)
       return
     }
     createPO({ supplierId, lines, notes: notes || undefined })
@@ -495,7 +554,7 @@ export default function PurchaseOrdersPage() {
       qtyOrdered: 5,
       unitCost: unitCostForStock(poStockItems[0]?.id ?? stock[0]?.id ?? 's1', supplierId),
     }])
-    flash('Draft PO created')
+    flash(t.poDraftCreated)
   }
 
   if (!canManage) {
@@ -507,8 +566,8 @@ export default function PurchaseOrdersPage() {
             <span className="po-empty-ico">
               <IconDoc />
             </span>
-            <strong>Purchase orders locked</strong>
-            <p>Only Admin / stock roles can manage purchasing.</p>
+            <strong>{t.poLocked}</strong>
+            <p>{t.poLockedHint}</p>
           </div>
         </div>
         <HubFooter backTo="/" backLabel={t.home} />
@@ -527,10 +586,16 @@ export default function PurchaseOrdersPage() {
               <IconDoc />
             </span>
             <div>
-              <h1>Purchase orders</h1>
+              <h1>{t.invPurchaseOrders}</h1>
               <p>
-                {openCount} open · {purchaseOrders.length} total
-                {activeSuppliers.length ? ` · ${activeSuppliers.length} vendors` : ''}
+                {(activeSuppliers.length
+                  ? t.poHeroMetaVendors
+                      .replace('{open}', String(openCount))
+                      .replace('{total}', String(purchaseOrders.length))
+                      .replace('{vendors}', String(activeSuppliers.length))
+                  : t.poHeroMeta
+                      .replace('{open}', String(openCount))
+                      .replace('{total}', String(purchaseOrders.length)))}
               </p>
             </div>
           </div>
@@ -538,28 +603,28 @@ export default function PurchaseOrdersPage() {
             <span className={`po-stat${openCount ? ' warn' : ''}`}>
               <IconOpen />
               <strong className="mesa-ltr-nums">{openCount}</strong>
-              <em>Open</em>
+              <em>{t.openAmount}</em>
             </span>
             <span className="po-stat">
               <IconDoc />
               <strong className="mesa-ltr-nums">{purchaseOrders.length}</strong>
-              <em>All</em>
+              <em>{t.all}</em>
             </span>
             <span className="po-stat">
               <IconVendors />
               <strong className="mesa-ltr-nums">{activeSuppliers.length}</strong>
-              <em>Vendors</em>
+              <em>{t.vendors}</em>
             </span>
           </div>
           <div className="po-hero-actions">
             <Link to="/inventory" className="po-link-btn">
-              <IconBox /> Stock
+              <IconBox /> {t.navStock}
             </Link>
             <Link to="/suppliers" className="po-link-btn">
-              <IconVendors /> Vendors
+              <IconVendors /> {t.vendors}
             </Link>
             <button type="button" className="po-link-btn primary" onClick={() => setShowNew(true)}>
-              <IconPlus /> New PO
+              <IconPlus /> {t.poNew}
             </button>
           </div>
         </header>
@@ -572,12 +637,12 @@ export default function PurchaseOrdersPage() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search PO, vendor, or notes"
-                  aria-label="Search purchase orders"
+                  placeholder={t.poSearchPlaceholder}
+                  aria-label={t.poSearchAria}
                 />
               </label>
               <div className="po-filters" role="tablist">
-                {STATUS_TABS.map((tab) => (
+                {statusTabs.map((tab) => (
                   <button
                     key={tab.id}
                     type="button"
@@ -596,11 +661,9 @@ export default function PurchaseOrdersPage() {
                 <span className="po-empty-ico">
                   <IconDoc />
                 </span>
-                <strong>No purchase orders</strong>
+                <strong>{t.poEmptyTitle}</strong>
                 <p>
-                  {purchaseOrders.length === 0
-                    ? 'Create a draft PO to start ordering from vendors.'
-                    : 'No POs match this search or status filter.'}
+                  {purchaseOrders.length === 0 ? t.poEmptyHintNew : t.poEmptyHintFilter}
                 </p>
                 <div className="po-empty-actions">
                   {statusFilter !== 'all' || search ? (
@@ -612,11 +675,11 @@ export default function PurchaseOrdersPage() {
                         setStatusFilter('all')
                       }}
                     >
-                      Reset filters
+                      {t.invResetFilters}
                     </button>
                   ) : null}
                   <button type="button" className="btn btn-primary" onClick={() => setShowNew(true)}>
-                    <IconPlus /> New PO
+                    <IconPlus /> {t.poNew}
                   </button>
                 </div>
               </div>
@@ -626,13 +689,13 @@ export default function PurchaseOrdersPage() {
                   <table className="po-table">
                     <thead>
                       <tr>
-                        <th>PO</th>
-                        <th>Vendor</th>
-                        <th>Status</th>
-                        <th>Lines</th>
-                        <th>Value</th>
-                        <th>Created</th>
-                        <th>Action</th>
+                        <th>{t.poColPo}</th>
+                        <th>{t.vendorTitle}</th>
+                        <th>{t.status}</th>
+                        <th>{t.poColLines}</th>
+                        <th>{t.poColValue}</th>
+                        <th>{t.poColCreated}</th>
+                        <th>{t.invColAction}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -653,7 +716,7 @@ export default function PurchaseOrdersPage() {
                             </td>
                             <td>
                               <span className={`po-badge tone-${statusTone(po.status)}`}>
-                                {po.status}
+                                {statusLabel(po.status, t)}
                               </span>
                             </td>
                             <td>
@@ -664,7 +727,7 @@ export default function PurchaseOrdersPage() {
                                   </span>
                                 ))}
                                 {po.lines.length > 3 ? (
-                                  <em>+{po.lines.length - 3} more</em>
+                                  <em>{t.poMoreLines.replace('{count}', String(po.lines.length - 3))}</em>
                                 ) : null}
                               </div>
                             </td>
@@ -682,7 +745,7 @@ export default function PurchaseOrdersPage() {
                                     className="po-act teal"
                                     onClick={() => markOrdered(po.id)}
                                   >
-                                    Mark ordered
+                                    {t.poMarkOrdered}
                                   </button>
                                 ) : null}
                                 {po.status === 'ordered' || po.status === 'partial' ? (
@@ -691,7 +754,7 @@ export default function PurchaseOrdersPage() {
                                     className="po-act primary"
                                     onClick={() => startReceive(po)}
                                   >
-                                    <IconTruck /> Receive
+                                    <IconTruck /> {t.poReceive}
                                   </button>
                                 ) : null}
                                 {po.status !== 'received' && po.status !== 'cancelled' ? (
@@ -700,7 +763,7 @@ export default function PurchaseOrdersPage() {
                                     className="po-act ghost"
                                     onClick={() => cancelPO(po.id)}
                                   >
-                                    Cancel
+                                    {t.cancel}
                                   </button>
                                 ) : null}
                               </div>
@@ -714,8 +777,8 @@ export default function PurchaseOrdersPage() {
 
                 <div className="po-pager">
                   <span className="mesa-ltr-nums">
-                    {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, list.length)} of{' '}
-                    {list.length}
+                    {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, list.length)}{' '}
+                    {t.expensePagerOf} {list.length}
                   </span>
                   <div className="po-pager-actions">
                     <button
@@ -724,7 +787,7 @@ export default function PurchaseOrdersPage() {
                       disabled={safePage <= 1}
                       onClick={() => setPage((p) => Math.max(1, p - 1))}
                     >
-                      Prev
+                      {t.expensePagerPrev}
                     </button>
                     {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
                       <button
@@ -743,7 +806,7 @@ export default function PurchaseOrdersPage() {
                       disabled={safePage >= pageCount}
                       onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                     >
-                      Next
+                      {t.expensePagerNext}
                     </button>
                   </div>
                 </div>
@@ -755,21 +818,21 @@ export default function PurchaseOrdersPage() {
             <section className="po-panel">
               <header>
                 <h2>
-                  <IconOpen /> Open pipeline
+                  <IconOpen /> {t.poOpenPipeline}
                 </h2>
                 <em className="mesa-ltr-nums">{openCount}</em>
               </header>
               <ul className="po-pipeline">
                 <li>
-                  <span>Draft</span>
+                  <span>{t.poTabDraft}</span>
                   <strong className="mesa-ltr-nums">{counts.draft}</strong>
                 </li>
                 <li>
-                  <span>Ordered</span>
+                  <span>{t.poTabOrdered}</span>
                   <strong className="mesa-ltr-nums">{counts.ordered}</strong>
                 </li>
                 <li>
-                  <span>Partial</span>
+                  <span>{t.poTabPartial}</span>
                   <strong className="mesa-ltr-nums">{counts.partial}</strong>
                 </li>
               </ul>
@@ -778,15 +841,18 @@ export default function PurchaseOrdersPage() {
             <section className="po-panel">
               <header>
                 <h2>
-                  <IconVendors /> Vendors
+                  <IconVendors /> {t.vendors}
                 </h2>
                 <em className="mesa-ltr-nums">{activeSuppliers.length}</em>
               </header>
               {activeSuppliers.length === 0 ? (
                 <div className="po-side-empty">
-                  <strong>No vendors yet</strong>
-                  <span>Add suppliers before creating POs.</span>
-                  <Link to="/suppliers">Manage vendors</Link>
+                  <strong>{t.noVendors}</strong>
+                  <span>{t.poNoVendorsSideHint}</span>
+                  <button type="button" className="po-side-link" onClick={() => { setShowNew(true); openQuickVendor() }}>
+                    {t.poQuickAddVendor}
+                  </button>
+                  <Link to="/suppliers">{t.poManageVendors}</Link>
                 </div>
               ) : (
                 <div className="po-vendor-list">
@@ -798,11 +864,11 @@ export default function PurchaseOrdersPage() {
                   ))}
                   {activeSuppliers.length > 6 ? (
                     <Link to="/suppliers" className="po-side-link">
-                      View all {activeSuppliers.length}
+                      {t.poViewAll.replace('{count}', String(activeSuppliers.length))}
                     </Link>
                   ) : (
                     <Link to="/suppliers" className="po-side-link">
-                      Manage vendors
+                      {t.poManageVendors}
                     </Link>
                   )}
                 </div>
@@ -812,12 +878,12 @@ export default function PurchaseOrdersPage() {
             <section className="po-panel">
               <header>
                 <h2>
-                  <IconBox /> Stock
+                  <IconBox /> {t.navStock}
                 </h2>
               </header>
-              <p className="po-side-hint">Review on-hand levels, then create or receive POs.</p>
+              <p className="po-side-hint">{t.poStockHint}</p>
               <Link to="/inventory" className="po-side-cta">
-                Open inventory
+                {t.poOpenInventory}
               </Link>
             </section>
           </aside>
@@ -835,184 +901,309 @@ export default function PurchaseOrdersPage() {
         >
           <div className="modal-card po-modal">
             <div className="section-head">
-              <h2>New purchase order</h2>
+              <h2>{t.poNewTitle}</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setShowNew(false)}>
-                Close
+                {t.close}
               </button>
             </div>
-            <label className="field-label">Vendor</label>
-            <MesaSelect
-              value={supplierId}
-              onChange={changeSupplier}
-              options={activeSuppliers.map((s) => ({
-                value: s.id,
-                label: `${s.name}${s.city ? ` · ${s.city}` : ''}`,
-              }))}
-              placeholder={activeSuppliers.length ? 'Select vendor' : 'No vendors'}
-              disabled={!activeSuppliers.length}
-            />
-            <label className="po-show-all">
-              <input
-                type="checkbox"
-                checked={showAllStock}
-                onChange={(e) => setShowAllStock(e.target.checked)}
-              />
-              Show all stock items (ignore vendor catalog)
-            </label>
-            {showAllStock || supplierId ? (
-              <p className="po-side-hint">
-                {showAllStock
-                  ? `Showing all ${poStockItems.length} stock item${poStockItems.length === 1 ? '' : 's'}${
-                      supplierId
-                        ? ` · ${linkedVendorCount} linked to this vendor`
-                        : ''
-                    }`
-                  : `${poStockItems.length} item${poStockItems.length === 1 ? '' : 's'} linked to this vendor · turn on “Show all” to pick from every stock item`}
-              </p>
-            ) : null}
-            <label className="field-label">Notes</label>
-            <input
-              className="search"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional"
-            />
-            <p className="modal-lead">Lines</p>
-            <div className="po-draft-head" aria-hidden>
-              <span>Item</span>
-              <span>Qty</span>
-              <span>Cost</span>
-              <span />
-            </div>
-            {draftLines.map((line, idx) => {
-              const unit = stock.find((s) => s.id === line.stockId)?.unit ?? ''
-              const lineOptions = (() => {
-                if (stockSelectOptions.some((o) => o.value === line.stockId)) {
-                  return stockSelectOptions
-                }
-                const row = stock.find((s) => s.id === line.stockId)
-                if (!row) return stockSelectOptions
-                return [
-                  {
-                    value: row.id,
-                    label: row.sku?.trim()
-                      ? `${row.name} · ${row.sku}`
-                      : `${row.name} (${row.unit})`,
-                  },
-                  ...stockSelectOptions,
-                ]
-              })()
-              const selectValue = lineOptions.some((o) => o.value === line.stockId)
-                ? line.stockId
-                : ''
-              return (
-              <div key={idx} className="po-draft-row">
-                <div className="po-draft-item">
+
+            <div className="po-modal-body">
+              <div className="po-field">
+                <span className="field-label">{t.vendorTitle}</span>
+                <div className="po-control-row">
                   <MesaSelect
-                    value={selectValue}
-                    onChange={(id) => {
-                      setDraftLines((prev) =>
-                        prev.map((row, i) =>
-                          i === idx
-                            ? {
-                                ...row,
-                                stockId: id,
-                                unitCost: unitCostForStock(id, supplierId),
-                              }
-                            : row,
-                        ),
-                      )
-                    }}
-                    options={lineOptions}
-                    placeholder={lineOptions.length ? 'Select item' : 'No items for vendor'}
-                    aria-label={`Line ${idx + 1} item`}
+                    value={supplierId}
+                    onChange={changeSupplier}
+                    options={activeSuppliers.map((s) => ({
+                      value: s.id,
+                      label: `${s.name}${s.city ? ` · ${s.city}` : ''}`,
+                    }))}
+                    placeholder={
+                      activeSuppliers.length ? t.poSelectVendor : t.poNoVendorsTap
+                    }
                   />
                   <button
                     type="button"
-                    className="po-draft-quick-add"
-                    title="Quick add stock item"
-                    aria-label={`Quick add item for line ${idx + 1}`}
-                    onClick={() => openQuickItem(idx)}
+                    className="po-icon-btn po-icon-btn-add"
+                    title={t.poQuickAddVendor}
+                    aria-label={t.poQuickAddVendor}
+                    onClick={openQuickVendor}
                   >
                     +
                   </button>
                 </div>
-                <label className="po-draft-field po-draft-qty">
-                  <span className="po-draft-field-label">Qty{unit ? ` (${unit})` : ''}</span>
-                  <input
-                    className="search po-draft-input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="0"
-                    aria-label={`Quantity ordered${unit ? ` in ${unit}` : ''}`}
-                    value={line.qtyOrdered || ''}
-                    onChange={(e) =>
-                      setDraftLines((prev) =>
-                        prev.map((row, i) =>
-                          i === idx ? { ...row, qtyOrdered: Number(e.target.value) || 0 } : row,
-                        ),
-                      )
+                {!activeSuppliers.length ? (
+                  <p className="po-field-hint">
+                    {t.poNoVendorsModalHint}{' '}
+                    <Link to="/suppliers">{t.poManageVendors}</Link>.
+                  </p>
+                ) : null}
+              </div>
+
+              <label className="po-check">
+                <input
+                  type="checkbox"
+                  checked={showAllStock}
+                  onChange={(e) => setShowAllStock(e.target.checked)}
+                />
+                <span>{t.poShowAllStock}</span>
+              </label>
+
+              {showAllStock || supplierId ? (
+                <p className="po-field-hint">
+                  {showAllStock
+                    ? `${(poStockItems.length === 1 ? t.poShowingAllOne : t.poShowingAll).replace(
+                        '{count}',
+                        String(poStockItems.length),
+                      )}${
+                        supplierId
+                          ? ` · ${t.poLinkedToVendor.replace('{count}', String(linkedVendorCount))}`
+                          : ''
+                      }`
+                    : (poStockItems.length === 1 ? t.poShowingLinkedOne : t.poShowingLinked).replace(
+                        '{count}',
+                        String(poStockItems.length),
+                      )}
+                </p>
+              ) : null}
+
+              <div className="po-field">
+                <span className="field-label">{t.poNotes}</span>
+                <input
+                  className="search"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={t.poOptional}
+                />
+              </div>
+
+              <div className="po-lines">
+                <div className="po-lines-head">
+                  <strong>{t.poLinesHead}</strong>
+                </div>
+                <div className="po-draft-head" aria-hidden>
+                  <span>{t.poItem}</span>
+                  <span />
+                  <span>{t.poQty}</span>
+                  <span>{t.poCost}</span>
+                  <span />
+                </div>
+                {draftLines.map((line, idx) => {
+                  const unit = stock.find((s) => s.id === line.stockId)?.unit ?? ''
+                  const lineOptions = (() => {
+                    if (stockSelectOptions.some((o) => o.value === line.stockId)) {
+                      return stockSelectOptions
                     }
-                  />
-                </label>
-                <label className="po-draft-field po-draft-cost">
-                  <span className="po-draft-field-label">Unit cost</span>
-                  <input
-                    className="search po-draft-input"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    aria-label="Unit cost"
-                    value={line.unitCost || ''}
-                    onChange={(e) =>
-                      setDraftLines((prev) =>
-                        prev.map((row, i) =>
-                          i === idx ? { ...row, unitCost: Number(e.target.value) || 0 } : row,
-                        ),
-                      )
-                    }
-                  />
-                </label>
+                    const row = stock.find((s) => s.id === line.stockId)
+                    if (!row) return stockSelectOptions
+                    return [
+                      {
+                        value: row.id,
+                        label: row.sku?.trim()
+                          ? `${row.name} · ${row.sku}`
+                          : `${row.name} (${row.unit})`,
+                      },
+                      ...stockSelectOptions,
+                    ]
+                  })()
+                  const selectValue = lineOptions.some((o) => o.value === line.stockId)
+                    ? line.stockId
+                    : ''
+                  return (
+                    <div key={idx} className="po-draft-row">
+                      <div className="po-draft-item">
+                        <MesaSelect
+                          value={selectValue}
+                          onChange={(id) => {
+                            setDraftLines((prev) =>
+                              prev.map((row, i) =>
+                                i === idx
+                                  ? {
+                                      ...row,
+                                      stockId: id,
+                                      unitCost: unitCostForStock(id, supplierId),
+                                    }
+                                  : row,
+                              ),
+                            )
+                          }}
+                          options={lineOptions}
+                          placeholder={lineOptions.length ? t.poSelectItem : t.poNoItemsForVendor}
+                          aria-label={t.poLineItemAria.replace('{n}', String(idx + 1))}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        className="po-icon-btn po-icon-btn-add"
+                        title={t.poQuickAddItem}
+                        aria-label={t.poQuickAddItemLine.replace('{n}', String(idx + 1))}
+                        onClick={() => openQuickItem(idx)}
+                      >
+                        +
+                      </button>
+                      <input
+                        className="search po-draft-input po-draft-qty"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0"
+                        aria-label={
+                          unit
+                            ? t.poQtyOrderedUnitAria.replace('{unit}', unit)
+                            : t.poQtyOrderedAria
+                        }
+                        value={line.qtyOrdered || ''}
+                        onChange={(e) =>
+                          setDraftLines((prev) =>
+                            prev.map((row, i) =>
+                              i === idx ? { ...row, qtyOrdered: Number(e.target.value) || 0 } : row,
+                            ),
+                          )
+                        }
+                      />
+                      <input
+                        className="search po-draft-input po-draft-cost"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        aria-label={t.poUnitCost}
+                        value={line.unitCost || ''}
+                        onChange={(e) =>
+                          setDraftLines((prev) =>
+                            prev.map((row, i) =>
+                              i === idx ? { ...row, unitCost: Number(e.target.value) || 0 } : row,
+                            ),
+                          )
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="po-icon-btn po-icon-btn-remove"
+                        aria-label={t.poRemoveLine}
+                        onClick={() => setDraftLines((prev) => prev.filter((_, i) => i !== idx))}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )
+                })}
                 <button
                   type="button"
-                  className="btn btn-ghost po-draft-remove"
-                  aria-label="Remove line"
-                  onClick={() => setDraftLines((prev) => prev.filter((_, i) => i !== idx))}
+                  className="btn btn-ghost po-add-line"
+                  onClick={() =>
+                    setDraftLines((prev) => [
+                      ...prev,
+                      {
+                        stockId: poStockItems[0]?.id ?? stock[0]?.id ?? 's1',
+                        qtyOrdered: 1,
+                        unitCost: unitCostForStock(
+                          poStockItems[0]?.id ?? stock[0]?.id ?? 's1',
+                          supplierId,
+                        ),
+                      },
+                    ])
+                  }
                 >
-                  ✕
+                  {t.poAddLine}
                 </button>
               </div>
-              )
-            })}
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() =>
-                setDraftLines((prev) => [
-                  ...prev,
-                  {
-                    stockId: poStockItems[0]?.id ?? stock[0]?.id ?? 's1',
-                    qtyOrdered: 1,
-                    unitCost: unitCostForStock(
-                      poStockItems[0]?.id ?? stock[0]?.id ?? 's1',
-                      supplierId,
-                    ),
-                  },
-                ])
-              }
-            >
-              + Add line
-            </button>
-            <div className="po-modal-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={!activeSuppliers.length}
-                onClick={submitNew}
-              >
-                Create draft PO
+
+              <div className="po-modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!supplierId}
+                  onClick={submitNew}
+                >
+                  {t.poCreateDraft}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {quickVendor ? (
+        <div
+          className="zk-products-quick-modal zk-ing-quick-modal po-quick-item-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t.poQuickAddVendor}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setQuickVendor(null)
+          }}
+        >
+          <div className="zk-products-quick-sheet">
+            <div className="zk-products-quick-head">
+              <strong>{t.poQuickAddVendor}</strong>
+              <button type="button" className="btn btn-ghost" onClick={() => setQuickVendor(null)}>
+                ×
+              </button>
+            </div>
+            <div className="zk-products-quick-body">
+              <label>
+                <span>{t.venNamePlaceholder}</span>
+                <input
+                  className="search"
+                  autoFocus
+                  value={quickVendor.name}
+                  placeholder={t.poVendorNameEg}
+                  onChange={(e) =>
+                    setQuickVendor({ ...quickVendor, name: e.target.value, error: '' })
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      saveQuickVendor()
+                    }
+                  }}
+                />
+              </label>
+              <div className="po-quick-item-grid">
+                <label>
+                  <span>{t.phone}</span>
+                  <input
+                    className="search"
+                    value={quickVendor.phone}
+                    placeholder={t.poOptional}
+                    onChange={(e) =>
+                      setQuickVendor({ ...quickVendor, phone: e.target.value, error: '' })
+                    }
+                  />
+                </label>
+                <label>
+                  <span>{t.venCity}</span>
+                  <input
+                    className="search"
+                    value={quickVendor.city}
+                    placeholder={t.poCityEg}
+                    onChange={(e) =>
+                      setQuickVendor({ ...quickVendor, city: e.target.value, error: '' })
+                    }
+                  />
+                </label>
+              </div>
+              <label>
+                <span>{t.emailId}</span>
+                <input
+                  className="search"
+                  type="email"
+                  value={quickVendor.email}
+                  placeholder={t.poOptional}
+                  onChange={(e) =>
+                    setQuickVendor({ ...quickVendor, email: e.target.value, error: '' })
+                  }
+                />
+              </label>
+              {quickVendor.error ? <p className="po-quick-item-error">{quickVendor.error}</p> : null}
+            </div>
+            <div className="zk-products-quick-actions">
+              <button type="button" className="btn btn-ghost" onClick={() => setQuickVendor(null)}>
+                {t.cancel}
+              </button>
+              <button type="button" className="btn btn-teal" onClick={saveQuickVendor}>
+                {t.addVendor}
               </button>
             </div>
           </div>
@@ -1024,26 +1215,26 @@ export default function PurchaseOrdersPage() {
           className="zk-products-quick-modal zk-ing-quick-modal po-quick-item-modal"
           role="dialog"
           aria-modal="true"
-          aria-label="Quick add stock item"
+          aria-label={t.poQuickAddItem}
           onClick={(e) => {
             if (e.target === e.currentTarget) setQuickItem(null)
           }}
         >
           <div className="zk-products-quick-sheet">
             <div className="zk-products-quick-head">
-              <strong>Quick add item</strong>
+              <strong>{t.poQuickAddItemTitle}</strong>
               <button type="button" className="btn btn-ghost" onClick={() => setQuickItem(null)}>
                 ×
               </button>
             </div>
             <div className="zk-products-quick-body">
               <label>
-                <span>Item name</span>
+                <span>{t.poItemName}</span>
                 <input
                   className="search"
                   autoFocus
                   value={quickItem.name}
-                  placeholder="e.g. Ground Beef"
+                  placeholder={t.poItemNameEg}
                   onChange={(e) =>
                     setQuickItem({ ...quickItem, name: e.target.value, error: '' })
                   }
@@ -1054,14 +1245,14 @@ export default function PurchaseOrdersPage() {
                     }
                   }}
                 />
-                <small className="zk-ing-hint">Must be unique — duplicates are blocked.</small>
+                <small className="zk-ing-hint">{t.poUniqueHint}</small>
               </label>
               <label>
-                <span>SKU / code</span>
+                <span>{t.poSkuCode}</span>
                 <input
                   className="search"
                   value={quickItem.sku}
-                  placeholder="Unique code"
+                  placeholder={t.poUniqueCode}
                   onChange={(e) =>
                     setQuickItem({ ...quickItem, sku: e.target.value, error: '' })
                   }
@@ -1069,7 +1260,7 @@ export default function PurchaseOrdersPage() {
               </label>
               <div className="po-quick-item-grid">
                 <label>
-                  <span>Unit</span>
+                  <span>{t.poUnit}</span>
                   <MesaSelect
                     value={quickItem.unit}
                     onChange={(v) => setQuickItem({ ...quickItem, unit: v })}
@@ -1077,7 +1268,7 @@ export default function PurchaseOrdersPage() {
                   />
                 </label>
                 <label>
-                  <span>Unit cost</span>
+                  <span>{t.poUnitCost}</span>
                   <input
                     className="search"
                     type="number"
@@ -1092,7 +1283,7 @@ export default function PurchaseOrdersPage() {
                 </label>
               </div>
               <label>
-                <span>Category</span>
+                <span>{t.poCategory}</span>
                 <MesaSelect
                   value={canonicalizeIngredientCategory(quickItem.category)}
                   onChange={(v) => setQuickItem({ ...quickItem, category: v })}
@@ -1105,17 +1296,17 @@ export default function PurchaseOrdersPage() {
               </label>
               {supplierMeta.name ? (
                 <p className="po-side-hint">
-                  Linked to vendor: {supplierMeta.name}
+                  {t.poLinkedVendor.replace('{name}', supplierMeta.name)}
                 </p>
               ) : null}
               {quickItem.error ? <p className="po-quick-item-error">{quickItem.error}</p> : null}
             </div>
             <div className="zk-products-quick-actions">
               <button type="button" className="btn btn-ghost" onClick={() => setQuickItem(null)}>
-                Cancel
+                {t.cancel}
               </button>
               <button type="button" className="btn btn-teal" onClick={saveQuickItem}>
-                Add item
+                {t.poAddItem}
               </button>
             </div>
           </div>
@@ -1133,9 +1324,9 @@ export default function PurchaseOrdersPage() {
         >
           <div className="modal-card po-modal">
             <div className="section-head">
-              <h2>Receive {receiveTarget.id}</h2>
+              <h2>{t.poReceiveTitle.replace('{id}', receiveTarget.id)}</h2>
               <button type="button" className="btn btn-ghost" onClick={() => setReceiveTarget(null)}>
-                Close
+                {t.close}
               </button>
             </div>
             <p className="modal-lead">{supplierName(receiveTarget.supplierId)}</p>
@@ -1144,7 +1335,7 @@ export default function PurchaseOrdersPage() {
               return (
                 <div key={line.stockId} className="po-recv-line">
                   <label className="field-label">
-                    {stockName(line.stockId)} · remaining {rem}
+                    {stockName(line.stockId)} · {t.poRemaining.replace('{rem}', String(rem))}
                   </label>
                   <input
                     className="search"
@@ -1160,7 +1351,7 @@ export default function PurchaseOrdersPage() {
             })}
             <div className="po-modal-actions">
               <button type="button" className="btn btn-teal" onClick={confirmReceive}>
-                Confirm receive
+                {t.poConfirmReceive}
               </button>
             </div>
           </div>

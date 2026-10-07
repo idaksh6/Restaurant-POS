@@ -137,6 +137,7 @@ export function saveCompanyProfile(company: CompanyProfile) {
 }
 
 export const COMPANY_SESSION_EVENT = 'mesa:company-session'
+export const BRANCH_SWITCH_EVENT = 'mesa:branch-switch'
 
 /** Persist company + branches and notify the UI (same-tab). */
 export function applyCompanySession(
@@ -188,6 +189,9 @@ export function getActiveBranchId(): string {
 
 export function setActiveBranchId(branchId: string) {
   localStorage.setItem(ACTIVE_BRANCH_KEY, branchId)
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(BRANCH_SWITCH_EVENT, { detail: { branchId } }))
+  }
 }
 
 export function loadActiveBranch(): Branch {

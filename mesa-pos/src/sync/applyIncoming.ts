@@ -9,9 +9,11 @@ import {
 } from '../data/mock'
 import { migrateStockItem } from '../data/stockLocations'
 import { customersRepo } from '../data/repos/customersRepo'
-import { floorRepo } from '../data/repos/floorRepo'
-import { mastersRepo } from '../data/repos/mastersRepo'
-import { notifyTicketsSynced, ticketsRepo } from '../data/repos/ticketsRepo'
+import { floorRepo, notifyFloorSynced } from '../data/repos/floorRepo'
+import { mastersRepo, peekCategories, peekDishes } from '../data/repos/mastersRepo'
+import { lineRequiresKitchen } from '../lib/kitchenRouting'
+import { listKdsStations, resolveLineStationId } from '../lib/kdsStations'
+import { notifyTicketsSynced, mergeTicketPair, ticketsRepo } from '../data/repos/ticketsRepo'
 import { mesaDb, tenantGetItem, tenantSetItem } from '../data/repos/db'
 import {
   COMPANY_SESSION_EVENT,
@@ -71,6 +73,24 @@ import {
   saveAllTransfers,
   type StockTransfer,
 } from '../data/stockTransfers'
+import {
+  fromApiIngredient,
+  isSeedIngredient,
+  loadIngredients,
+  saveIngredients,
+} from '../data/ingredients'
+import {
+  loadStockLocations,
+  saveStockLocations,
+  SEED_STOCK_LOCATIONS,
+  type StockLocation,
+} from '../data/stockLocations'
+import {
+  isSeedYieldLink,
+  loadYieldLinks,
+  saveYieldLinks,
+  type YieldLink,
+} from '../data/stockYieldLinks'
 import { fromApiTimetable, isDemoTimetable, loadTimetables, saveTimetables } from '../data/menuTimetable'
 import {
   fromApiAudit,
@@ -93,9 +113,22 @@ import {
   saveExpenseTypes,
   savePaymentTypes,
 } from '../data/paymentTypes'
-import { fromApiTax, isDemoTax, loadTaxes, saveTaxes } from '../data/tax'
+import { fromApiTax, isDemoTax, loadTaxes, normalizeTaxIds, saveTaxes } from '../data/tax'
 import { fromApiDiscount, loadDiscounts, saveDiscounts } from '../data/discount'
 import { fromApiUnit, isDemoUnit, loadUnits, saveUnits } from '../data/units'
+import {
+  fromApiBeveragePrice,
+  fromApiBeverageQty,
+  loadBeveragePrices,
+  loadBeverageQtys,
+  saveBeveragePrices,
+  saveBeverageQtys,
+} from '../data/beverages'
+import {
+  fromApiAddonMaster,
+  loadAddonMasters,
+  saveAddonMasters,
+} from '../data/addonMasters'
 import {
   fromApiCharge,
   isDemoCharge,
@@ -204,6 +237,10 @@ export function ticketFromServer(row: Record<string, unknown>): OpenTicket | nul
   const discountPct = pick(row, nested, 'discountPct')
   const chargeIds = pick(row, nested, 'chargeIds')
   const amount = pick(row, nested, 'amount')
+  const note = pick(row, nested, 'note')
+  const mergedIntoTableId = pick(row, nested, 'mergedIntoTableId')
+  const mergedFromTableIds = pick(row, nested, 'mergedFromTableIds')
+  const masterTxnId = pick(row, nested, 'masterTxnId')
   const dineTable = tableId
     ? String(tableId)
     : type === 'dine-in' && String(row.id).startsWith('dine:')
@@ -214,6 +251,12 @@ export function ticketFromServer(row: Record<string, unknown>): OpenTicket | nul
   const parsedDeliveryStatus = allowedStatus.includes(statusVal as (typeof allowedStatus)[number])
     ? (statusVal as OpenTicket['deliveryStatus'])
     : undefined
+  const checkStatus: OpenTicket['checkStatus'] =
+    status === 'billing'
+      ? 'billing'
+      : status === 'merged' || mergedIntoTableId
+        ? 'merged'
+        : 'open'
   return {
     id: String(row.id),
     type,
@@ -232,11 +275,12 @@ export function ticketFromServer(row: Record<string, unknown>): OpenTicket | nul
       : undefined,
     openedAt: String(pick(row, nested, 'openedAt') ?? ''),
     lines,
+    note: note != null && String(note).trim() ? String(note).trim() : undefined,
     channel: channel ? String(channel) : undefined,
     branchId: branchId ? String(branchId) : undefined,
     tableId: dineTable,
     guests: guests != null ? Number(guests) : undefined,
-    checkStatus: status === 'billing' ? 'billing' : 'open',
+    checkStatus,
     kitchenStatus: kitchenStatus ? (String(kitchenStatus) as OpenTicket['kitchenStatus']) : undefined,
     kitchenPriority: kitchenPriority
       ? (kitchenPriority as OpenTicket['kitchenPriority'])
@@ -249,6 +293,11 @@ export function ticketFromServer(row: Record<string, unknown>): OpenTicket | nul
     discountPct: discountPct != null ? Number(discountPct) : undefined,
     chargeIds: Array.isArray(chargeIds) ? chargeIds.map(String) : undefined,
     amount: amount != null ? Number(amount) : undefined,
+    mergedIntoTableId: mergedIntoTableId ? String(mergedIntoTableId) : undefined,
+    mergedFromTableIds: Array.isArray(mergedFromTableIds)
+      ? mergedFromTableIds.map(String)
+      : undefined,
+    masterTxnId: masterTxnId ? String(masterTxnId) : undefined,
     updatedAt:
       stampFrom(row, nested) ||
       (row.updatedAt != null ? new Date(String(row.updatedAt)).getTime() : 0) ||
@@ -257,11 +306,15 @@ export function ticketFromServer(row: Record<string, unknown>): OpenTicket | nul
 }
 
 export function kitchenFromTicket(ticket: OpenTicket): KitchenTicket | null {
-  const sent = ticket.lines.filter((l) => l.sent)
-  // Only show on KOT when items were actually sent — kitchenStatus alone is not enough
+  const dishes = peekDishes()
+  const categories = peekCategories()
+  const sent = ticket.lines.filter((l) => l.sent && lineRequiresKitchen(l, dishes))
+  // Only show on KOT when kitchen items were actually sent — kitchenStatus alone is not enough
   if (!sent.length) return null
   // Staff cleared this ticket from the board with Done
   if (ticket.kitchenDismissed) return null
+  const stations = listKdsStations(ticket.branchId, categories)
+  const printers = loadAllPrinters()
   return {
     id: `kot-${ticket.id}`,
     source:
@@ -271,7 +324,16 @@ export function kitchenFromTicket(ticket: OpenTicket): KitchenTicket | null {
     priority: ticket.kitchenPriority ?? 'normal',
     status: ticket.kitchenStatus ?? 'queued',
     createdAt: ticket.openedAt,
-    lines: sent.map((l) => ({ name: l.name, qty: l.qty, itemId: l.itemId })),
+    lines: sent.map((l) => {
+      const dish = dishes.find((d) => d.id === l.itemId)
+      return {
+        name: l.note?.trim() ? `${l.name} (${l.note.trim()})` : l.name,
+        qty: l.qty,
+        itemId: l.itemId,
+        status: ticket.kitchenStatus ?? 'queued',
+        stationId: resolveLineStationId(dish, categories, stations, printers),
+      }
+    }),
     branchId: ticket.branchId,
   }
 }
@@ -354,13 +416,95 @@ async function applyCatalog(kind: string, row: Record<string, unknown>, remove =
         ? loadAllPrinters().filter((p) => p.id !== id)
         : upsertById(loadAllPrinters(), mapped),
     )
+  } else if (kind === 'beverageQty') {
+    const mapped = fromApiBeverageQty(row)
+    let next = remove
+      ? loadBeverageQtys().filter((q) => q.id !== id)
+      : upsertById(loadBeverageQtys(), mapped)
+    if (!remove && mapped.isDefault) {
+      next = next.map((q) => ({ ...q, isDefault: q.id === mapped.id }))
+    }
+    saveBeverageQtys(next)
+    if (remove) {
+      saveBeveragePrices(loadBeveragePrices().filter((p) => p.qtyId !== id))
+    }
+  } else if (kind === 'beveragePrice') {
+    const mapped = fromApiBeveragePrice(row)
+    saveBeveragePrices(
+      remove
+        ? loadBeveragePrices().filter((p) => p.id !== id)
+        : upsertById(loadBeveragePrices(), mapped),
+    )
+  } else if (kind === 'addonMaster') {
+    const mapped = fromApiAddonMaster(row)
+    saveAddonMasters(
+      remove
+        ? loadAddonMasters().filter((r) => r.id !== id)
+        : upsertById(loadAddonMasters(), mapped),
+    )
   } else if (kind === 'tableArea') {
     const mapped = fromApiTableArea(row)
     if (!mapped.id || !mapped.name) return
+    const branchId = mapped.branchId || getActiveBranchId()
+    const stamped = { ...mapped, branchId }
     const next = remove
-      ? loadTableAreas().filter((a) => a.id !== id)
-      : upsertById(loadTableAreas(), mapped)
-    saveTableAreas(next)
+      ? loadTableAreas(branchId).filter((a) => a.id !== id)
+      : upsertById(loadTableAreas(branchId), stamped)
+    saveTableAreas(next, branchId)
+  } else if (kind === 'ingredient') {
+    const mapped = fromApiIngredient(row)
+    if (isSeedIngredient(mapped)) return
+    const branchId = mapped.branchId || getActiveBranchId()
+    const stamped = { ...mapped, branchId }
+    const scoped = loadIngredients().filter((r) => r.branchId === branchId && !isSeedIngredient(r))
+    const nextScoped = remove
+      ? scoped.filter((r) => r.id !== id)
+      : upsertById(scoped, stamped)
+    const others = loadIngredients().filter(
+      (r) => r.branchId && r.branchId !== branchId && !isSeedIngredient(r),
+    )
+    saveIngredients([...others, ...nextScoped])
+  } else if (kind === 'stockLocation') {
+    const mapped: StockLocation = {
+      id: String(row.id ?? ''),
+      label: String(row.label ?? '').trim() || String(row.id ?? ''),
+      hint: row.hint ? String(row.hint) : undefined,
+      type: (['cold', 'dry', 'station', 'other'].includes(String(row.type))
+        ? String(row.type)
+        : 'other') as StockLocation['type'],
+      active: row.active !== false,
+      sortOrder: Number(row.sortOrder ?? 0) || 0,
+    }
+    if (!mapped.id) return
+    const current = loadStockLocations()
+    const seedIds = new Set(SEED_STOCK_LOCATIONS.map((s) => s.id))
+    const base = current.some((r) => !seedIds.has(r.id)) ? current : []
+    const next = remove
+      ? (base.length ? base : current).filter((r) => r.id !== id)
+      : upsertById(base.length ? base : current, mapped)
+    saveStockLocations(next.length ? next : SEED_STOCK_LOCATIONS.map((r) => ({ ...r })))
+  } else if (kind === 'yieldLink') {
+    const mapped: YieldLink = {
+      id: String(row.id ?? ''),
+      fromSku: String(row.fromSku ?? '').trim(),
+      toSku: String(row.toSku ?? '').trim(),
+      defaultYieldPct: Math.min(100, Math.max(1, Math.round(Number(row.defaultYieldPct) || 100))),
+      label: String(row.label ?? '').trim(),
+      note: row.note ? String(row.note) : undefined,
+      active: row.active !== false,
+      branchId: row.branchId ? String(row.branchId) : getActiveBranchId(),
+    }
+    if (!mapped.id || isSeedYieldLink(mapped)) return
+    const branchId = mapped.branchId || getActiveBranchId()
+    if (remove) {
+      saveYieldLinks(
+        loadYieldLinks(branchId).filter((r) => r.id !== id),
+        branchId,
+      )
+    } else {
+      const rows = loadYieldLinks(branchId)
+      saveYieldLinks([mapped, ...rows.filter((r) => r.id !== mapped.id)], branchId)
+    }
   }
 }
 
@@ -372,6 +516,16 @@ function opBranch(entity: SyncEntity, payload: Record<string, unknown>) {
 function isOtherBranch(entity: SyncEntity, payload: Record<string, unknown>) {
   const br = opBranch(entity, payload)
   return Boolean(br && br !== getActiveBranchId())
+}
+
+/** Branch transfer docs touch both ends — apply when from/to/op branch matches active. */
+function transferTouchesActiveBranch(entity: SyncEntity, payload: Record<string, unknown>) {
+  const active = getActiveBranchId()
+  const br = opBranch(entity, payload)
+  const from = payload.fromBranchId ? String(payload.fromBranchId) : ''
+  const to = payload.toBranchId ? String(payload.toBranchId) : ''
+  if (!br && !from && !to) return true
+  return br === active || from === active || to === active
 }
 
 export async function applyIncoming(entities: SyncEntity[], localDeviceId = getDeviceId()) {
@@ -410,18 +564,36 @@ export async function applyIncoming(entities: SyncEntity[], localDeviceId = getD
           break
         case 'ticket.create':
         case 'ticket.update': {
-          const incoming = ticketFromServer({ ...payload, id: entityId, branchId: entity.branchId ?? payload.branchId })
-          if (incoming) {
-            await ticketsRepo.put(incoming, incoming.branchId ?? getActiveBranchId())
-            ticketsTouched = true
-          }
-          break
-        }
-        case 'ticket.settle':
-          await ticketsRepo.remove(entityId)
-          await mesaDb.kitchen.delete(`kot-${entityId}`).catch(() => undefined)
+          const incoming = ticketFromServer({
+            ...payload,
+            id: entityId,
+            branchId: entity.branchId ?? payload.branchId,
+          })
+          if (!incoming) break
+          const current = await mesaDb.tickets.get(incoming.id)
+          // Settled is terminal — never resurrect from a stale update.
+          if (current?.checkStatus === 'settled' && incoming.checkStatus !== 'settled') break
+          const merged = current ? mergeTicketPair(current, incoming) : incoming
+          await ticketsRepo.put(merged, merged.branchId ?? getActiveBranchId())
           ticketsTouched = true
           break
+        }
+        case 'ticket.settle': {
+          const current = await mesaDb.tickets.get(entityId)
+          if (current) {
+            await ticketsRepo.put(
+              {
+                ...current,
+                checkStatus: 'settled',
+                updatedAt: Math.max(current.updatedAt ?? 0, Date.now()),
+              },
+              current.branchId ?? getActiveBranchId(),
+            )
+          }
+          await ticketsRepo.remove(entityId)
+          ticketsTouched = true
+          break
+        }
         case 'ticket.line.upsert': {
           const ticketId = String(payload.ticketId ?? entityId)
           const current = await mesaDb.tickets.get(ticketId)
@@ -467,16 +639,41 @@ export async function applyIncoming(entities: SyncEntity[], localDeviceId = getD
             break
           }
           const existingKot = await mesaDb.kitchen.get(`kot-${ticketId}`)
+          let lines: KitchenTicket['lines'] =
+            Array.isArray(payload.lines) && payload.lines.length
+              ? (payload.lines as KitchenTicket['lines'])
+              : existingKot?.lines ?? []
+          const lineIndex = Number(payload.lineIndex)
+          const lineStatus = payload.lineStatus as KitchenTicket['status'] | undefined
+          if (
+            Number.isInteger(lineIndex) &&
+            lineIndex >= 0 &&
+            lineStatus &&
+            lines[lineIndex]
+          ) {
+            lines = lines.map((l, i) => (i === lineIndex ? { ...l, status: lineStatus } : l))
+          }
+          const rawStatus =
+            (payload.status as KitchenTicket['status'] | undefined) ??
+            existingKot?.status ??
+            'queued'
+          if (rawStatus === 'done') {
+            await mesaDb.kitchen.delete(`kot-${ticketId}`).catch(() => undefined)
+            ticketsTouched = true
+            await ticketsRepo.put({
+              ...current,
+              kitchenStatus: 'ready',
+              kitchenDismissed: true,
+            })
+            break
+          }
           const kot: KitchenTicket = {
             id: `kot-${ticketId}`,
             source: String(payload.source ?? existingKot?.source ?? ticketId),
             priority: (payload.priority as KitchenTicket['priority']) ?? existingKot?.priority ?? 'normal',
-            status: (payload.status as KitchenTicket['status']) ?? existingKot?.status ?? 'queued',
+            status: rawStatus,
             createdAt: String(payload.createdAt ?? existingKot?.createdAt ?? new Date().toISOString()),
-            lines:
-              Array.isArray(payload.lines) && payload.lines.length
-                ? (payload.lines as KitchenTicket['lines'])
-                : existingKot?.lines ?? [],
+            lines,
             branchId: opBranch(entity, payload) || existingKot?.branchId || getActiveBranchId(),
           }
           if (!kot.lines.length) {
@@ -488,8 +685,9 @@ export async function applyIncoming(entities: SyncEntity[], localDeviceId = getD
           await ticketsRepo.put({
             ...current,
             lines: type === 'kot.send' ? current.lines.map((l) => ({ ...l, sent: true })) : current.lines,
-            kitchenStatus: kot.status,
+            kitchenStatus: kot.status === 'done' ? 'ready' : kot.status,
             kitchenPriority: kot.priority,
+            ...(kot.status === 'done' ? { kitchenDismissed: true } : {}),
           })
           break
         }
@@ -511,30 +709,46 @@ export async function applyIncoming(entities: SyncEntity[], localDeviceId = getD
         }
         case 'foodVoucher.upsert': {
           const batch = payload.batch as FoodVoucherBatch | undefined
+          const branchId =
+            String(batch?.branchId ?? payload.branchId ?? entity.branchId ?? getActiveBranchId())
           if (batch && !isDemoFoodVoucher(batch.id)) {
-            saveBatches(upsertById(loadBatches(), batch))
+            const stamped = { ...batch, branchId: batch.branchId ?? branchId }
+            saveBatches(upsertById(loadBatches(branchId), stamped), branchId)
           }
           const codes = payload.codes as FoodVoucherCode[] | undefined
           if (Array.isArray(codes)) {
-            let next = loadCodes()
+            let next = loadCodes(branchId)
             for (const code of codes) {
-              if (!isDemoFoodVoucher(code.id)) next = upsertById(next, code)
+              if (!isDemoFoodVoucher(code.id)) {
+                next = upsertById(next, { ...code, branchId: code.branchId ?? branchId })
+              }
             }
-            saveCodes(next)
+            saveCodes(next, branchId)
           }
           break
         }
-        case 'foodVoucher.delete':
-          saveBatches(loadBatches().filter((b) => b.id !== entityId))
-          saveCodes(loadCodes().filter((c) => c.batchId !== entityId))
-          break
-        case 'foodVoucher.redeem':
+        case 'foodVoucher.delete': {
+          const branchId = String(payload.branchId ?? entity.branchId ?? getActiveBranchId())
+          saveBatches(
+            loadBatches(branchId).filter((b) => b.id !== entityId),
+            branchId,
+          )
           saveCodes(
-            loadCodes().map((c) =>
-              c.id === entityId ? { ...c, status: 'used', usedAt: new Date().toISOString() } : c,
-            ),
+            loadCodes(branchId).filter((c) => c.batchId !== entityId),
+            branchId,
           )
           break
+        }
+        case 'foodVoucher.redeem': {
+          const branchId = String(payload.branchId ?? entity.branchId ?? getActiveBranchId())
+          saveCodes(
+            loadCodes(branchId).map((c) =>
+              c.id === entityId ? { ...c, status: 'used' as const, usedAt: new Date().toISOString() } : c,
+            ),
+            branchId,
+          )
+          break
+        }
         case 'vendor.upsert': {
           const raw = tenantGetItem('mesa-suppliers')
           const rows = raw ? (JSON.parse(raw) as { id: string }[]) : []
@@ -572,9 +786,12 @@ export async function applyIncoming(entities: SyncEntity[], localDeviceId = getD
             payload.delta != null && Number.isFinite(Number(payload.delta))
               ? Number(payload.delta)
               : null
-          let onHand = statedOnHand ?? existing?.onHand ?? 0
-          if (statedOnHand == null && delta != null) {
-            onHand = Math.max(0, Math.round(((existing?.onHand ?? 0) + delta) * 100) / 100)
+          // Prefer deltas so two devices decrementing the same SKU both apply.
+          let onHand = existing?.onHand ?? 0
+          if (delta != null) {
+            onHand = Math.max(0, Math.round((onHand + delta) * 100) / 100)
+          } else if (statedOnHand != null) {
+            onHand = statedOnHand
           }
           const item = {
             id: entityId,
@@ -611,14 +828,17 @@ export async function applyIncoming(entities: SyncEntity[], localDeviceId = getD
         }
         case 'floor.upsert': {
           const br = opBranch(entity, payload) || getActiveBranchId()
+          const note = payload.note != null ? String(payload.note).trim() : ''
           const table: Table = {
             id: entityId,
             label: String(payload.label ?? ''),
             seats: Number(payload.seats ?? 2),
             area: String(payload.area ?? 'Main Hall'),
+            note: note || undefined,
             status: 'free',
           }
           await floorRepo.put({ ...table, branchId: br }, br)
+          notifyFloorSynced()
           break
         }
         case 'day.close':
@@ -668,7 +888,7 @@ export async function applyIncoming(entities: SyncEntity[], localDeviceId = getD
           break
         }
         case 'stockTransfer.upsert': {
-          if (isOtherBranch(entity, payload)) break
+          if (!transferTouchesActiveBranch(entity, payload)) break
           const row = fromApiTransfer({
             ...payload,
             id: entityId || payload.id,
@@ -799,6 +1019,7 @@ export type BootstrapPayload = {
   receipts?: Record<string, unknown>[]
   purchaseOrders?: Record<string, unknown>[]
   stockTransfers?: Record<string, unknown>[]
+  ingredients?: Record<string, unknown>[]
   ledger?: Record<string, unknown>[]
   audit?: Record<string, unknown>[]
   sequences?: Record<string, unknown>[]
@@ -859,11 +1080,14 @@ function mapApiProduct(row: Record<string, unknown>): MasterDish {
     hsn: meta.hsn ? String(meta.hsn) : undefined,
     details: meta.details ? String(meta.details) : undefined,
     productType: meta.productType === 'combo' ? 'combo' : meta.productType === 'single' ? 'single' : undefined,
-    taxIds: Array.isArray(meta.taxIds) ? meta.taxIds.map((x) => String(x)) : undefined,
+    taxIds: Array.isArray(meta.taxIds)
+      ? normalizeTaxIds(meta.taxIds.map((x) => String(x)))
+      : undefined,
     discountIds: Array.isArray(meta.discountIds)
       ? meta.discountIds.map((x) => String(x))
       : undefined,
     imageDataUrl: meta.imageDataUrl ? String(meta.imageDataUrl) : undefined,
+    requiresKitchen: meta.requiresKitchen === false ? false : meta.requiresKitchen === true ? true : undefined,
   }
 }
 
@@ -937,14 +1161,18 @@ export async function applyBootstrap(data: BootstrapPayload) {
   if (data.floorTables?.length) {
     const branchId = getActiveBranchId()
     await floorRepo.replace(
-      data.floorTables.map((row) => ({
-        id: String(row.id),
-        label: String(row.label ?? ''),
-        seats: Number(row.seats ?? 2),
-        area: String(row.area ?? 'Main Hall'),
-        status: 'free' as const,
-        branchId: String(row.branchId ?? branchId),
-      })),
+      data.floorTables.map((row) => {
+        const note = row.note != null ? String(row.note).trim() : ''
+        return {
+          id: String(row.id),
+          label: String(row.label ?? ''),
+          seats: Number(row.seats ?? 2),
+          area: String(row.area ?? 'Main Hall'),
+          note: note || undefined,
+          status: 'free' as const,
+          branchId: String(row.branchId ?? branchId),
+        }
+      }),
       branchId,
     )
   }
@@ -955,6 +1183,18 @@ export async function applyBootstrap(data: BootstrapPayload) {
     await mesaDb.stock.clear()
     await mesaDb.stock.bulkPut([...others, ...incoming])
     tenantSetItem('mesa-stock', JSON.stringify(incoming))
+  }
+  if (data.ingredients?.length) {
+    const branchId = getActiveBranchId()
+    const incoming = data.ingredients
+      .map((r) => fromApiIngredient(r))
+      .filter((r) => !isSeedIngredient(r))
+      .map((r) => ({ ...r, branchId: r.branchId || branchId }))
+      .filter((r) => r.branchId === branchId)
+    const others = loadIngredients().filter(
+      (r) => r.branchId && r.branchId !== branchId && !isSeedIngredient(r),
+    )
+    saveIngredients([...others, ...incoming])
   }
   if (data.dayClose?.dayKey) {
     saveDayClosed(data.dayClose.dayKey, getActiveBranchId())

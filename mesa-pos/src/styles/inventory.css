@@ -1,0 +1,356 @@
+/* Inventory / stock — mobile page scroll; table area must not trap touch */
+
+@media (max-width: 1100px) {
+  .app-shell:has(.zk-stock) {
+    height: 100% !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+    grid-template-columns: 1fr !important;
+  }
+
+  .app-shell:has(.zk-stock) .side-nav {
+    display: none !important;
+  }
+
+  .app-shell:has(.zk-stock) .main-stage {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  .zk-stock {
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .zk-stock .zk-dash-header.zk-dash-header-bar {
+    flex-shrink: 0 !important;
+  }
+
+  /* Only this element scrolls the page on mobile */
+  .zk-stock > .stk-page-inner {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    /* Footer stays in flow below — no overlap, last card fully visible */
+    padding-bottom: 0.85rem !important;
+    margin-bottom: 0 !important;
+  }
+
+  .zk-stock > .stk-page-inner::after {
+    content: none;
+  }
+
+  /* Keep footer in document flow (not fixed) so content never sits under it */
+  .zk-stock > .zk-hub-foot {
+    flex-shrink: 0 !important;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    z-index: 20 !important;
+    margin-top: 0 !important;
+    width: 100% !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .stk-layout {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.85rem !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .stk-main {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* Do not create a nested scrollport — parent page scrolls */
+  .stk-main-scroll {
+    flex: none !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overscroll-behavior: auto !important;
+    touch-action: pan-y;
+  }
+
+  .stk-table-wrap {
+    overflow: visible !important;
+    overscroll-behavior: auto !important;
+    touch-action: pan-y;
+  }
+
+  .stk-side {
+    flex: 0 0 auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.85rem !important;
+  }
+
+  .stk-alert-list,
+  .stk-po-list,
+  .stk-recipe-list {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .stk-side > .stk-panel:last-child {
+    margin-bottom: 0.35rem !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .zk-stock > .stk-page-inner {
+    margin: 0.45rem 0.5rem 0.35rem !important;
+    gap: 0.65rem !important;
+  }
+
+  .stk-hero-stats .stk-stat em {
+    display: none;
+  }
+
+  .stk-toolbar {
+    gap: 0.45rem !important;
+    margin-bottom: 0.65rem !important;
+  }
+
+  .stk-search {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+    padding: 0 0.65rem !important;
+  }
+
+  .stk-search input {
+    min-height: 0 !important;
+    padding: 0 !important;
+    line-height: 1.25 !important;
+  }
+
+  .stk-search .inv-ico,
+  .stk-search svg {
+    flex-shrink: 0 !important;
+    width: 1.1rem !important;
+    height: 1.1rem !important;
+  }
+
+  .stk-filters {
+    width: 100% !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.15rem !important;
+  }
+
+  .stk-filter {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+  }
+
+  .stk-sort {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    min-height: 44px !important;
+    max-height: 44px !important;
+  }
+
+  .stk-hero {
+    padding: 0.65rem 0.75rem !important;
+    gap: 0.5rem !important;
+  }
+
+  .stk-hero-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 0.35rem !important;
+  }
+
+  .stk-hero-actions .stk-link-btn {
+    justify-content: center !important;
+    min-height: 2rem !important;
+    padding: 0.3rem 0.35rem !important;
+    font-size: 0.7rem !important;
+    gap: 0.22rem !important;
+    border-radius: 8px !important;
+    line-height: 1.15 !important;
+    text-align: center;
+  }
+
+  .stk-hero-actions .stk-link-btn.primary {
+    grid-column: auto !important;
+  }
+
+  .stk-hero-actions .stk-link-btn .inv-ico,
+  .stk-hero-actions .stk-link-btn svg {
+    width: 0.95rem !important;
+    height: 0.95rem !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Stack rows as cards — no wide table / no nested horizontal scroll trap */
+  .stk-table-wrap {
+    border: 0 !important;
+    overflow: visible !important;
+  }
+
+  .stk-table {
+    min-width: 0 !important;
+    width: 100% !important;
+    border-collapse: separate !important;
+    border-spacing: 0 0.55rem !important;
+  }
+
+  .stk-table thead {
+    display: none !important;
+  }
+
+  .stk-table tbody tr {
+    background: #fff !important;
+    border: 1px solid #d9e3dc !important;
+    border-radius: 12px !important;
+    display: grid !important;
+    grid-template-columns: 1fr auto !important;
+    gap: 0.35rem 0.55rem !important;
+    padding: 0.7rem 0.75rem !important;
+    box-shadow: 0 4px 12px #12201c0a;
+  }
+
+  .stk-table tbody tr.is-low {
+    background: linear-gradient(90deg, #fff5f5, #fff) !important;
+    border-color: #ffc9c9 !important;
+  }
+
+  .stk-table tbody td {
+    border: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+    min-width: 0 !important;
+  }
+
+  /* Item */
+  .stk-table tbody td:nth-child(1) {
+    grid-column: 1 / -1;
+  }
+
+  /* Category */
+  .stk-table tbody td:nth-child(2) {
+    grid-column: 1;
+    align-self: center;
+  }
+
+  /* Vendor — clip cleanly, no horizontal page drag */
+  .stk-table tbody td:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  .stk-vendor-cell {
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  .stk-vendor-name,
+  .stk-vendor {
+    max-width: none !important;
+  }
+
+  /* Level bar */
+  .stk-table tbody td:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+
+  /* On hand */
+  .stk-table tbody td:nth-child(5) {
+    grid-column: 1;
+    font-size: 0.9rem;
+  }
+
+  /* Locations — hide on very narrow */
+  .stk-table tbody td:nth-child(6) {
+    display: none !important;
+  }
+
+  /* Reorder */
+  .stk-table tbody td:nth-child(7) {
+    grid-column: 2;
+    justify-self: end;
+    text-align: end;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+
+  /* Status */
+  .stk-table tbody td:nth-child(8) {
+    grid-column: 2;
+    grid-row: 2;
+    justify-self: end;
+    align-self: center;
+  }
+
+  /* Cost */
+  .stk-table tbody td:nth-child(9) {
+    grid-column: 1;
+    font-size: 0.82rem;
+    color: var(--muted);
+  }
+
+  /* Adjust */
+  .stk-table tbody td:nth-child(10) {
+    grid-column: 1 / -1;
+  }
+
+  .stk-adjust-btn {
+    width: 100% !important;
+    justify-content: center !important;
+    min-height: 2.25rem !important;
+  }
+
+  .stk-main-scroll .stk-table th {
+    position: static !important;
+  }
+}
+
+/* Stock receiving — view posted receipt banner */
+.recv-view-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--warn, #b7791f) 35%, #e8dcc0);
+  background: color-mix(in srgb, var(--warn-soft, #f6e7c8) 70%, #fff);
+}
+
+.recv-view-banner p {
+  flex: 1 1 12rem;
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.35;
+  color: #5c4a1f;
+}
+
+.recv-modal-lead {
+  margin: 0 0 0.65rem;
+  padding: 0 0.1rem;
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: var(--muted, #5f7169);
+}

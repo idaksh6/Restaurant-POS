@@ -87,7 +87,7 @@ function installWindowsShortcuts() {
   const options = {
     target: exe,
     cwd,
-    description: 'Mesa KSA Restaurant POS',
+    description: 'Isarva Restaurant POS',
     appUserModelId: 'sa.mesa.pos',
   }
   const desktop = path.join(app.getPath('desktop'), 'Mesa POS.lnk')

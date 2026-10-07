@@ -1,0 +1,324 @@
+/* Barcode POS — scan → cart → settle */
+
+.app-shell:has(.zk-bc) .main-stage {
+  background: #eef3f0 !important;
+  flex-direction: column !important;
+  max-width: none !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  display: flex !important;
+  overflow: hidden !important;
+}
+
+.app-shell:has(.zk-bc) .main-stage > .zk-bc {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.zk-bc {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface, #eef2ef);
+  color: var(--ink, #12201c);
+}
+
+.zk-bc > .zk-dash-header.zk-dash-header-bar {
+  flex-shrink: 0;
+  margin: 0 !important;
+  border-radius: 0 !important;
+}
+
+.zk-bc > .bc-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.75rem 1rem 0.5rem;
+  box-sizing: border-box;
+}
+
+.zk-bc > .zk-hub-foot {
+  flex-shrink: 0;
+  position: relative;
+  width: 100%;
+  margin-top: 0;
+  padding: 0.7rem 1.5rem calc(0.7rem + env(safe-area-inset-bottom, 0px)) !important;
+  box-sizing: border-box;
+}
+
+.bc-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1.05rem;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid var(--line, #d5ddd8);
+  box-shadow: var(--shadow, 0 18px 40px #12201c14);
+}
+
+.bc-hero-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.bc-hero-mark {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.9rem;
+  display: grid;
+  place-items: center;
+  background: #e8edf2;
+  color: #343a40;
+}
+
+.bc-hero-mark svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.bc-hero h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 750;
+}
+
+.bc-hero p {
+  margin: 0.15rem 0 0;
+  color: var(--muted, #5f7169);
+  font-size: 0.9rem;
+}
+
+.bc-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.bc-pill.closed {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: #f8d7d3;
+  color: #b42318;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.bc-scan-card {
+  background: #fff;
+  border: 1px solid var(--line, #d5ddd8);
+  border-radius: 16px;
+  padding: 0.95rem 1.05rem;
+  box-shadow: var(--shadow, 0 18px 40px #12201c14);
+}
+
+.bc-scan-label {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 0.45rem;
+}
+
+.bc-scan-row {
+  display: flex;
+  gap: 0.55rem;
+  align-items: stretch;
+}
+
+.bc-scan-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 3rem;
+  border: 2px solid #1f6b5c;
+  border-radius: 12px;
+  padding: 0.65rem 0.9rem;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.bc-scan-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(31, 107, 92, 0.2);
+}
+
+.bc-scan-help,
+.bc-muted {
+  margin: 0.45rem 0 0;
+  color: var(--muted, #5f7169);
+  font-size: 0.86rem;
+}
+
+.bc-last-hit {
+  margin: 0.55rem 0 0;
+  font-weight: 700;
+  color: #1f7a45;
+}
+
+.bc-desk {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(14rem, 0.9fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.bc-ticket,
+.bc-queue {
+  background: #fff;
+  border: 1px solid var(--line, #d5ddd8);
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+  box-shadow: var(--shadow, 0 18px 40px #12201c14);
+}
+
+.bc-ticket-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.bc-ticket-head strong {
+  display: block;
+}
+
+.bc-ticket-head span {
+  color: var(--muted, #5f7169);
+  font-size: 0.85rem;
+}
+
+.bc-empty {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1.25rem 0.5rem;
+  text-align: center;
+  color: var(--muted, #5f7169);
+}
+
+.bc-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.bc-lines li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line, #d5ddd8);
+}
+
+.bc-lines li strong {
+  display: block;
+}
+
+.bc-lines li small {
+  display: block;
+  color: var(--muted, #5f7169);
+}
+
+.bc-lines li em {
+  display: block;
+  font-style: normal;
+  font-weight: 700;
+  margin-top: 0.2rem;
+}
+
+.bc-totals {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line, #d5ddd8);
+}
+
+.bc-totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.bc-totals .bc-total {
+  font-size: 1.05rem;
+}
+
+.bc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.85rem;
+}
+
+.bc-queue h2 {
+  margin: 0 0 0.65rem;
+  font-size: 1rem;
+}
+
+.bc-queue ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.bc-queue button {
+  width: 100%;
+  text-align: start;
+  border: 1px solid var(--line, #d5ddd8);
+  background: #f7f9f7;
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  cursor: pointer;
+  font: inherit;
+}
+
+.bc-queue button.on {
+  border-color: #1f6b5c;
+  background: #d8ebe5;
+}
+
+.bc-queue button strong {
+  display: block;
+}
+
+.bc-queue button span {
+  color: var(--muted, #5f7169);
+  font-size: 0.82rem;
+}
+
+.bc-queue-link {
+  display: inline-block;
+  margin-top: 0.85rem;
+  color: #1f6b5c;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+@media (max-width: 960px) {
+  .bc-desk {
+    grid-template-columns: 1fr;
+  }
+
+  .zk-bc > .bc-page {
+    padding: 0.55rem 0.65rem 0.45rem;
+  }
+}

@@ -1,7 +1,13 @@
 import { useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { findFoodVoucher, loadCodes, type FoodVoucherCode } from '../data/foodVouchers'
+import {
+  findFoodVoucher,
+  suggestFoodVouchers,
+  type FoodVoucherCode,
+} from '../data/foodVouchers'
 import { money } from '../data/mock'
+import { useI18n } from '../locale/i18n'
+import { useFoodVouchers } from '../state/FoodVoucherContext'
 
 export type FoodVoucherPayResult = {
   voucherId: string
@@ -18,51 +24,62 @@ type Props = {
 }
 
 export default function FoodVoucherPayModal({ billAmount, onClose, onConfirm, embedded }: Props) {
+  const { t } = useI18n()
+  const { codes } = useFoodVouchers()
   const [search, setSearch] = useState('')
   const [hit, setHit] = useState<FoodVoucherCode | null>(null)
   const [hint, setHint] = useState('')
   const [accepted, setAccepted] = useState(false)
 
-  const suggestions = useMemo(() => {
-    const q = search.trim()
-    if (q.length < 2) return []
-    return loadCodes()
-      .filter((c) => c.status === 'available' && c.code.includes(q))
-      .slice(0, 5)
-  }, [search])
+  const suggestions = useMemo(
+    () => suggestFoodVouchers(search, codes, search.trim() ? 8 : 12),
+    [search, codes],
+  )
 
-  function lookup(raw?: string) {
+  function selectCode(row: FoodVoucherCode) {
+    setHit(row)
+    setSearch(row.code)
+    setHint('')
+  }
+
+  function lookup(raw?: string): FoodVoucherCode | null {
     const q = (raw ?? search).trim()
-    const found = findFoodVoucher(q)
-    if (!found) {
+    if (!q) {
       setHit(null)
-      setHint('No available food voucher for that code')
-      return
+      setHint(suggestions.length ? t.fvSelectHint : t.fvNoneAvailable)
+      return null
+    }
+    const found = findFoodVoucher(q, codes)
+    if (!found) {
+      const matches = suggestFoodVouchers(q, codes, 8)
+      setHit(null)
+      setHint(matches.length > 1 ? t.fvSeveralMatch : t.fvNotFound)
+      return null
     }
     setHit(found)
     setSearch(found.code)
     setHint('')
+    return found
   }
 
-  function acceptOk() {
-    if (!hit) return
+  function acceptOk(row: FoodVoucherCode = hit!) {
+    if (!row) return
     onConfirm({
-      voucherId: hit.id,
-      voucherCode: hit.code,
-      voucherName: hit.name,
-      amount: Math.min(hit.amount, billAmount),
+      voucherId: row.id,
+      voucherCode: row.code,
+      voucherName: row.name,
+      amount: Math.min(row.amount, billAmount),
     })
   }
 
   function submit() {
-    if (!hit) {
-      lookup()
-      return
-    }
+    const row = hit ?? lookup()
+    if (!row) return
     if (embedded) {
-      acceptOk()
+      acceptOk(row)
       return
     }
+    setHit(row)
     setAccepted(true)
   }
 
@@ -70,12 +87,12 @@ export default function FoodVoucherPayModal({ billAmount, onClose, onConfirm, em
     <>
       {embedded ? (
         <button type="button" className="settle-back" onClick={onClose}>
-          ← Back
+          {t.settleBack}
         </button>
       ) : (
         <header className="fvp-head">
-          <strong>Food Voucher</strong>
-          <button type="button" className="btn btn-ghost" onClick={onClose} aria-label="Close">
+          <strong>{t.fvLabel}</strong>
+          <button type="button" className="btn btn-ghost" onClick={onClose} aria-label={t.close}>
             ✕
           </button>
         </header>
@@ -83,41 +100,46 @@ export default function FoodVoucherPayModal({ billAmount, onClose, onConfirm, em
 
       <div className={embedded ? 'settle-pay-fields' : 'fvp-fields'}>
         <label>
-          Search Food Voucher
+          {t.fvSearch}
           <input
             className="search"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setHit(null)
+              setHint('')
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') lookup()
             }}
-            placeholder="Enter voucher code"
+            placeholder={t.fvPlaceholder}
             autoFocus
           />
         </label>
         {suggestions.length > 0 && !hit ? (
           <div className="fvp-suggest">
             {suggestions.map((c) => (
-              <button key={c.id} type="button" onClick={() => lookup(c.code)}>
+              <button key={c.id} type="button" onClick={() => selectCode(c)}>
                 {c.code} · {c.name} · {money(c.amount)}
               </button>
             ))}
           </div>
         ) : null}
 
-        <div className="fvp-info">
+        <div className={`fvp-info${hit ? ' is-applied' : ''}`}>
           <div>
-            <span>Food Voucher</span>
+            <span>{t.fvLabel}</span>
             <strong>{hit?.name ?? '—'}</strong>
           </div>
           <div>
-            <span>Voucher Amount</span>
+            <span>{t.fvAmount}</span>
             <strong>{hit ? money(hit.amount) : '—'}</strong>
           </div>
           <div>
-            <span>Voucher Expiry Date</span>
-            <strong>{hit?.expiryDate ?? '—'}</strong>
+            <span>{t.fvExpiry}</span>
+            <strong>{hit ? String(hit.expiryDate).slice(0, 10) : '—'}</strong>
           </div>
+          {hit ? <p className="fvp-applied-tag">{t.fvReady}</p> : null}
         </div>
       </div>
 
@@ -125,10 +147,10 @@ export default function FoodVoucherPayModal({ billAmount, onClose, onConfirm, em
 
       <div className={embedded ? 'settle-pay-actions' : 'fvp-actions'}>
         <button type="button" className="btn btn-ghost" onClick={() => lookup()}>
-          Lookup
+          {t.fvLookup}
         </button>
         <button type="button" className="btn btn-teal" disabled={!hit} onClick={submit}>
-          Apply voucher
+          {t.fvApply}
         </button>
       </div>
     </>
@@ -143,9 +165,9 @@ export default function FoodVoucherPayModal({ billAmount, onClose, onConfirm, em
         {accepted && hit ? (
           <div className="fvp-toast" role="alertdialog">
             <div className="fvp-toast-card">
-              <strong>Food Voucher</strong>
-              <p>Food voucher accepted · {money(Math.min(hit.amount, billAmount))}</p>
-              <button type="button" className="btn btn-primary" onClick={acceptOk}>
+              <strong>{t.fvLabel}</strong>
+              <p>{t.fvAccepted.replace('{amount}', money(Math.min(hit.amount, billAmount)))}</p>
+              <button type="button" className="btn btn-primary" onClick={() => acceptOk()}>
                 OK
               </button>
             </div>

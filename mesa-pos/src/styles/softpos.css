@@ -1,0 +1,226 @@
+/* Card / SoftPOS settings — full-height hub shell (desktop + mobile) */
+
+.zk-softpos {
+  min-height: 0;
+}
+
+.zk-softpos > .zk-hub-top,
+.zk-softpos > .zk-hub-foot {
+  flex-shrink: 0;
+}
+
+.zk-softpos-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  align-content: stretch;
+  min-height: 0;
+  max-width: 920px;
+  width: 100%;
+  margin-inline: auto;
+  box-sizing: border-box;
+}
+
+.zk-softpos-pagehead h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.zk-softpos-pagehead p {
+  margin: 0.35rem 0 0;
+  max-width: 48rem;
+  color: var(--muted);
+  line-height: 1.45;
+  font-size: 0.95rem;
+}
+
+.zk-softpos-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.zk-softpos-locked {
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.zk-softpos-locked p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.zk-softpos-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.zk-softpos-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.zk-softpos-stat > span {
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.zk-softpos-stat > strong {
+  font-size: 1rem;
+  word-break: break-word;
+}
+
+.zk-softpos-stat-switch {
+  justify-content: space-between;
+}
+
+.zk-softpos-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.zk-softpos-pill.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.zk-softpos-pill.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.zk-softpos-pill.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.zk-softpos-note {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.zk-softpos-desktop-hint {
+  padding: 0.65rem 0.85rem;
+  border-radius: 12px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  border: 1px solid color-mix(in srgb, var(--teal) 22%, transparent);
+}
+
+.zk-softpos-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.zk-softpos-actions .zk-co-btn {
+  min-height: var(--touch-min);
+  padding: 0.65rem 1.1rem;
+}
+
+.zk-softpos-test-result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.zk-softpos-test-result.ok {
+  background: var(--ok-soft);
+  border-color: color-mix(in srgb, var(--ok) 28%, transparent);
+}
+
+.zk-softpos-test-result.fail {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent);
+}
+
+.settle-card-busy {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: var(--teal);
+}
+
+.settle-card-error {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: var(--danger);
+}
+
+.settle-softpos-hint {
+  opacity: 0.85;
+  font-size: 0.88rem !important;
+}
+
+@media (max-width: 900px) {
+  .zk-softpos-status-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .zk-softpos-body {
+    padding-inline: 0.15rem;
+    max-width: none;
+  }
+
+  .zk-softpos-actions {
+    flex-direction: column;
+  }
+
+  .zk-softpos-actions .zk-co-btn {
+    width: 100%;
+  }
+
+  .zk-softpos > .zk-hub-top {
+    min-height: 3.25rem;
+    padding: 0.65rem 0.85rem;
+    gap: 0.45rem;
+  }
+
+  .zk-softpos > .zk-hub-foot {
+    padding: 0.55rem 0.75rem;
+  }
+}
+
+@media (min-width: 1100px) {
+  .zk-softpos-body {
+    padding-block: 1.15rem 1.35rem;
+  }
+
+  .zk-softpos-card {
+    padding: 1.65rem 1.75rem;
+  }
+}

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { getPermissions } from '../auth/roles'
-import AccountsShell from '../components/AccountsShell'
+import ExpensesShell from '../components/ExpensesShell'
 import AccessDenied from '../components/AccessDenied'
 import { useDeleteConfirm } from '../hooks/useDeleteConfirm'
 import { useI18n } from '../locale/i18n'
@@ -99,7 +99,7 @@ export default function PaymentTypesPage() {
   }
 
   return (
-    <AccountsShell
+    <ExpensesShell
       active="payment-types"
       title={t.paymentTypes}
       subtitle={t.paymentTypesHint}
@@ -248,6 +248,6 @@ export default function PaymentTypesPage() {
         />
       ) : null}
       {deleteConfirmDialog}
-    </AccountsShell>
+    </ExpensesShell>
   )
 }

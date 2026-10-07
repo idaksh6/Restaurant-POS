@@ -17,8 +17,8 @@ type SettingsTile = {
   to?: string
   icon: ReactNode
   tone: Tone
-  group: string
-  hint?: string
+  groupKey: I18nKey
+  hintKey?: I18nKey
 }
 
 const sections: { id: SectionId; labelKey: I18nKey; icon: ReactNode }[] = [
@@ -335,71 +335,75 @@ function tile(
   labelKey: I18nKey,
   icon: string,
   tone: Tone,
-  group: string,
+  groupKey: I18nKey,
   to?: string,
-  hint?: string,
+  hintKey?: I18nKey,
 ): SettingsTile {
-  return { id, labelKey, icon: tileIcon(icon), tone, group, to, hint }
+  return { id, labelKey, icon: tileIcon(icon), tone, groupKey, to, hintKey }
 }
 
 const grids: Record<SectionId, SettingsTile[]> = {
   settings: [
-    tile('company', 'companyDetails', 'building', 'teal', 'Business', '/settings/company', 'Brand, VAT & branches'),
-    tile('zatca', 'zatcaEInvoice', 'pig', 'rose', 'Business', '/settings/company?focus=zatca', 'Phase 1 QR on receipts'),
-    tile('utility', 'setUtility', 'wrench', 'slate', 'Business', undefined, 'Tools & diagnostics'),
-    tile('about', 'setAbout', 'info', 'ocean', 'Business', undefined, 'App version & info'),
-    tile('email', 'setEmail', 'mail', 'violet', 'Business', undefined, 'Outgoing mail'),
-    tile('customers', 'setCustomers', 'people', 'teal', 'Guests & loyalty', '/crm', 'CRM & points'),
-    tile('gift', 'giftCards', 'gift', 'rose', 'Guests & loyalty', '/settings/gift-cards'),
-    tile('voucher', 'foodVouchers', 'pct', 'amber', 'Guests & loyalty', '/settings/food-vouchers'),
-    tile('reservation', 'tileReservation', 'phone', 'ocean', 'Guests & loyalty'),
-    tile('vendor', 'setVendor', 'truck', 'slate', 'Operations', '/settings/vendors'),
-    tile('delivery-boy', 'setDeliveryBoy', 'scooter', 'lime', 'Operations', '/settings/delivery-riders'),
-    tile('notify', 'setNotify', 'bell', 'amber', 'Operations', '/settings/notifications'),
-    tile('delivery-api', 'setDeliveryApi', 'mobile', 'ocean', 'Operations', '/settings/delivery-integrations'),
-    tile('counter', 'counter', 'bell', 'teal', 'Floor & service', '/quick-serve'),
-    tile('table-area', 'setTableArea', 'area', 'violet', 'Floor & service', '/settings/floor'),
-    tile('table-mgmt', 'setTableMgmt', 'table', 'teal', 'Floor & service', '/settings/floor?tab=tables'),
-    tile('menu-time', 'menuTimetable', 'calendar', 'amber', 'Floor & service', '/settings/menu-timetable'),
-    tile('addons', 'setAddons', 'plus', 'lime', 'Menu & channels', '/masters'),
-    tile('online-type', 'setOnlineType', 'mobile', 'ocean', 'Menu & channels', '/online'),
-    tile('pos-web', 'setPosWeb', 'monitor', 'slate', 'Menu & channels'),
-    tile('fx', 'setFx', 'exchange', 'amber', 'Money'),
-    tile('denom', 'setDenom', 'money', 'teal', 'Money'),
+    tile('company', 'companyDetails', 'building', 'teal', 'setGroupBusiness', '/settings/company', 'setHintCompany'),
+    tile('zatca', 'zatcaEInvoice', 'pig', 'rose', 'setGroupBusiness', '/settings/company?focus=zatca', 'setHintZatca'),
+    tile('zatca-queue', 'zatcaEInvoice', 'list', 'amber', 'setGroupBusiness', '/settings/zatca/invoices', 'setHintZatca'),
+    tile('utility', 'setUtility', 'wrench', 'slate', 'setGroupBusiness', undefined, 'setHintUtility'),
+    tile('about', 'setAbout', 'info', 'ocean', 'setGroupBusiness', undefined, 'setHintAbout'),
+    tile('email', 'setEmail', 'mail', 'violet', 'setGroupBusiness', undefined, 'setHintEmail'),
+    tile('customers', 'setCustomers', 'people', 'teal', 'setGroupGuests', '/crm', 'setHintCustomers'),
+    tile('gift', 'giftCards', 'gift', 'rose', 'setGroupGuests', '/settings/gift-cards'),
+    tile('voucher', 'foodVouchers', 'pct', 'amber', 'setGroupGuests', '/settings/food-vouchers'),
+    tile('loyalty-camp', 'setLoyaltyCampaigns', 'star', 'violet', 'setGroupGuests', '/settings/loyalty-campaigns', 'setHintLoyaltyCampaigns'),
+    tile('reservation', 'tileReservation', 'phone', 'ocean', 'setGroupGuests'),
+    tile('vendor', 'setVendor', 'truck', 'slate', 'setGroupOperations', '/settings/vendors'),
+    tile('delivery-boy', 'setDeliveryBoy', 'scooter', 'lime', 'setGroupOperations', '/settings/delivery-riders'),
+    tile('notify', 'setNotify', 'bell', 'amber', 'setGroupOperations', '/settings/notifications'),
+    tile('delivery-api', 'setDeliveryApi', 'mobile', 'ocean', 'setGroupOperations', '/settings/delivery-integrations'),
+    tile('counter', 'counter', 'bell', 'teal', 'setGroupFloor', '/quick-serve'),
+    tile('table-area', 'setTableArea', 'area', 'violet', 'setGroupFloor', '/settings/floor'),
+    tile('table-mgmt', 'setTableMgmt', 'table', 'teal', 'setGroupFloor', '/settings/floor?tab=tables'),
+    tile('menu-time', 'menuTimetable', 'calendar', 'amber', 'setGroupFloor', '/settings/menu-timetable'),
+    tile('addons', 'setAddons', 'plus', 'lime', 'setGroupMenu', '/settings/addons', 'setAddonsHint'),
+    tile('online-type', 'setOnlineType', 'mobile', 'ocean', 'setGroupMenu', '/online'),
+    tile('pos-web', 'setPosWeb', 'monitor', 'slate', 'setGroupMenu'),
+    tile('fx', 'setFx', 'exchange', 'amber', 'setGroupMoney'),
+    tile('denom', 'setDenom', 'money', 'teal', 'setGroupMoney'),
+    tile('card-terminal', 'setCardTerminal', 'mobile', 'ocean', 'setGroupMoney', '/settings/card-terminal', 'setHintCardTerminal'),
   ],
   printer: [
-    tile('receipt-printer', 'setReceiptPrinter', 'print', 'teal', 'Printers', '/settings/printers?focus=receipt'),
-    tile('kot-printer', 'setKotPrinter', 'print', 'amber', 'Printers', '/settings/printers?focus=kot'),
-    tile('printer-map', 'setPrinterMap', 'list', 'ocean', 'Printers', '/settings/printers?focus=map'),
-    tile('print-template', 'setPrintTemplate', 'list', 'violet', 'Printers', '/settings/printers?focus=template'),
+    tile('receipt-printer', 'setReceiptPrinter', 'print', 'teal', 'setGroupPrinters', '/settings/printers?focus=receipt'),
+    tile('kot-printer', 'setKotPrinter', 'print', 'amber', 'setGroupPrinters', '/settings/printers?focus=kot'),
+    tile('printer-map', 'setPrinterMap', 'list', 'ocean', 'setGroupPrinters', '/settings/printers?focus=map'),
+    tile('print-template', 'setPrintTemplate', 'list', 'violet', 'setGroupPrinters', '/settings/printers?focus=template'),
   ],
   products: [
-    tile('dept', 'setDeptList', 'list', 'teal', 'Catalog', '/settings/departments'),
-    tile('menu-items', 'setMenuItems', 'dish', 'lime', 'Catalog', '/masters?tab=dishes'),
-    tile('menu-details', 'setMenuDetails', 'box', 'ocean', 'Catalog', '/settings/menu-details'),
-    tile('combo', 'setCombo', 'combo', 'amber', 'Catalog'),
-    tile('tax', 'tax', 'pig', 'rose', 'Pricing & tax', '/settings/tax'),
-    tile('tax-update', 'setTaxUpdate', 'exchange', 'violet', 'Pricing & tax', '/settings/tax-update'),
-    tile('discount', 'discount', 'gift', 'amber', 'Pricing & tax', '/settings/discount'),
-    tile('units', 'units', 'scale', 'slate', 'Pricing & tax', '/settings/units'),
-    tile('extra', 'setExtraCharges', 'charge', 'ocean', 'Pricing & tax', '/settings/extra-charges'),
-    tile('point', 'setPointMaster', 'waiter', 'teal', 'Loyalty & drinks', '/crm'),
-    tile('bev-qty', 'setBevQty', 'waiter', 'lime', 'Loyalty & drinks', '/masters'),
-    tile('bev-price', 'setBevPrice', 'waiter', 'amber', 'Loyalty & drinks', '/masters'),
-    tile('online-price', 'setOnlinePrice', 'list', 'ocean', 'Loyalty & drinks', '/online'),
+    tile('dept', 'setDeptList', 'list', 'teal', 'setGroupCatalog', '/settings/departments'),
+    tile('menu-items', 'setMenuItems', 'dish', 'lime', 'setGroupCatalog', '/masters?tab=dishes'),
+    tile('menu-details', 'setMenuDetails', 'box', 'ocean', 'setGroupCatalog', '/settings/menu-details'),
+    tile('combo', 'setCombo', 'combo', 'amber', 'setGroupCatalog'),
+    tile('tax', 'tax', 'pig', 'rose', 'setGroupPricing', '/settings/tax'),
+    tile('tax-update', 'setTaxUpdate', 'exchange', 'violet', 'setGroupPricing', '/settings/tax-update'),
+    tile('discount', 'discount', 'gift', 'amber', 'setGroupPricing', '/settings/discount'),
+    tile('units', 'units', 'scale', 'slate', 'setGroupPricing', '/settings/units'),
+    tile('extra', 'setExtraCharges', 'charge', 'ocean', 'setGroupPricing', '/settings/extra-charges'),
+    tile('point', 'setPointMaster', 'waiter', 'teal', 'setGroupLoyalty', '/crm'),
+    tile('bev-qty', 'setBevQty', 'waiter', 'lime', 'setGroupLoyalty', '/settings/beverages/quantities'),
+    tile('bev-price', 'setBevPrice', 'waiter', 'amber', 'setGroupLoyalty', '/settings/beverages/prices'),
+    tile('online-price', 'setOnlinePrice', 'list', 'ocean', 'setGroupLoyalty', '/online'),
   ],
   user: [
-    tile('user-list', 'userList', 'people', 'teal', 'Access', '/settings/users'),
-    tile('roles', 'setRoles', 'waiter', 'ocean', 'Access', '/settings/roles'),
-    tile('role-priv', 'setRolePriv', 'wrench', 'amber', 'Access', '/settings/roles?focus=privileges'),
-    tile('pin', 'setPinLogin', 'mobile', 'violet', 'Access', '/settings/users?focus=pin'),
+    tile('user-list', 'userList', 'people', 'teal', 'setGroupAccess', '/settings/users'),
+    tile('roles', 'setRoles', 'waiter', 'ocean', 'setGroupAccess', '/settings/roles'),
+    tile('role-priv', 'setRolePriv', 'wrench', 'amber', 'setGroupAccess', '/settings/roles?focus=privileges'),
+    tile('pin', 'setPinLogin', 'mobile', 'violet', 'setGroupAccess', '/settings/users?focus=pin'),
   ],
   accounts: [
-    tile('payment-type', 'paymentTypes', 'money', 'teal', 'Accounts', '/expenses/payment-types'),
-    tile('expense-types', 'expenseTypes', 'list', 'amber', 'Accounts', '/expenses/types'),
-    tile('expense-details', 'expenseDetails', 'pig', 'rose', 'Accounts', '/expenses'),
-    tile('day-close', 'tileDayClose', 'calendar', 'violet', 'Close & ledger', '/back-office?tab=day'),
-    tile('ledger', 'setSalesLedger', 'money', 'lime', 'Close & ledger', '/back-office?tab=sales'),
+    tile('accounts-hub', 'tileAccounts', 'money', 'teal', 'setGroupAccounts', '/accounts'),
+    tile('payment-type', 'paymentTypes', 'money', 'teal', 'setGroupAccounts', '/expenses/payment-types'),
+    tile('expense-types', 'expenseTypes', 'list', 'amber', 'setGroupAccounts', '/expenses/types'),
+    tile('expense-details', 'expenseDetails', 'pig', 'rose', 'setGroupAccounts', '/expenses'),
+    tile('day-close', 'tileDayClose', 'calendar', 'violet', 'setGroupCloseLedger', '/back-office?tab=day'),
+    tile('ledger', 'setSalesLedger', 'money', 'lime', 'setGroupCloseLedger', '/back-office?tab=sales'),
   ],
   ingredients: [
     tile(
@@ -407,27 +411,27 @@ const grids: Record<SectionId, SettingsTile[]> = {
       'setIngredientList',
       'box',
       'ocean',
-      'Catalog',
+      'setGroupCatalog',
       '/settings/ingredients/list',
-      'Raw materials — name, SKU, unit',
+      'setHintIngredientListShort',
     ),
     tile(
       'menu-recipes',
       'setMenuItemRecipes',
       'dish',
       'teal',
-      'Recipes',
+      'setGroupRecipes',
       '/masters?tab=dishes',
-      'Assign ingredients to menu items',
+      'setHintMenuRecipes',
     ),
     tile(
       'usage',
       'setRecipeUsage',
       'list',
       'amber',
-      'Recipes',
+      'setGroupRecipes',
       '/settings/ingredients/usage',
-      'What each menu item consumes',
+      'setHintRecipeUsage',
     ),
   ],
   inventory: [
@@ -436,29 +440,29 @@ const grids: Record<SectionId, SettingsTile[]> = {
       'setStorageLocations',
       'box',
       'violet',
-      'Stock setup',
+      'setGroupStockSetup',
       '/settings/inventory/locations',
-      'Walk-in, bar, kitchen, pastry areas',
+      'setHintStorageLocations',
     ),
     tile(
       'yield-conversions',
       'setYieldConversions',
       'dish',
       'teal',
-      'Stock setup',
+      'setGroupStockSetup',
       '/settings/inventory/yield',
-      'Raw → prepped prep links',
+      'setHintYield',
     ),
-    tile('receiving', 'stockReceiving', 'truck', 'teal', 'Stock flow', '/settings/inventory/receiving'),
-    tile('transfer', 'stockTransfer', 'scale', 'ocean', 'Stock flow', '/settings/inventory/transfer'),
-    tile('po', 'setPurchaseOrder', 'list', 'amber', 'Stock flow', '/purchase-orders'),
-    tile('stock', 'setStockList', 'box', 'lime', 'Stock flow', '/inventory?focus=stock&from=inventory'),
+    tile('receiving', 'stockReceiving', 'truck', 'teal', 'setGroupStockFlow', '/settings/inventory/receiving'),
+    tile('transfer', 'stockTransfer', 'scale', 'ocean', 'setGroupStockFlow', '/settings/inventory/transfer'),
+    tile('po', 'setPurchaseOrder', 'list', 'amber', 'setGroupStockFlow', '/purchase-orders'),
+    tile('stock', 'setStockList', 'box', 'lime', 'setGroupStockFlow', '/inventory?focus=stock&from=inventory'),
   ],
   database: [
-    tile('export', 'setExport', 'backup', 'ocean', 'Data', '/settings/database/export'),
-    tile('import', 'setImport', 'db', 'amber', 'Data', '/settings/database/import'),
-    tile('backup', 'setBackup', 'backup', 'violet', 'Data', '/settings/database/backup'),
-    tile('clear-demo', 'setDataClean', 'wrench', 'rose', 'Data', '/settings/database/clean'),
+    tile('export', 'setExport', 'backup', 'ocean', 'setGroupData', '/settings/database/export'),
+    tile('import', 'setImport', 'db', 'amber', 'setGroupData', '/settings/database/import'),
+    tile('backup', 'setBackup', 'backup', 'violet', 'setGroupData', '/settings/database/backup'),
+    tile('clear-demo', 'setDataClean', 'wrench', 'rose', 'setGroupData', '/settings/database/clean'),
   ],
 }
 
@@ -506,20 +510,18 @@ export default function SettingsPage() {
     if (!q) return tiles
     return tiles.filter((tileItem) => {
       const label = t[tileItem.labelKey].toLowerCase()
-      return (
-        label.includes(q) ||
-        tileItem.group.toLowerCase().includes(q) ||
-        (tileItem.hint ?? '').toLowerCase().includes(q)
-      )
+      const group = t[tileItem.groupKey].toLowerCase()
+      const hint = tileItem.hintKey ? t[tileItem.hintKey].toLowerCase() : ''
+      return label.includes(q) || group.includes(q) || hint.includes(q)
     })
   }, [tiles, query, t])
 
   const groups = useMemo(() => {
-    const map = new Map<string, SettingsTile[]>()
+    const map = new Map<I18nKey, SettingsTile[]>()
     for (const tileItem of filtered) {
-      const list = map.get(tileItem.group) ?? []
+      const list = map.get(tileItem.groupKey) ?? []
       list.push(tileItem)
-      map.set(tileItem.group, list)
+      map.set(tileItem.groupKey, list)
     }
     return [...map.entries()]
   }, [filtered])
@@ -591,8 +593,10 @@ export default function SettingsPage() {
               <p className="zk-settings-kicker">{t.settings}</p>
               <h1>{title}</h1>
               <p className="zk-settings-sub">
-                {filtered.length} item{filtered.length === 1 ? '' : 's'}
-                {query.trim() ? ' matching search' : ' in this section'}
+                {(query.trim() ? t.setItemsMatching : t.setItemsInSection).replace(
+                  '{count}',
+                  String(filtered.length),
+                )}
               </p>
             </div>
             <label className="zk-settings-search">
@@ -600,26 +604,26 @@ export default function SettingsPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search settings…"
-                aria-label="Search settings"
+                placeholder={t.setSearchPlaceholder}
+                aria-label={t.setSearchPlaceholder}
               />
             </label>
           </header>
 
           {groups.length === 0 ? (
             <div className="zk-settings-empty">
-              <strong>No matches</strong>
-              <p>Try another search or clear the filter.</p>
+              <strong>{t.setNoMatchesTitle}</strong>
+              <p>{t.setNoMatchesHint}</p>
               <button type="button" className="zk-settings-clear" onClick={() => setQuery('')}>
-                Clear search
+                {t.setClearSearch}
               </button>
             </div>
           ) : (
             <div className="zk-settings-groups">
-              {groups.map(([group, items]) => (
-                <section key={group} className="zk-settings-group">
+              {groups.map(([groupKey, items]) => (
+                <section key={groupKey} className="zk-settings-group">
                   <div className="zk-settings-group-head">
-                    <h2>{group}</h2>
+                    <h2>{t[groupKey]}</h2>
                     <span className="mesa-ltr-nums">{items.length}</span>
                   </div>
                   <div className="zk-settings-grid">
@@ -634,7 +638,7 @@ export default function SettingsPage() {
                           {tileItem.icon}
                         </span>
                         <strong>{t[tileItem.labelKey]}</strong>
-                        {tileItem.hint ? <em>{tileItem.hint}</em> : null}
+                        {tileItem.hintKey ? <em>{t[tileItem.hintKey]}</em> : null}
                       </button>
                     ))}
                   </div>

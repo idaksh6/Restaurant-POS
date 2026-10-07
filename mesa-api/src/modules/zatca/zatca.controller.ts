@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Inject, Param, Put, Query, Req, UseGuards } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Param,
+  Post,
+  Put,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common'
 import { JwtAuthGuard, requireCompany, type JwtUser } from '../auth/jwt.guard'
 import { ZatcaService } from './zatca.service'
 
@@ -15,6 +26,36 @@ export class ZatcaController {
   @Put('config')
   putConfig(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
     return this.zatca.putConfig(requireCompany(req.user), body)
+  }
+
+  @Get('proxy')
+  proxyStatus() {
+    return this.zatca.getProxyStatus()
+  }
+
+  @Post('compliance')
+  compliance(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
+    return this.zatca.runComplianceCheck(requireCompany(req.user), body)
+  }
+
+  @Post('onboard/csr')
+  onboardCsr(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
+    return this.zatca.onboardCsr(requireCompany(req.user), body)
+  }
+
+  @Post('onboard/compliance-check')
+  complianceCheck(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
+    return this.zatca.runComplianceCheck(requireCompany(req.user), body)
+  }
+
+  @Post('onboard/production')
+  onboardProduction(@Req() req: { user?: JwtUser }) {
+    return this.zatca.onboardProduction(requireCompany(req.user))
+  }
+
+  @Post('onboard/csid')
+  onboardCsid(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
+    return this.zatca.onboardCsid(requireCompany(req.user), body)
   }
 
   @Get('invoices')

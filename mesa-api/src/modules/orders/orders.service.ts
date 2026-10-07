@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { Prisma } from '@prisma/client'
 import { InjectPrisma, PrismaService } from '../../prisma.service'
 import { assertBranchInCompany, companyIdForBranch } from '../auth/tenant'
-import { notifyTicketChanged } from '../sync/bus'
+import { notifyMastersChanged, notifyTicketChanged } from '../sync/bus'
 
 function asLines(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? (value as Record<string, unknown>[]) : []
@@ -150,6 +150,83 @@ export class OrdersService {
     )
   }
 
+  /** Guest QR / storefront order → Online queue. */
+  async ingestGuestOrder(
+    branchId: string,
+    body: {
+      customer?: string
+      phone?: string
+      note?: string
+      tableId?: string
+      lines?: Array<{ name?: string; qty?: number; price?: number; itemId?: string }>
+    },
+  ) {
+    const companyId = await companyIdForBranch(this.prisma, branchId)
+    if (!companyId) throw new Error('Unknown branch')
+    await assertBranchInCompany(this.prisma, branchId, companyId)
+
+    const lines = (body.lines ?? []).map((l, i) => ({
+      id: `qr-${i}-${Date.now()}`,
+      itemId: String(l.itemId ?? `qr-item-${i}`),
+      name: String(l.name ?? 'Item'),
+      qty: Math.max(1, Number(l.qty ?? 1)),
+      price: Math.max(0, Number(l.price ?? 0)),
+      sent: false,
+    }))
+    if (!lines.length) throw new Error('lines required')
+    const amount = lines.reduce((s, l) => s + l.qty * l.price, 0)
+    const externalOrderId = `QR-${Date.now()}`
+    const id = `qr-${branchId}-${externalOrderId}`
+    const openedAt = new Date().toLocaleTimeString('en-SA', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    const payload = {
+      id,
+      type: 'online',
+      customer: String(body.customer ?? 'QR guest'),
+      phone: body.phone ? String(body.phone) : undefined,
+      note: body.note ? String(body.note) : undefined,
+      tableId: body.tableId ? String(body.tableId) : undefined,
+      channel: 'QR',
+      externalOrderId,
+      openedAt,
+      lines,
+      amount,
+      branchId,
+      checkStatus: 'open',
+      kitchenStatus: 'queued',
+      channelAcceptStatus: 'pending',
+      updatedAt: Date.now(),
+      replaceLines: true,
+    }
+    return this.upsert({ ...payload, status: 'open', branchId }, companyId)
+  }
+
+  async publicMenu(branchId: string) {
+    const companyId = await companyIdForBranch(this.prisma, branchId)
+    if (!companyId) throw new Error('Unknown branch')
+    const products = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
+      SELECT id, name, "categoryId", category, price, code, active
+      FROM "Product"
+      WHERE "companyId" = ${companyId}
+        AND "branchId" = ${branchId}
+        AND active = true
+      ORDER BY code ASC
+      LIMIT 200
+    `
+    const categories = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
+      SELECT id, name, "parentId", active, sort
+      FROM "Category"
+      WHERE "companyId" = ${companyId}
+        AND ("branchId" = ${branchId} OR "branchId" IS NULL)
+        AND active = true
+      ORDER BY sort ASC
+      LIMIT 100
+    `
+    return { branchId, companyId, products, categories }
+  }
+
   async settle(id: string, companyId: string, meta?: unknown) {
     const existing = await this.prisma.ticket.findFirst({
       where: { id, companyId },
@@ -245,11 +322,13 @@ export class OrdersService {
 
   async closeDay(companyId: string, branchId: string, dayKey: string, countedCash: number, staff?: string) {
     await assertBranchInCompany(this.prisma, branchId, companyId)
-    return this.prisma.dayClose.upsert({
+    const row = await this.prisma.dayClose.upsert({
       where: { branchId_dayKey: { branchId, dayKey } },
       create: { companyId, branchId, dayKey, countedCash, staff },
       update: { countedCash, staff, closedAt: new Date() },
     })
+    notifyMastersChanged('api')
+    return row
   }
 
   listShifts(companyId: string, branchId?: string) {
@@ -284,7 +363,7 @@ export class OrdersService {
       })
     }
 
-    return this.prisma.shift.upsert({
+    const saved = await this.prisma.shift.upsert({
       where: { id },
       create: {
         id,
@@ -314,6 +393,8 @@ export class OrdersService {
         open,
       },
     })
+    notifyMastersChanged('api')
+    return saved
   }
 
   listLedger(companyId: string, branchId?: string) {
@@ -350,11 +431,13 @@ export class OrdersService {
       at: new Date(String(row.at ?? Date.now())),
     }
 
-    return this.prisma.auditLog.upsert({
+    const saved = await this.prisma.auditLog.upsert({
       where: { id },
       create: { id, ...data },
       update: data,
     })
+    notifyMastersChanged('api')
+    return saved
   }
 
   async upsertLedger(row: Record<string, unknown>, companyId: string) {
@@ -387,13 +470,20 @@ export class OrdersService {
       loyaltyRedeem: row.loyaltyRedeem != null ? Number(row.loyaltyRedeem) : null,
       voidReason: row.voidReason ? String(row.voidReason) : null,
       voidLineName: row.voidLineName ? String(row.voidLineName) : null,
+      billNo: row.billNo != null && Number.isFinite(Number(row.billNo)) ? Number(row.billNo) : null,
+      orderId: row.orderId ? String(row.orderId) : null,
+      staffUsername: row.staffUsername ? String(row.staffUsername) : null,
+      tableLabel: row.tableLabel ? String(row.tableLabel) : null,
+      invoiceUuid: row.invoiceUuid ? String(row.invoiceUuid) : null,
     }
 
-    return this.prisma.salesLedger.upsert({
+    const saved = await this.prisma.salesLedger.upsert({
       where: { id },
       create: { id, ...data },
       update: data,
     })
+    notifyMastersChanged('api')
+    return saved
   }
 
   listSequences(companyId: string, branchId?: string) {
@@ -404,7 +494,13 @@ export class OrdersService {
 
   async upsertSequence(row: Record<string, unknown>, companyId: string) {
     const kind = String(row.kind ?? '')
-    if (kind !== 'delivery' && kind !== 'driveThru' && kind !== 'takeaway' && kind !== 'quickServe') {
+    if (
+      kind !== 'delivery' &&
+      kind !== 'driveThru' &&
+      kind !== 'takeaway' &&
+      kind !== 'quickServe' &&
+      kind !== 'bill'
+    ) {
       throw new Error('invalid sequence kind')
     }
     const branchId = String(row.branchId ?? '')
@@ -417,11 +513,13 @@ export class OrdersService {
     })
     const value = Math.max(existing?.value ?? 0, incoming)
 
-    return this.prisma.branchSequence.upsert({
+    const saved = await this.prisma.branchSequence.upsert({
       where: { branchId_kind: { branchId, kind } },
       create: { companyId, branchId, kind, value },
       update: { companyId, value },
     })
+    notifyMastersChanged('api')
+    return saved
   }
 }
 

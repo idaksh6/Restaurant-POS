@@ -23,6 +23,7 @@ import {
   type CompanyProfile,
 } from '../data/company'
 import { mapApiBranches } from '../lib/branding'
+import { branchesForUser } from '../lib/branchAccess'
 import { useAuth } from './AuthContext'
 import { getDeviceId } from '../sync/deviceId'
 import { enqueueOutbox, dropPendingUpsertsFor } from '../sync/outbox'
@@ -32,6 +33,8 @@ import { apiDeleteBranch, apiMastersReady, apiPutBranch, apiPutCompany } from '.
 type BranchContextValue = {
   company: CompanyProfile
   branches: Branch[]
+  /** Branches the current user may switch to (respects user.branchId). */
+  allowedBranches: Branch[]
   activeBranch: Branch
   activeBranchId: string
   details: CompanyDetails
@@ -44,7 +47,7 @@ type BranchContextValue = {
 const BranchContext = createContext<BranchContextValue | null>(null)
 
 export function BranchProvider({ children }: { children: ReactNode }) {
-  const { selectedCompany } = useAuth()
+  const { selectedCompany, user } = useAuth()
   const [company, setCompanyState] = useState<CompanyProfile>(loadCompanyProfile)
   const [branches, setBranchesState] = useState<Branch[]>(loadBranches)
   const [activeBranchId, setActiveId] = useState(getActiveBranchId)
@@ -83,6 +86,22 @@ export function BranchProvider({ children }: { children: ReactNode }) {
       companyOutboxOverlay(),
     )
   }, [selectedCompany])
+
+  const allowedBranches = useMemo(
+    () => branchesForUser(branches, user?.branchId, user?.role),
+    [branches, user?.branchId, user?.role],
+  )
+
+  // Branch-scoped users must stay on their assigned branch (admins can switch freely).
+  useEffect(() => {
+    if (user?.role === 'admin') return
+    const scoped = user?.branchId?.trim()
+    if (!scoped) return
+    if (activeBranchId === scoped) return
+    if (!branches.some((b) => b.id === scoped)) return
+    setActiveBranchId(scoped)
+    setActiveId(scoped)
+  }, [user?.branchId, user?.role, activeBranchId, branches])
 
   const activeBranch = useMemo(
     () => branches.find((b) => b.id === activeBranchId) ?? loadActiveBranch(),
@@ -149,17 +168,25 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     [activeBranchId],
   )
 
-  const switchBranch = useCallback((branchId: string) => {
-    const exists = loadBranches().some((b) => b.id === branchId && b.active)
-    if (!exists) return
-    setActiveBranchId(branchId)
-    setActiveId(branchId)
-  }, [])
+  const switchBranch = useCallback(
+    (branchId: string) => {
+      if (user?.role !== 'admin') {
+        const scoped = user?.branchId?.trim()
+        if (scoped && branchId !== scoped) return
+      }
+      const exists = loadBranches().some((b) => b.id === branchId && b.active)
+      if (!exists) return
+      setActiveBranchId(branchId)
+      setActiveId(branchId)
+    },
+    [user?.branchId, user?.role],
+  )
 
   const value = useMemo(
     () => ({
       company,
       branches,
+      allowedBranches,
       activeBranch,
       activeBranchId,
       details,
@@ -171,6 +198,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     [
       company,
       branches,
+      allowedBranches,
       activeBranch,
       activeBranchId,
       details,

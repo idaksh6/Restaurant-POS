@@ -172,6 +172,7 @@ export type ApiFoodVoucherBatch = {
   count: number
   amount: number
   createdAt: string
+  branchId?: string | null
 }
 
 export type ApiFoodVoucherCode = {
@@ -184,13 +185,15 @@ export type ApiFoodVoucherCode = {
   amount: number
   status: 'available' | 'used' | string
   usedAt?: string | null
+  branchId?: string | null
 }
 
-export async function apiListFoodVouchers(): Promise<{
+export async function apiListFoodVouchers(branchId?: string): Promise<{
   batches: ApiFoodVoucherBatch[]
   codes: ApiFoodVoucherCode[]
 }> {
-  return mastersFetch('/masters/food-vouchers') as Promise<{
+  const qs = branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''
+  return mastersFetch(`/masters/food-vouchers${qs}`) as Promise<{
     batches: ApiFoodVoucherBatch[]
     codes: ApiFoodVoucherCode[]
   }>
@@ -204,6 +207,7 @@ export async function apiPutFoodVoucher(body: {
     count: number
     amount: number
     createdAt?: string
+    branchId?: string
   }
   codes?: Array<{
     id: string
@@ -214,7 +218,9 @@ export async function apiPutFoodVoucher(body: {
     amount: number
     status: string
     usedAt?: string
+    branchId?: string
   }>
+  branchId?: string
 }) {
   return mastersFetch('/masters/food-vouchers', {
     method: 'PUT',
@@ -354,6 +360,12 @@ export type CatalogKind =
   | 'deliveryRider'
   | 'printStation'
   | 'tableArea'
+  | 'beverageQty'
+  | 'beveragePrice'
+  | 'addonMaster'
+  | 'ingredient'
+  | 'stockLocation'
+  | 'yieldLink'
 
 export type ApiCatalog = {
   giftCards: Record<string, unknown>[]
@@ -368,10 +380,16 @@ export type ApiCatalog = {
   deliveryRiders: Record<string, unknown>[]
   printStations: Record<string, unknown>[]
   tableAreas?: Record<string, unknown>[]
+  beverageQtys?: Record<string, unknown>[]
+  beveragePrices?: Record<string, unknown>[]
+  addonMasters?: Record<string, unknown>[]
+  stockLocations?: Record<string, unknown>[]
+  yieldLinks?: Record<string, unknown>[]
 }
 
-export async function apiListCatalog(): Promise<ApiCatalog> {
-  return mastersFetch('/masters/catalog') as Promise<ApiCatalog>
+export async function apiListCatalog(branchId?: string): Promise<ApiCatalog> {
+  const qs = branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''
+  return mastersFetch(`/masters/catalog${qs}`) as Promise<ApiCatalog>
 }
 
 export async function apiPutCatalog(kind: CatalogKind, row: Record<string, unknown>) {
@@ -416,8 +434,9 @@ export async function apiPutStock(row: Record<string, unknown>) {
   return mastersFetch('/masters/stock', { method: 'PUT', body: JSON.stringify(row) })
 }
 
-export async function apiListIngredients() {
-  return mastersFetch('/masters/ingredients') as Promise<Record<string, unknown>[]>
+export async function apiListIngredients(branchId?: string) {
+  const qs = branchId ? `?branchId=${encodeURIComponent(branchId)}` : ''
+  return mastersFetch(`/masters/ingredients${qs}`) as Promise<Record<string, unknown>[]>
 }
 
 export async function apiPutIngredient(row: Record<string, unknown>) {

@@ -271,6 +271,16 @@ export class MastersService {
         : prevMeta.productType
           ? String(prevMeta.productType)
           : undefined,
+      requiresKitchen:
+        product.requiresKitchen === false
+          ? false
+          : product.requiresKitchen === true
+            ? true
+            : prevMeta.requiresKitchen === false
+              ? false
+              : prevMeta.requiresKitchen === true
+                ? true
+                : undefined,
       taxIds: Array.isArray(product.taxIds)
         ? product.taxIds
         : Array.isArray(prevMeta.taxIds)
@@ -337,7 +347,63 @@ export class MastersService {
     })
   }
 
-  listFoodVouchers(companyId: string) {
+  async listFoodVouchers(companyId: string, branchId?: string) {
+    // Ensure column exists on older tenant DBs.
+    try {
+      await this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "FoodVoucherBatch" ADD COLUMN IF NOT EXISTS "branchId" TEXT`,
+      )
+      await this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "FoodVoucherCode" ADD COLUMN IF NOT EXISTS "branchId" TEXT`,
+      )
+    } catch {
+      /* ignore */
+    }
+
+    if (branchId) {
+      await assertBranchInCompany(this.prisma, branchId, companyId)
+      // Legacy company-wide rows (null branchId) → Head Office only.
+      const branches = await this.prisma.branch.findMany({
+        where: { companyId },
+        select: { id: true, code: true, name: true },
+      })
+      const ho = branches.find((b) => {
+        const code = String(b.code || '').trim().toUpperCase()
+        const name = String(b.name || '').trim().toLowerCase()
+        return (
+          code === 'H001' ||
+          code === 'HO' ||
+          code === 'HQ' ||
+          name.includes('head office')
+        )
+      })
+      if (ho?.id) {
+        await this.prisma.$executeRawUnsafe(
+          `UPDATE "FoodVoucherBatch" SET "branchId" = $1
+           WHERE "companyId" = $2 AND ("branchId" IS NULL OR "branchId" = '')`,
+          ho.id,
+          companyId,
+        )
+        await this.prisma.$executeRawUnsafe(
+          `UPDATE "FoodVoucherCode" SET "branchId" = $1
+           WHERE "companyId" = $2 AND ("branchId" IS NULL OR "branchId" = '')`,
+          ho.id,
+          companyId,
+        )
+      }
+      const [batches, codes] = await Promise.all([
+        this.prisma.foodVoucherBatch.findMany({
+          where: { companyId, branchId },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.foodVoucherCode.findMany({
+          where: { companyId, branchId },
+          orderBy: { code: 'asc' },
+        }),
+      ])
+      return { batches, codes }
+    }
+
     return Promise.all([
       this.prisma.foodVoucherBatch.findMany({
         where: { companyId },
@@ -354,8 +420,24 @@ export class MastersService {
     const batchIn = (input.batch ?? input) as Record<string, unknown>
     const id = String(batchIn.id ?? '')
     if (!id) throw new BadRequestException('Batch id required')
+    const branchId = String(batchIn.branchId ?? input.branchId ?? '')
+    if (!branchId) throw new BadRequestException('branchId required for food voucher')
+    await assertBranchInCompany(this.prisma, branchId, companyId)
+
+    try {
+      await this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "FoodVoucherBatch" ADD COLUMN IF NOT EXISTS "branchId" TEXT`,
+      )
+      await this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "FoodVoucherCode" ADD COLUMN IF NOT EXISTS "branchId" TEXT`,
+      )
+    } catch {
+      /* ignore */
+    }
+
     const data = {
       companyId,
+      branchId,
       name: String(batchIn.name ?? ''),
       expiryDate: String(batchIn.expiryDate ?? ''),
       count: Number(batchIn.count ?? 0),
@@ -367,6 +449,7 @@ export class MastersService {
       create: {
         id,
         companyId: data.companyId,
+        branchId: data.branchId,
         name: data.name,
         expiryDate: data.expiryDate,
         count: data.count,
@@ -374,6 +457,7 @@ export class MastersService {
         ...(data.createdAt ? { createdAt: data.createdAt } : {}),
       },
       update: {
+        branchId: data.branchId,
         name: data.name,
         expiryDate: data.expiryDate,
         count: data.count,
@@ -386,8 +470,10 @@ export class MastersService {
       const row = raw as Record<string, unknown>
       const codeId = String(row.id ?? '')
       if (!codeId) continue
+      const codeBranchId = String(row.branchId ?? branchId)
       const codeData = {
         companyId,
+        branchId: codeBranchId,
         batchId: id,
         name: String(row.name ?? data.name),
         code: String(row.code ?? ''),
@@ -407,6 +493,7 @@ export class MastersService {
   }
 
   async deleteFoodVoucherBatch(id: string, companyId: string) {
+    await this.prisma.foodVoucherCode.deleteMany({ where: { batchId: id, companyId } })
     await this.prisma.foodVoucherBatch.deleteMany({ where: { id, companyId } })
     return { ok: true, id }
   }
@@ -574,11 +661,76 @@ ALTER TABLE "DiscountRate"
     }
   }
 
-  async listCatalog(companyId: string) {
+  private async ensureAddonMasterTable() {
+    await this.prisma.$executeRawUnsafe(`
+CREATE TABLE IF NOT EXISTS "AddonMaster" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "branchId" TEXT,
+    "name" TEXT NOT NULL,
+    "min" INTEGER NOT NULL DEFAULT 0,
+    "max" INTEGER NOT NULL DEFAULT 99,
+    "appendVariationName" BOOLEAN NOT NULL DEFAULT false,
+    "addons" TEXT NOT NULL DEFAULT '[]',
+    "sort" INTEGER NOT NULL DEFAULT 0,
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "AddonMaster_pkey" PRIMARY KEY ("id")
+)`)
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "AddonMaster_companyId_idx" ON "AddonMaster"("companyId")`,
+    )
+  }
+
+  private async ensureBeverageTables() {
+    await this.prisma.$executeRawUnsafe(`
+CREATE TABLE IF NOT EXISTS "BeverageQty" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "branchId" TEXT,
+    "code" TEXT NOT NULL DEFAULT '',
+    "name" TEXT NOT NULL,
+    "ml" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "sort" INTEGER NOT NULL DEFAULT 0,
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "isDefault" BOOLEAN NOT NULL DEFAULT false,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "BeverageQty_pkey" PRIMARY KEY ("id")
+)`)
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "BeverageQty_companyId_idx" ON "BeverageQty"("companyId")`,
+    )
+    await this.prisma.$executeRawUnsafe(`
+CREATE TABLE IF NOT EXISTS "BeveragePrice" (
+    "id" TEXT NOT NULL,
+    "companyId" TEXT NOT NULL,
+    "branchId" TEXT,
+    "productId" TEXT NOT NULL,
+    "qtyId" TEXT NOT NULL,
+    "price" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "BeveragePrice_pkey" PRIMARY KEY ("id")
+)`)
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "BeveragePrice_companyId_idx" ON "BeveragePrice"("companyId")`,
+    )
+  }
+
+  async listCatalog(companyId: string, branchId?: string) {
     try {
       await this.ensureDiscountRateTable()
     } catch {
       /* ignore ensure failures; list still tries */
+    }
+    try {
+      await this.ensureBeverageTables()
+    } catch {
+      /* ignore */
+    }
+    try {
+      await this.ensureAddonMasterTable()
+    } catch {
+      /* ignore */
     }
     let discounts: Array<Record<string, unknown>> = []
     try {
@@ -587,6 +739,35 @@ ALTER TABLE "DiscountRate"
       `
     } catch {
       discounts = []
+    }
+    let beverageQtys: Array<Record<string, unknown>> = []
+    let beveragePrices: Array<Record<string, unknown>> = []
+    let addonMasters: Array<Record<string, unknown>> = []
+    try {
+      beverageQtys = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
+        SELECT * FROM "BeverageQty" WHERE "companyId" = ${companyId} ORDER BY sort ASC, name ASC
+      `
+      beveragePrices = branchId
+        ? await this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+            `SELECT * FROM "BeveragePrice"
+             WHERE "companyId" = $1 AND ("branchId" = $2 OR "branchId" IS NULL OR "branchId" = '')
+             ORDER BY "productId" ASC`,
+            companyId,
+            branchId,
+          )
+        : await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
+            SELECT * FROM "BeveragePrice" WHERE "companyId" = ${companyId} ORDER BY "productId" ASC
+          `
+    } catch {
+      beverageQtys = []
+      beveragePrices = []
+    }
+    try {
+      addonMasters = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
+        SELECT * FROM "AddonMaster" WHERE "companyId" = ${companyId} ORDER BY sort ASC, name ASC
+      `
+    } catch {
+      addonMasters = []
     }
     const [
       giftCards,
@@ -633,11 +814,72 @@ ALTER TABLE "DiscountRate"
       ])
     let tableAreas: Array<Record<string, unknown>> = []
     try {
-      tableAreas = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
-        SELECT * FROM "TableArea" WHERE "companyId" = ${companyId} ORDER BY sort ASC, name ASC
-      `
+      await this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "TableArea" ADD COLUMN IF NOT EXISTS "branchId" TEXT`,
+      )
+      // Legacy company-wide areas (null branchId) → Head Office only.
+      if (branchId) {
+        const branches = await this.prisma.branch.findMany({
+          where: { companyId },
+          select: { id: true, code: true, name: true },
+        })
+        const ho = branches.find((b) => {
+          const code = String(b.code || '').trim().toUpperCase()
+          const name = String(b.name || '').trim().toLowerCase()
+          return (
+            code === 'H001' ||
+            code === 'HO' ||
+            code === 'HQ' ||
+            name.includes('head office')
+          )
+        })
+        if (ho?.id) {
+          await this.prisma.$executeRawUnsafe(
+            `UPDATE "TableArea" SET "branchId" = $1
+             WHERE "companyId" = $2 AND ("branchId" IS NULL OR "branchId" = '')`,
+            ho.id,
+            companyId,
+          )
+        }
+        tableAreas = await this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+          `SELECT * FROM "TableArea"
+           WHERE "companyId" = $1 AND "branchId" = $2
+           ORDER BY sort ASC, name ASC`,
+          companyId,
+          branchId,
+        )
+      } else {
+        tableAreas = await this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+          `SELECT * FROM "TableArea" WHERE "companyId" = $1 ORDER BY sort ASC, name ASC`,
+          companyId,
+        )
+      }
     } catch {
       tableAreas = []
+    }
+    let stockLocations: Array<Record<string, unknown>> = []
+    let yieldLinks: Array<Record<string, unknown>> = []
+    try {
+      await this.ensureStockLocationTable()
+      stockLocations = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
+        SELECT * FROM "StockLocation" WHERE "companyId" = ${companyId} ORDER BY "sortOrder" ASC, label ASC
+      `
+    } catch {
+      stockLocations = []
+    }
+    try {
+      await this.ensureYieldLinkTable()
+      yieldLinks = branchId
+        ? await this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+            `SELECT * FROM "YieldLink" WHERE "companyId" = $1 AND "branchId" = $2 ORDER BY label ASC`,
+            companyId,
+            branchId,
+          )
+        : await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
+            SELECT * FROM "YieldLink" WHERE "companyId" = ${companyId} ORDER BY label ASC
+          `
+    } catch {
+      yieldLinks = []
     }
     return {
       giftCards,
@@ -652,6 +894,11 @@ ALTER TABLE "DiscountRate"
       deliveryRiders,
       printStations,
       tableAreas,
+      beverageQtys,
+      beveragePrices,
+      addonMasters,
+      stockLocations,
+      yieldLinks,
     }
   }
 
@@ -842,12 +1089,16 @@ ALTER TABLE "DiscountRate"
         const branchId = String(input.branchId ?? '')
         if (!branchId) throw new BadRequestException('branchId required')
         await assertBranchInCompany(this.prisma, branchId, companyId)
+        const taxIds = Array.isArray(input.taxIds)
+          ? (input.taxIds as unknown[]).map((x) => String(x)).filter(Boolean).slice(0, 1)
+          : []
         await this.prisma.$executeRawUnsafe(
-          `INSERT INTO "ExtraCharge" (id, "companyId", "branchId", name, amount, percent, active, sort, "updatedAt")
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          `INSERT INTO "ExtraCharge" (id, "companyId", "branchId", name, amount, percent, active, sort, "taxIds", "updatedAt")
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)
            ON CONFLICT (id) DO UPDATE SET
              "branchId" = EXCLUDED."branchId", name = EXCLUDED.name, amount = EXCLUDED.amount,
              percent = EXCLUDED.percent, active = EXCLUDED.active, sort = EXCLUDED.sort,
+             "taxIds" = EXCLUDED."taxIds",
              "updatedAt" = EXCLUDED."updatedAt"`,
           id,
           companyId,
@@ -857,6 +1108,7 @@ ALTER TABLE "DiscountRate"
           input.percent === true,
           input.active !== false,
           Number(input.sort ?? 0),
+          JSON.stringify(taxIds),
           now,
         )
         break
@@ -886,8 +1138,22 @@ ALTER TABLE "DiscountRate"
         const branchId = String(input.branchId ?? '')
         if (!branchId) throw new BadRequestException('branchId required')
         await assertBranchInCompany(this.prisma, branchId, companyId)
-        const kind = String(input.kind ?? 'receipt') === 'kot' ? 'kot' : 'receipt'
+        const kindRaw = String(input.kind ?? 'receipt')
+        const kind = kindRaw === 'kot' || kindRaw === 'bill' ? kindRaw : 'receipt'
         const templateRaw = String(input.templateId ?? (kind === 'kot' ? 'kitchen' : 'classic'))
+        const connectionRaw = input.connection == null ? null : String(input.connection)
+        const connection =
+          connectionRaw && ['browser', 'usb', 'lan', 'wifi'].includes(connectionRaw) ? connectionRaw : null
+        const purposes = Array.isArray(input.purposes)
+          ? JSON.stringify(
+              (input.purposes as unknown[])
+                .map(String)
+                .filter((p) => p === 'kot' || p === 'bill' || p === 'receipt'),
+            )
+          : null
+        const options =
+          input.options && typeof input.options === 'object' ? JSON.stringify(input.options) : null
+        const portNum = input.port == null ? null : Number(input.port)
         const allowed = [
           'classic',
           'compact',
@@ -904,14 +1170,21 @@ ALTER TABLE "DiscountRate"
             ? 'kitchen'
             : 'classic'
         await this.prisma.$executeRawUnsafe(
-          `INSERT INTO "PrintStation" (id, "companyId", "branchId", kind, name, target, copies, "paperWidthMm", "templateId", "departmentId", header, footer, active, sort, "updatedAt")
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          `INSERT INTO "PrintStation" (id, "companyId", "branchId", kind, name, target, copies, "paperWidthMm", "templateId", "departmentId", header, footer, active, sort, "updatedAt",
+             connection, host, port, purposes, options, "isDefault")
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20::jsonb,$21)
            ON CONFLICT (id) DO UPDATE SET
              "branchId" = EXCLUDED."branchId", kind = EXCLUDED.kind, name = EXCLUDED.name, target = EXCLUDED.target,
              copies = EXCLUDED.copies, "paperWidthMm" = EXCLUDED."paperWidthMm", "templateId" = EXCLUDED."templateId",
              "departmentId" = EXCLUDED."departmentId",
              header = EXCLUDED.header, footer = EXCLUDED.footer, active = EXCLUDED.active, sort = EXCLUDED.sort,
-             "updatedAt" = EXCLUDED."updatedAt"`,
+             "updatedAt" = EXCLUDED."updatedAt",
+             connection = COALESCE(EXCLUDED.connection, "PrintStation".connection),
+             host = CASE WHEN EXCLUDED.connection IS NULL THEN "PrintStation".host ELSE EXCLUDED.host END,
+             port = CASE WHEN EXCLUDED.connection IS NULL THEN "PrintStation".port ELSE EXCLUDED.port END,
+             purposes = COALESCE(EXCLUDED.purposes, "PrintStation".purposes),
+             options = COALESCE(EXCLUDED.options, "PrintStation".options),
+             "isDefault" = COALESCE(EXCLUDED."isDefault", "PrintStation"."isDefault")`,
           id,
           companyId,
           branchId,
@@ -927,23 +1200,163 @@ ALTER TABLE "DiscountRate"
           input.active !== false,
           Number(input.sort ?? 0),
           now,
+          connection,
+          connection && input.host ? String(input.host).trim() : null,
+          connection && portNum && Number.isFinite(portNum) ? Math.round(portNum) : null,
+          purposes,
+          options,
+          input.isDefault == null ? null : input.isDefault === true,
         )
         break
       }
-      case 'tableArea':
+      case 'tableArea': {
+        const areaBranchId = input.branchId ? String(input.branchId) : ''
+        if (!areaBranchId) throw new BadRequestException('branchId required for table area')
+        await assertBranchInCompany(this.prisma, areaBranchId, companyId)
         await this.prisma.$executeRawUnsafe(
-          `INSERT INTO "TableArea" (id, "companyId", name, sort, active, "updatedAt")
-           VALUES ($1,$2,$3,$4,$5,$6)
+          `ALTER TABLE "TableArea" ADD COLUMN IF NOT EXISTS "branchId" TEXT`,
+        )
+        await this.prisma.$executeRawUnsafe(
+          `INSERT INTO "TableArea" (id, "companyId", "branchId", name, sort, active, "updatedAt")
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
            ON CONFLICT (id) DO UPDATE SET
+             "branchId" = EXCLUDED."branchId",
              name = EXCLUDED.name, sort = EXCLUDED.sort, active = EXCLUDED.active, "updatedAt" = EXCLUDED."updatedAt"`,
           id,
           companyId,
+          areaBranchId,
           String(input.name ?? '').trim() || 'Area',
           Number(input.sort ?? input.sortOrder ?? 0) || 0,
           input.active !== false,
           now,
         )
         break
+      }
+      case 'beverageQty': {
+        await this.ensureBeverageTables()
+        if (input.isDefault === true) {
+          await this.prisma.$executeRawUnsafe(
+            `UPDATE "BeverageQty" SET "isDefault" = false WHERE "companyId" = $1 AND id <> $2`,
+            companyId,
+            id,
+          )
+        }
+        await this.prisma.$executeRawUnsafe(
+          `INSERT INTO "BeverageQty" (id, "companyId", "branchId", code, name, ml, sort, active, "isDefault", "updatedAt")
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT (id) DO UPDATE SET
+             "branchId" = EXCLUDED."branchId", code = EXCLUDED.code, name = EXCLUDED.name, ml = EXCLUDED.ml,
+             sort = EXCLUDED.sort, active = EXCLUDED.active, "isDefault" = EXCLUDED."isDefault",
+             "updatedAt" = EXCLUDED."updatedAt"`,
+          id,
+          companyId,
+          input.branchId ? String(input.branchId) : null,
+          String(input.code ?? ''),
+          String(input.name ?? '').trim() || 'Size',
+          Number(input.ml ?? 0),
+          Number(input.sort ?? 0),
+          input.active !== false,
+          input.isDefault === true,
+          now,
+        )
+        break
+      }
+      case 'beveragePrice': {
+        await this.ensureBeverageTables()
+        const productId = String(input.productId ?? '')
+        const qtyId = String(input.qtyId ?? '')
+        if (!productId || !qtyId) throw new BadRequestException('productId and qtyId required')
+        await this.prisma.$executeRawUnsafe(
+          `INSERT INTO "BeveragePrice" (id, "companyId", "branchId", "productId", "qtyId", price, "updatedAt")
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT (id) DO UPDATE SET
+             "branchId" = EXCLUDED."branchId", "productId" = EXCLUDED."productId", "qtyId" = EXCLUDED."qtyId",
+             price = EXCLUDED.price, "updatedAt" = EXCLUDED."updatedAt"`,
+          id,
+          companyId,
+          input.branchId ? String(input.branchId) : null,
+          productId,
+          qtyId,
+          Number(input.price ?? 0),
+          now,
+        )
+        break
+      }
+      case 'addonMaster': {
+        await this.ensureAddonMasterTable()
+        const addonsJson = JSON.stringify(
+          Array.isArray(input.addons) ? input.addons : [],
+        )
+        const min = Math.max(0, Math.floor(Number(input.min) || 0))
+        const max = Math.max(min, Math.floor(Number(input.max) || 99))
+        await this.prisma.$executeRawUnsafe(
+          `INSERT INTO "AddonMaster" (id, "companyId", "branchId", name, min, max, "appendVariationName", addons, sort, active, "updatedAt")
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           ON CONFLICT (id) DO UPDATE SET
+             "branchId" = EXCLUDED."branchId", name = EXCLUDED.name, min = EXCLUDED.min, max = EXCLUDED.max,
+             "appendVariationName" = EXCLUDED."appendVariationName", addons = EXCLUDED.addons,
+             sort = EXCLUDED.sort, active = EXCLUDED.active, "updatedAt" = EXCLUDED."updatedAt"`,
+          id,
+          companyId,
+          input.branchId ? String(input.branchId) : null,
+          String(input.name ?? '').trim() || 'Addon group',
+          min,
+          max,
+          input.appendVariationName === true,
+          addonsJson,
+          Number(input.sort ?? 0) || 0,
+          input.active !== false,
+          now,
+        )
+        break
+      }
+      case 'ingredient':
+        await this.upsertIngredient(input, companyId)
+        break
+      case 'stockLocation': {
+        await this.ensureStockLocationTable()
+        await this.prisma.$executeRawUnsafe(
+          `INSERT INTO "StockLocation" (id, "companyId", label, hint, type, active, "sortOrder", "updatedAt")
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT (id) DO UPDATE SET
+             label = EXCLUDED.label, hint = EXCLUDED.hint, type = EXCLUDED.type,
+             active = EXCLUDED.active, "sortOrder" = EXCLUDED."sortOrder", "updatedAt" = EXCLUDED."updatedAt"`,
+          id,
+          companyId,
+          String(input.label ?? '').trim() || id,
+          input.hint ? String(input.hint) : null,
+          String(input.type ?? 'other'),
+          input.active !== false,
+          Number(input.sortOrder ?? 0) || 0,
+          now,
+        )
+        break
+      }
+      case 'yieldLink': {
+        await this.ensureYieldLinkTable()
+        const ylBranch = String(input.branchId ?? '')
+        if (!ylBranch) throw new BadRequestException('branchId required for yield link')
+        await assertBranchInCompany(this.prisma, ylBranch, companyId)
+        await this.prisma.$executeRawUnsafe(
+          `INSERT INTO "YieldLink" (id, "companyId", "branchId", "fromSku", "toSku", "defaultYieldPct", label, note, active, "updatedAt")
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT (id) DO UPDATE SET
+             "branchId" = EXCLUDED."branchId", "fromSku" = EXCLUDED."fromSku", "toSku" = EXCLUDED."toSku",
+             "defaultYieldPct" = EXCLUDED."defaultYieldPct", label = EXCLUDED.label, note = EXCLUDED.note,
+             active = EXCLUDED.active, "updatedAt" = EXCLUDED."updatedAt"`,
+          id,
+          companyId,
+          ylBranch,
+          String(input.fromSku ?? '').trim(),
+          String(input.toSku ?? '').trim(),
+          Math.min(100, Math.max(1, Math.round(Number(input.defaultYieldPct) || 100))),
+          String(input.label ?? '').trim(),
+          input.note ? String(input.note) : null,
+          input.active !== false,
+          now,
+        )
+        break
+      }
       default:
         throw new BadRequestException(`Unknown catalog kind ${kind}`)
     }
@@ -951,6 +1364,26 @@ ALTER TABLE "DiscountRate"
   }
 
   async deleteCatalogRow(kind: string, id: string, companyId: string) {
+    if (kind === 'beverageQty') {
+      await this.ensureBeverageTables()
+      await this.prisma.$executeRawUnsafe(
+        `DELETE FROM "BeveragePrice" WHERE "companyId" = $1 AND "qtyId" = $2`,
+        companyId,
+        id,
+      )
+    }
+    if (kind === 'addonMaster') {
+      await this.ensureAddonMasterTable()
+    }
+    if (kind === 'stockLocation') {
+      await this.ensureStockLocationTable()
+    }
+    if (kind === 'yieldLink') {
+      await this.ensureYieldLinkTable()
+    }
+    if (kind === 'ingredient') {
+      await this.ensureIngredientTable()
+    }
     const tables: Record<string, string> = {
       giftCard: 'GiftCard',
       tax: 'TaxRate',
@@ -964,6 +1397,12 @@ ALTER TABLE "DiscountRate"
       deliveryRider: 'DeliveryRider',
       printStation: 'PrintStation',
       tableArea: 'TableArea',
+      beverageQty: 'BeverageQty',
+      beveragePrice: 'BeveragePrice',
+      addonMaster: 'AddonMaster',
+      ingredient: 'Ingredient',
+      stockLocation: 'StockLocation',
+      yieldLink: 'YieldLink',
     }
     const table = tables[kind]
     if (!table) throw new BadRequestException(`Unknown catalog kind ${kind}`)
@@ -1052,19 +1491,26 @@ ALTER TABLE "DiscountRate"
     const branchId = String(input.branchId ?? '')
     if (!id || !branchId) throw new BadRequestException('id and branchId required')
     await assertBranchInCompany(this.prisma, branchId, companyId)
-    const now = new Date()
     await this.prisma.$executeRawUnsafe(
-      `INSERT INTO "FloorTable" (id, "companyId", "branchId", label, seats, area, sort, active, "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `ALTER TABLE "FloorTable" ADD COLUMN IF NOT EXISTS "note" TEXT`,
+    )
+    const now = new Date()
+    const noteRaw = input.note != null ? String(input.note).trim() : ''
+    const note = noteRaw || null
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO "FloorTable" (id, "companyId", "branchId", label, seats, area, note, sort, active, "updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT (id) DO UPDATE SET
          "branchId" = EXCLUDED."branchId", label = EXCLUDED.label, seats = EXCLUDED.seats,
-         area = EXCLUDED.area, sort = EXCLUDED.sort, active = EXCLUDED.active, "updatedAt" = EXCLUDED."updatedAt"`,
+         area = EXCLUDED.area, note = EXCLUDED.note, sort = EXCLUDED.sort, active = EXCLUDED.active,
+         "updatedAt" = EXCLUDED."updatedAt"`,
       id,
       companyId,
       branchId,
       String(input.label ?? ''),
       Number(input.seats ?? 2),
       String(input.area ?? 'Main Hall'),
+      note,
       Number(input.sort ?? 0),
       input.active !== false,
       now,
@@ -1084,16 +1530,43 @@ ALTER TABLE "DiscountRate"
   }
 
   listStockItems(companyId: string, branchId?: string) {
+    const seedSkuList = [
+      'MEAT-RIB-300',
+      'MEAT-CHK-BR',
+      'DRY-ARB-1',
+      'PRD-TOM',
+      'DRY-BUR',
+      'BEV-LEM',
+      'BEV-ESP',
+      'DRY-CHO',
+      'DRY-OIL',
+      'SEA-BAS',
+      'DAIR-MILK',
+      'DRY-FLR',
+      'PRD-POT-RAW',
+      'PRD-POT-FRY',
+      'DRY-PAN-BLK',
+      'DRY-PAN-CKB',
+    ]
     if (branchId) {
-      return this.prisma.$queryRaw<Record<string, unknown>[]>`
-        SELECT * FROM "StockItem"
-        WHERE "companyId" = ${companyId} AND "branchId" = ${branchId}
-        ORDER BY name ASC
-      `
+      return this.prisma.$queryRawUnsafe(
+        `SELECT * FROM "StockItem"
+         WHERE "companyId" = $1 AND "branchId" = $2
+           AND NOT (id ~ '(^|:)(stk-)?s[0-9]+$' OR UPPER(COALESCE(sku,'')) = ANY($3::text[]))
+         ORDER BY name ASC`,
+        companyId,
+        branchId,
+        seedSkuList,
+      )
     }
-    return this.prisma.$queryRaw<Record<string, unknown>[]>`
-      SELECT * FROM "StockItem" WHERE "companyId" = ${companyId} ORDER BY name ASC
-    `
+    return this.prisma.$queryRawUnsafe(
+      `SELECT * FROM "StockItem"
+       WHERE "companyId" = $1
+         AND NOT (id ~ '(^|:)(stk-)?s[0-9]+$' OR UPPER(COALESCE(sku,'')) = ANY($2::text[]))
+       ORDER BY name ASC`,
+      companyId,
+      seedSkuList,
+    )
   }
 
   private async ensureIngredientTable() {
@@ -1125,7 +1598,49 @@ ALTER TABLE "DiscountRate"
       `ALTER TABLE "Ingredient" ADD COLUMN IF NOT EXISTS "defaultLocationId" TEXT`,
     )
     await this.prisma.$executeRawUnsafe(
+      `ALTER TABLE "Ingredient" ADD COLUMN IF NOT EXISTS "branchId" TEXT`,
+    )
+    await this.prisma.$executeRawUnsafe(
       `CREATE INDEX IF NOT EXISTS "Ingredient_companyId_idx" ON "Ingredient" ("companyId")`,
+    )
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "Ingredient_companyId_branchId_idx" ON "Ingredient" ("companyId", "branchId")`,
+    )
+  }
+
+  private async ensureStockLocationTable() {
+    await this.prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "StockLocation" (
+        id TEXT PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        label TEXT NOT NULL,
+        hint TEXT,
+        type TEXT NOT NULL DEFAULT 'other',
+        active BOOLEAN NOT NULL DEFAULT true,
+        "sortOrder" INTEGER NOT NULL DEFAULT 0,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`)
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "StockLocation_companyId_idx" ON "StockLocation" ("companyId")`,
+    )
+  }
+
+  private async ensureYieldLinkTable() {
+    await this.prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "YieldLink" (
+        id TEXT PRIMARY KEY,
+        "companyId" TEXT NOT NULL,
+        "branchId" TEXT NOT NULL,
+        "fromSku" TEXT NOT NULL,
+        "toSku" TEXT NOT NULL,
+        "defaultYieldPct" INTEGER NOT NULL DEFAULT 100,
+        label TEXT NOT NULL DEFAULT '',
+        note TEXT,
+        active BOOLEAN NOT NULL DEFAULT true,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`)
+    await this.prisma.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "YieldLink_companyId_branchId_idx" ON "YieldLink" ("companyId", "branchId")`,
     )
   }
 
@@ -1183,8 +1698,18 @@ ALTER TABLE "DiscountRate"
     )
   }
 
-  async listIngredients(companyId: string) {
+  async listIngredients(companyId: string, branchId?: string) {
     await this.ensureIngredientTable()
+    if (branchId) {
+      await assertBranchInCompany(this.prisma, branchId, companyId)
+      return this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
+        `SELECT * FROM "Ingredient"
+         WHERE "companyId" = $1 AND "branchId" = $2
+         ORDER BY name ASC`,
+        companyId,
+        branchId,
+      )
+    }
     return this.prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT * FROM "Ingredient" WHERE "companyId" = $1 ORDER BY name ASC`,
       companyId,
@@ -1195,8 +1720,34 @@ ALTER TABLE "DiscountRate"
     await this.ensureIngredientTable()
     const id = String(input.id ?? '')
     if (!id) throw new BadRequestException('id required')
+    const skuRaw = String(input.sku ?? '').trim()
+    const skuUpper = skuRaw.toUpperCase()
+    const seedSkus = new Set([
+      'MEAT-RIB-300',
+      'MEAT-CHK-BR',
+      'DRY-ARB-1',
+      'PRD-TOM',
+      'DRY-BUR',
+      'BEV-LEM',
+      'BEV-ESP',
+      'DRY-CHO',
+      'DRY-OIL',
+      'SEA-BAS',
+      'DAIR-MILK',
+      'DRY-FLR',
+      'PRD-POT-RAW',
+      'PRD-POT-FRY',
+      'DRY-PAN-BLK',
+      'DRY-PAN-CKB',
+    ])
+    if (/^s\d+$/.test(id) || seedSkus.has(skuUpper)) {
+      throw new BadRequestException('seed ingredients are not allowed')
+    }
     const name = String(input.name ?? '').trim()
     if (!name) throw new BadRequestException('name required')
+    const branchId = input.branchId ? String(input.branchId) : ''
+    if (!branchId) throw new BadRequestException('branchId required for ingredient')
+    await assertBranchInCompany(this.prisma, branchId, companyId)
     const now = new Date()
     const vendorId = input.vendorId ? String(input.vendorId).trim() || null : null
     const vendor = input.vendor ? String(input.vendor).trim() || null : null
@@ -1212,9 +1763,10 @@ ALTER TABLE "DiscountRate"
       ? String(input.defaultLocationId).trim() || null
       : null
     await this.prisma.$executeRawUnsafe(
-      `INSERT INTO "Ingredient" (id, "companyId", name, sku, category, unit, active, "vendorId", vendor, "vendorLinks", "reorderAt", "defaultLocationId", "updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13)
+      `INSERT INTO "Ingredient" (id, "companyId", "branchId", name, sku, category, unit, active, "vendorId", vendor, "vendorLinks", "reorderAt", "defaultLocationId", "updatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14)
        ON CONFLICT (id) DO UPDATE SET
+         "branchId" = EXCLUDED."branchId",
          name = EXCLUDED.name, sku = EXCLUDED.sku, category = EXCLUDED.category,
          unit = EXCLUDED.unit, active = EXCLUDED.active,
          "vendorId" = EXCLUDED."vendorId", vendor = EXCLUDED.vendor,
@@ -1223,8 +1775,9 @@ ALTER TABLE "DiscountRate"
          "updatedAt" = EXCLUDED."updatedAt"`,
       id,
       companyId,
+      branchId,
       name,
-      String(input.sku ?? ''),
+      skuRaw,
       String(input.category ?? ''),
       String(input.unit ?? 'pcs'),
       input.active !== false,
@@ -1252,16 +1805,50 @@ ALTER TABLE "DiscountRate"
   async upsertStockItem(input: Record<string, unknown>, companyId: string) {
     const id = String(input.id ?? '')
     if (!id) throw new BadRequestException('id required')
+    const skuUpper = String(input.sku ?? '').trim().toUpperCase()
+    const seedSkus = new Set([
+      'MEAT-RIB-300',
+      'MEAT-CHK-BR',
+      'DRY-ARB-1',
+      'PRD-TOM',
+      'DRY-BUR',
+      'BEV-LEM',
+      'BEV-ESP',
+      'DRY-CHO',
+      'DRY-OIL',
+      'SEA-BAS',
+      'DAIR-MILK',
+      'DRY-FLR',
+      'PRD-POT-RAW',
+      'PRD-POT-FRY',
+      'DRY-PAN-BLK',
+      'DRY-PAN-CKB',
+    ])
+    const bare = id.includes(':') ? id.slice(id.indexOf(':') + 1) : id
+    const bareNoStk = bare.startsWith('stk-') ? bare.slice(4) : bare
+    if (/^s\d+$/.test(bare) || /^s\d+$/.test(bareNoStk) || seedSkus.has(skuUpper)) {
+      throw new BadRequestException('seed stock items are not allowed')
+    }
+    const branchId = input.branchId ? String(input.branchId) : ''
+    if (!branchId) throw new BadRequestException('branchId required for stock')
+    await assertBranchInCompany(this.prisma, branchId, companyId)
     const now = new Date()
     const statedOnHand =
       input.onHand != null && Number.isFinite(Number(input.onHand)) ? Number(input.onHand) : null
     const delta = input.delta != null && Number.isFinite(Number(input.delta)) ? Number(input.delta) : null
-    let onHand = statedOnHand ?? 0
-    if (statedOnHand == null && delta != null) {
+    let onHand = 0
+    if (delta != null) {
       const rows = await this.prisma.$queryRaw<Array<{ onHand: number }>>`
         SELECT "onHand" FROM "StockItem" WHERE id = ${id} AND "companyId" = ${companyId} LIMIT 1
       `
       onHand = Math.max(0, Math.round(((rows[0]?.onHand ?? 0) + delta) * 100) / 100)
+    } else if (statedOnHand != null) {
+      onHand = statedOnHand
+    } else {
+      const rows = await this.prisma.$queryRaw<Array<{ onHand: number }>>`
+        SELECT "onHand" FROM "StockItem" WHERE id = ${id} AND "companyId" = ${companyId} LIMIT 1
+      `
+      onHand = rows[0]?.onHand ?? 0
     }
     await this.ensureStockIngredientColumn()
     await this.ensureStockLocationColumn()
@@ -1272,12 +1859,13 @@ ALTER TABLE "DiscountRate"
       `INSERT INTO "StockItem" (id, "companyId", "branchId", "ingredientId", name, sku, category, unit, "onHand", "locationBalances", "reorderAt", cost, "vendorId", vendor, "updatedAt")
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15)
        ON CONFLICT (id) DO UPDATE SET
+         "branchId" = EXCLUDED."branchId",
          "ingredientId" = EXCLUDED."ingredientId", name = EXCLUDED.name, sku = EXCLUDED.sku, category = EXCLUDED.category, unit = EXCLUDED.unit,
          "onHand" = EXCLUDED."onHand", "locationBalances" = EXCLUDED."locationBalances", "reorderAt" = EXCLUDED."reorderAt", cost = EXCLUDED.cost,
          "vendorId" = EXCLUDED."vendorId", vendor = EXCLUDED.vendor, "updatedAt" = EXCLUDED."updatedAt"`,
       id,
       companyId,
-      input.branchId ? String(input.branchId) : null,
+      branchId,
       ingredientId,
       String(input.name ?? 'Item'),
       String(input.sku ?? ''),

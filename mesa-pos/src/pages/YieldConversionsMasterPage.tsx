@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getPermissions } from '../auth/roles'
 import { HubFooter, HubHeader } from '../components/HubChrome'
@@ -14,8 +14,10 @@ import {
   type YieldLink,
 } from '../data/stockYieldLinks'
 import { settingsHubPath } from '../lib/settingsHub'
+import { pushCatalogDelete, pushCatalogRow } from '../lib/catalogPush'
 import { useI18n } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
+import { useBranch } from '../state/BranchContext'
 import { usePos } from '../state/PosContext'
 
 function emptyRow(): YieldLink {
@@ -37,15 +39,21 @@ function autoLabel(fromName: string, toName: string) {
 
 export default function YieldConversionsMasterPage() {
   const { user } = useAuth()
+  const { activeBranchId } = useBranch()
   const { flash, stock } = usePos()
   const { t } = useI18n()
   const canAccess = user ? getPermissions(user.role).canMasters || user.role === 'admin' : false
 
-  const [rows, setRows] = useState<YieldLink[]>(() => loadYieldLinks())
+  const [rows, setRows] = useState<YieldLink[]>(() => loadYieldLinks(activeBranchId))
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<YieldLink | null>(null)
   const [isNew, setIsNew] = useState(false)
   const { askDelete, deleteConfirmDialog } = useDeleteConfirm()
+
+  useEffect(() => {
+    setRows(loadYieldLinks(activeBranchId))
+    setEditing(null)
+  }, [activeBranchId])
 
   const skuOptions = useMemo(() => stockSkuOptions(stock), [stock])
   const stockBySku = useMemo(() => new Map(stock.map((s) => [s.sku, s])), [stock])
@@ -67,12 +75,12 @@ export default function YieldConversionsMasterPage() {
   }, [rows, query, stockBySku])
 
   function refresh() {
-    setRows(loadYieldLinks())
+    setRows(loadYieldLinks(activeBranchId))
   }
 
   function startAdd() {
     setIsNew(true)
-    setEditing(emptyRow())
+    setEditing({ ...emptyRow(), branchId: activeBranchId })
   }
 
   function startEdit(row: YieldLink) {
@@ -116,8 +124,10 @@ export default function YieldConversionsMasterPage() {
       defaultYieldPct: Math.min(100, Math.max(1, Number(editing.defaultYieldPct) || 100)),
       note: editing.note?.trim() || undefined,
       active: editing.active !== false,
+      branchId: activeBranchId,
     }
-    upsertYieldLink(doc)
+    upsertYieldLink(doc, activeBranchId)
+    pushCatalogRow('yieldLink', doc)
     refresh()
     setEditing(null)
     flash(isNew ? `Conversion “${label}” added` : `Conversion “${label}” saved`)
@@ -128,7 +138,8 @@ export default function YieldConversionsMasterPage() {
     askDelete({
       name: editing.label,
       onConfirm: () => {
-        deleteYieldLink(editing.id)
+        deleteYieldLink(editing.id, activeBranchId)
+        pushCatalogDelete('yieldLink', editing.id)
         refresh()
         setEditing(null)
         flash('Conversion deleted')

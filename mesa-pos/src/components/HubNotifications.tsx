@@ -2,12 +2,19 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { loadNotifyLog } from '../data/deliveryIntegrations'
+import {
+  incomingBranchTransfers,
+  pendingBranchDispatch,
+  TRANSFERS_CHANGED,
+  transferItemName,
+} from '../data/stockTransfers'
 import { resolveDeliveryColumn } from '../lib/deliveryBoard'
 import {
   isExternalChannelOrder,
   needsChannelAccept,
 } from '../lib/ksaDelivery'
 import { useI18n } from '../locale/i18n'
+import { useBranch } from '../state/BranchContext'
 import { usePos } from '../state/PosContext'
 import { useSync } from '../sync/SyncContext'
 
@@ -22,8 +29,16 @@ export type HubNotificationItem = {
 
 export function useHubNotifications(): HubNotificationItem[] {
   const { tickets } = usePos()
-  const { connectivity, queued, outbox } = useSync()
+  const { activeBranchId } = useBranch()
+  const { connectivity, queued, outbox, syncEpoch } = useSync()
   const { t } = useI18n()
+  const [transferTick, setTransferTick] = useState(0)
+
+  useEffect(() => {
+    const bump = () => setTransferTick((n) => n + 1)
+    window.addEventListener(TRANSFERS_CHANGED, bump)
+    return () => window.removeEventListener(TRANSFERS_CHANGED, bump)
+  }, [])
 
   return useMemo(() => {
     const items: HubNotificationItem[] = []
@@ -53,6 +68,28 @@ export function useHubNotifications(): HubNotificationItem[] {
         title: `${courierReady.length} order${courierReady.length > 1 ? 's' : ''} ready for platform courier`,
         to: '/courier',
         tone: 'info',
+      })
+    }
+
+    const incoming = incomingBranchTransfers(activeBranchId)
+    for (const row of incoming) {
+      items.push({
+        id: `xfer-receive-${row.id}`,
+        title: `Approve receive · ${transferItemName(row)}`,
+        hint: `${row.qty} ${row.unit} from ${row.fromBranchName || 'branch'}`,
+        to: '/settings/inventory/transfer',
+        tone: 'warn',
+      })
+    }
+
+    const dispatchPending = pendingBranchDispatch(activeBranchId)
+    for (const row of dispatchPending) {
+      items.push({
+        id: `xfer-dispatch-${row.id}`,
+        title: `Approve & dispatch · ${transferItemName(row)}`,
+        hint: `${row.qty} ${row.unit} requested by ${row.toBranchName || 'branch'}`,
+        to: '/settings/inventory/transfer',
+        tone: 'warn',
       })
     }
 
@@ -98,7 +135,7 @@ export function useHubNotifications(): HubNotificationItem[] {
     }
 
     return items
-  }, [tickets, outbox, queued, connectivity, t])
+  }, [tickets, outbox, queued, connectivity, t, activeBranchId, transferTick, syncEpoch])
 }
 
 export default function HubNotifications({ onSync }: { onSync?: () => void }) {

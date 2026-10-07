@@ -20,13 +20,14 @@ const allNav = [
   'online',
   'kitchen',
   'inventory',
+  'expenses',
+  'accounts',
   'suppliers',
   'purchase-orders',
   'crm',
   'masters',
   'settings',
   'back-office',
-  'expenses',
 ] as const
 
 const templateNav = ['dine-in', 'kitchen', 'takeaway', 'crm']
@@ -49,10 +50,12 @@ export function navRequiredByFlags(flags: Omit<AccessFlags, 'nav'>): string[] {
     keys.add('settings')
     keys.add('masters')
     keys.add('expenses')
+    keys.add('accounts')
   }
   if (flags.canBackOffice) {
     keys.add('back-office')
     keys.add('expenses')
+    keys.add('accounts')
   }
   if (flags.canManageUsers) keys.add('settings')
   return [...keys]

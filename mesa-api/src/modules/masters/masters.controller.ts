@@ -1,6 +1,14 @@
 import { Body, Controller, Delete, Get, Inject, Param, Put, Query, Req, UseGuards } from '@nestjs/common'
 import { JwtAuthGuard, requireCompany, type JwtUser } from '../auth/jwt.guard'
+import { notifyMastersChanged } from '../sync/bus'
 import { MastersService } from './masters.service'
+
+/** After every REST write, tell peers to refresh (web ↔ desktop live sync). */
+async function afterMastersWrite<T>(work: Promise<T>): Promise<T> {
+  const result = await work
+  notifyMastersChanged('api')
+  return result
+}
 
 @Controller('masters')
 @UseGuards(JwtAuthGuard)
@@ -14,7 +22,7 @@ export class MastersController {
 
   @Put('company')
   putCompany(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertCompany(body, requireCompany(req.user))
+    return afterMastersWrite(this.masters.upsertCompany(body, requireCompany(req.user)))
   }
 
   @Get('branches')
@@ -24,12 +32,12 @@ export class MastersController {
 
   @Put('branches')
   putBranch(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertBranch(body, requireCompany(req.user))
+    return afterMastersWrite(this.masters.upsertBranch(body, requireCompany(req.user)))
   }
 
   @Delete('branches/:id')
   deleteBranch(@Req() req: { user?: JwtUser }, @Param('id') id: string) {
-    return this.masters.deleteBranch(id, requireCompany(req.user))
+    return afterMastersWrite(this.masters.deleteBranch(id, requireCompany(req.user)))
   }
 
   @Get('categories')
@@ -39,15 +47,17 @@ export class MastersController {
 
   @Put('categories')
   putCategory(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertCategory(
-      { ...body, branchId: body.branchId ?? req.user?.branchId },
-      requireCompany(req.user),
+    return afterMastersWrite(
+      this.masters.upsertCategory(
+        { ...body, branchId: body.branchId ?? req.user?.branchId },
+        requireCompany(req.user),
+      ),
     )
   }
 
   @Delete('categories/:id')
   deleteCategory(@Req() req: { user?: JwtUser }, @Param('id') id: string) {
-    return this.masters.deleteCategory(id, requireCompany(req.user))
+    return afterMastersWrite(this.masters.deleteCategory(id, requireCompany(req.user)))
   }
 
   @Get('products')
@@ -57,20 +67,25 @@ export class MastersController {
 
   @Put('products')
   putProduct(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertProduct(
-      { ...body, branchId: body.branchId ?? req.user?.branchId },
-      requireCompany(req.user),
+    return afterMastersWrite(
+      this.masters.upsertProduct(
+        { ...body, branchId: body.branchId ?? req.user?.branchId },
+        requireCompany(req.user),
+      ),
     )
   }
 
   @Delete('products/:id')
   deleteProduct(@Req() req: { user?: JwtUser }, @Param('id') id: string) {
-    return this.masters.deleteProduct(id, requireCompany(req.user))
+    return afterMastersWrite(this.masters.deleteProduct(id, requireCompany(req.user)))
   }
 
   @Get('catalog')
-  catalog(@Req() req: { user?: JwtUser }) {
-    return this.masters.listCatalog(requireCompany(req.user))
+  catalog(@Req() req: { user?: JwtUser }, @Query('branchId') branchId?: string) {
+    return this.masters.listCatalog(
+      requireCompany(req.user),
+      branchId ?? req.user?.branchId,
+    )
   }
 
   @Put('catalog/:kind')
@@ -79,7 +94,7 @@ export class MastersController {
     @Param('kind') kind: string,
     @Body() body: Record<string, unknown>,
   ) {
-    return this.masters.upsertCatalogRow(kind, body, requireCompany(req.user))
+    return afterMastersWrite(this.masters.upsertCatalogRow(kind, body, requireCompany(req.user)))
   }
 
   @Delete('catalog/:kind/:id')
@@ -88,15 +103,17 @@ export class MastersController {
     @Param('kind') kind: string,
     @Param('id') id: string,
   ) {
-    return this.masters.deleteCatalogRow(kind, id, requireCompany(req.user))
+    return afterMastersWrite(this.masters.deleteCatalogRow(kind, id, requireCompany(req.user)))
   }
 
   @Put('gift-cards/redeem')
   redeemGiftCard(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.redeemGiftCard(
-      String(body.id ?? ''),
-      requireCompany(req.user),
-      Number(body.amount ?? 0),
+    return afterMastersWrite(
+      this.masters.redeemGiftCard(
+        String(body.id ?? ''),
+        requireCompany(req.user),
+        Number(body.amount ?? 0),
+      ),
     )
   }
 
@@ -107,30 +124,48 @@ export class MastersController {
 
   @Put('customers')
   putCustomer(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertCustomer(
-      { ...body, branchId: body.branchId ?? req.user?.branchId },
-      requireCompany(req.user),
+    return afterMastersWrite(
+      this.masters.upsertCustomer(
+        { ...body, branchId: body.branchId ?? req.user?.branchId },
+        requireCompany(req.user),
+      ),
     )
   }
 
   @Get('food-vouchers')
-  foodVouchers(@Req() req: { user?: JwtUser }) {
-    return this.masters.listFoodVouchers(requireCompany(req.user))
+  foodVouchers(@Req() req: { user?: JwtUser }, @Query('branchId') branchId?: string) {
+    return this.masters.listFoodVouchers(
+      requireCompany(req.user),
+      branchId ?? req.user?.branchId,
+    )
   }
 
   @Put('food-vouchers')
   putFoodVoucher(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertFoodVoucherBatch(body, requireCompany(req.user))
+    return afterMastersWrite(
+      this.masters.upsertFoodVoucherBatch(
+        {
+          ...body,
+          branchId:
+            body.branchId ??
+            (body.batch as { branchId?: string } | undefined)?.branchId ??
+            req.user?.branchId,
+        },
+        requireCompany(req.user),
+      ),
+    )
   }
 
   @Put('food-vouchers/redeem')
   redeemFoodVoucher(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.redeemFoodVoucherCode(String(body.id ?? ''), requireCompany(req.user))
+    return afterMastersWrite(
+      this.masters.redeemFoodVoucherCode(String(body.id ?? ''), requireCompany(req.user)),
+    )
   }
 
   @Delete('food-vouchers/:id')
   deleteFoodVoucher(@Req() req: { user?: JwtUser }, @Param('id') id: string) {
-    return this.masters.deleteFoodVoucherBatch(id, requireCompany(req.user))
+    return afterMastersWrite(this.masters.deleteFoodVoucherBatch(id, requireCompany(req.user)))
   }
 
   @Get('vendors')
@@ -140,17 +175,17 @@ export class MastersController {
 
   @Put('vendors')
   putVendor(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertVendor(body, requireCompany(req.user))
+    return afterMastersWrite(this.masters.upsertVendor(body, requireCompany(req.user)))
   }
 
   @Put('vendors/ledger')
   putVendorLedger(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertVendorLedger(body, requireCompany(req.user))
+    return afterMastersWrite(this.masters.upsertVendorLedger(body, requireCompany(req.user)))
   }
 
   @Delete('vendors/:id')
   deleteVendor(@Req() req: { user?: JwtUser }, @Param('id') id: string) {
-    return this.masters.deleteVendor(id, requireCompany(req.user))
+    return afterMastersWrite(this.masters.deleteVendor(id, requireCompany(req.user)))
   }
 
   @Get('floor')
@@ -160,12 +195,12 @@ export class MastersController {
 
   @Put('floor')
   putFloor(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertFloorTable(body, requireCompany(req.user))
+    return afterMastersWrite(this.masters.upsertFloorTable(body, requireCompany(req.user)))
   }
 
   @Delete('floor/:id')
   deleteFloor(@Req() req: { user?: JwtUser }, @Param('id') id: string) {
-    return this.masters.deleteFloorTable(id, requireCompany(req.user))
+    return afterMastersWrite(this.masters.deleteFloorTable(id, requireCompany(req.user)))
   }
 
   @Get('stock')
@@ -175,22 +210,30 @@ export class MastersController {
 
   @Put('stock')
   putStock(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertStockItem(body, requireCompany(req.user))
+    return afterMastersWrite(this.masters.upsertStockItem(body, requireCompany(req.user)))
   }
 
   @Get('ingredients')
-  ingredients(@Req() req: { user?: JwtUser }) {
-    return this.masters.listIngredients(requireCompany(req.user))
+  ingredients(@Req() req: { user?: JwtUser }, @Query('branchId') branchId?: string) {
+    return this.masters.listIngredients(
+      requireCompany(req.user),
+      branchId ?? req.user?.branchId,
+    )
   }
 
   @Put('ingredients')
   putIngredient(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertIngredient(body, requireCompany(req.user))
+    return afterMastersWrite(
+      this.masters.upsertIngredient(
+        { ...body, branchId: body.branchId ?? req.user?.branchId },
+        requireCompany(req.user),
+      ),
+    )
   }
 
   @Delete('ingredients/:id')
   deleteIngredient(@Req() req: { user?: JwtUser }, @Param('id') id: string) {
-    return this.masters.deleteIngredient(requireCompany(req.user), id)
+    return afterMastersWrite(this.masters.deleteIngredient(requireCompany(req.user), id))
   }
 
   @Get('receipts')
@@ -200,9 +243,11 @@ export class MastersController {
 
   @Put('receipts')
   putReceipt(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertStockReceipt(
-      { ...body, branchId: body.branchId ?? req.user?.branchId },
-      requireCompany(req.user),
+    return afterMastersWrite(
+      this.masters.upsertStockReceipt(
+        { ...body, branchId: body.branchId ?? req.user?.branchId },
+        requireCompany(req.user),
+      ),
     )
   }
 
@@ -213,9 +258,11 @@ export class MastersController {
 
   @Put('purchase-orders')
   putPurchaseOrder(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertPurchaseOrder(
-      { ...body, branchId: body.branchId ?? req.user?.branchId },
-      requireCompany(req.user),
+    return afterMastersWrite(
+      this.masters.upsertPurchaseOrder(
+        { ...body, branchId: body.branchId ?? req.user?.branchId },
+        requireCompany(req.user),
+      ),
     )
   }
 
@@ -226,9 +273,11 @@ export class MastersController {
 
   @Put('stock-transfers')
   putStockTransfer(@Req() req: { user?: JwtUser }, @Body() body: Record<string, unknown>) {
-    return this.masters.upsertStockTransfer(
-      { ...body, branchId: body.branchId ?? req.user?.branchId },
-      requireCompany(req.user),
+    return afterMastersWrite(
+      this.masters.upsertStockTransfer(
+        { ...body, branchId: body.branchId ?? req.user?.branchId },
+        requireCompany(req.user),
+      ),
     )
   }
 }

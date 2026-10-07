@@ -28,8 +28,19 @@ export function insertIntoFocusedField(text: string) {
   else el.value = next
 
   const caret = start + text.length
-  el.setSelectionRange(caret, caret)
-  el.dispatchEvent(new Event('input', { bubbles: true }))
+  try {
+    el.setSelectionRange(caret, caret)
+  } catch {
+    /* some input types reject selection */
+  }
+  el.dispatchEvent(
+    new InputEvent('input', {
+      bubbles: true,
+      cancelable: true,
+      data: text,
+      inputType: 'insertText',
+    }),
+  )
   el.dispatchEvent(new Event('change', { bubbles: true }))
   return true
 }

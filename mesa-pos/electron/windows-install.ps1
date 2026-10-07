@@ -27,7 +27,7 @@ foreach ($shortcut in @($desktop, $startMenu)) {
   $link.TargetPath = $exe
   $link.WorkingDirectory = $dest
   $link.WindowStyle = 1
-  $link.Description = 'Mesa KSA Restaurant POS'
+  $link.Description = 'Isarva Restaurant POS'
   $link.Save()
 }
 

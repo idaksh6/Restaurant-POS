@@ -22,17 +22,27 @@ export function sameFloorTable(a?: string | null, b?: string | null) {
   return a === b || unscopedFloorId(a) === unscopedFloorId(b)
 }
 
+/** Fired after peer floor.upsert / local floor writes so UI can soft-refresh without remounting. */
+export const FLOOR_SYNC_EVENT = 'mesa:floor-synced'
+
+export function notifyFloorSynced() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event(FLOOR_SYNC_EVENT))
+}
+
 export function alignFloorTableId(tableId: string | undefined, layout: { id: string }[]) {
   if (!tableId) return tableId
   return layout.find((row) => sameFloorTable(row.id, tableId))?.id ?? tableId
 }
 
 function asLayout(row: FloorTableRow): Table {
+  const note = row.note?.trim()
   return {
     id: row.id,
     label: row.label,
     seats: row.seats,
     area: row.area,
+    note: note || undefined,
     status: 'free',
   }
 }
@@ -48,10 +58,14 @@ export const floorRepo = {
       const br = r.branchId ?? branchId
       return { ...r, id: scopedFloorId(String(r.id), br), branchId: br, status: 'free' as const }
     })
-    const others = (await mesaDb.floorTables.toArray()).filter((r) => r.branchId && r.branchId !== branchId)
-    await mesaDb.floorTables.clear()
-    const all = [...others, ...incoming]
-    if (all.length) await mesaDb.floorTables.bulkPut(all)
+    const existing = await mesaDb.floorTables.toArray()
+    const dropIds = existing
+      .filter((r) => !r.branchId || r.branchId === branchId)
+      .map((r) => r.id)
+      .filter((id) => !incoming.some((r) => r.id === id))
+    // Prefer surgical deletes over clear() so peer soft-reloads never see an empty floor mid-write.
+    if (dropIds.length) await mesaDb.floorTables.bulkDelete(dropIds)
+    if (incoming.length) await mesaDb.floorTables.bulkPut(incoming)
     return incoming.map(asLayout)
   },
 

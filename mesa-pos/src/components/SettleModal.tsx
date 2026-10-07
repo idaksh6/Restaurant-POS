@@ -5,7 +5,12 @@ import MesaSelect from './MesaSelect'
 import FoodVoucherPayModal, { type FoodVoucherPayResult } from './FoodVoucherPayModal'
 import { money } from '../data/mock'
 import { paymentParents, ensurePaymentTypes, type PaymentParent } from '../data/paymentTypes'
+import {
+  methodNeedsCardTerminal,
+  requestCardPayment,
+} from '../hardware/cardTerminal'
 import { paymentMethods } from '../locale/saudi'
+import { useI18n, type Dict } from '../locale/i18n'
 import { SAR_PER_POINT } from '../state/CrmContext'
 import { useCatalog } from '../state/CatalogContext'
 
@@ -14,6 +19,8 @@ const singleMethods = paymentMethods.filter((m) => m !== 'Split bill')
 export type SplitPayment = {
   method: string
   amount: number
+  cardAuthCode?: string
+  cardRrn?: string
 }
 
 export type SettleResult = {
@@ -22,6 +29,8 @@ export type SettleResult = {
   splitPayments?: SplitPayment[]
   tendered?: number
   change?: number
+  /** Cash whole-riyal round-up absorbed into the bill (no change given). */
+  roundOff?: number
   customerId?: string
   loyaltyRedeemPts?: number
   loyaltyRedeemSar?: number
@@ -31,6 +40,8 @@ export type SettleResult = {
   foodVoucherId?: string
   foodVoucherCode?: string
   foodVoucherAmount?: number
+  cardAuthCode?: string
+  cardRrn?: string
 }
 
 export type SettleCustomer = {
@@ -47,6 +58,11 @@ type Props = {
   startInSplit?: boolean
   customers?: SettleCustomer[]
   preselectCustomerId?: string
+  /**
+   * Amount still due after food voucher (pre-VAT discount) and loyalty.
+   * Defaults to total − voucher − loyalty when omitted.
+   */
+  computeDue?: (voucherSar: number, loyaltySar: number) => number
   onClose: () => void
   onConfirm: (result: SettleResult) => void
 }
@@ -55,6 +71,21 @@ type SplitMode = 'equal' | 'custom'
 
 const quickDenoms = [5, 10, 20, 50, 100, 500]
 
+function parentPayLabel(id: PaymentParent, t: Dict): string {
+  switch (id) {
+    case 'cash':
+      return t.cash
+    case 'card':
+      return t.card
+    case 'voucher':
+      return t.settlePayVoucher
+    case 'online':
+      return t.settlePayOnline
+    case 'other':
+      return t.settlePayOther
+  }
+}
+
 export default function SettleModal({
   total,
   title,
@@ -62,9 +93,11 @@ export default function SettleModal({
   startInSplit = false,
   customers = [],
   preselectCustomerId,
+  computeDue,
   onClose,
   onConfirm,
 }: Props) {
+  const { t } = useI18n()
   const { paymentTypes } = useCatalog()
   const payTypes = useMemo(
     () => ensurePaymentTypes(paymentTypes).filter((p) => p.active),
@@ -86,6 +119,8 @@ export default function SettleModal({
   const [showFoodVoucher, setShowFoodVoucher] = useState(false)
   const [pendingGift, setPendingGift] = useState<GiftCardPayResult | null>(null)
   const [pendingVoucher, setPendingVoucher] = useState<FoodVoucherPayResult | null>(null)
+  const [cardBusy, setCardBusy] = useState(false)
+  const [cardError, setCardError] = useState('')
 
   const customer = customers.find((c) => c.id === customerId)
   const redeemPtsNum = Math.min(
@@ -94,20 +129,40 @@ export default function SettleModal({
   )
   const redeemSar = Math.round(redeemPtsNum * SAR_PER_POINT * 100) / 100
   const voucherSar = pendingVoucher?.amount ?? 0
-  const due = Math.max(0, Math.round((total - redeemSar - voucherSar) * 100) / 100)
+  const due = Math.max(
+    0,
+    Math.round(
+      (computeDue
+        ? computeDue(voucherSar, redeemSar)
+        : total - redeemSar - voucherSar) * 100,
+    ) / 100,
+  )
 
   const cashValue = Number(tendered) || 0
   const change = cashValue - due
   const perPart = due / parts
 
-  const paid = payments.reduce((s, p) => s + p.amount, 0)
+  const paid = Math.round(payments.reduce((s, p) => s + p.amount, 0) * 100) / 100
   const remaining = Math.max(0, Math.round((due - paid) * 100) / 100)
-  const isFullyPaid = remaining < 0.01
+  const overage = Math.max(0, Math.round((paid - due) * 100) / 100)
+  const isFullyPaid = remaining < 0.01 && overage < 0.01
+  const isOverpaid = overage >= 0.01
 
   const quickCash = useMemo(() => {
     const rounded = Math.ceil(due / 5) * 5
     return [rounded, rounded + 10, rounded + 20, rounded + 50]
   }, [due])
+
+  /** Whole SAR within +1, or first quick-cash (ceil to 5 SAR) — absorb into bill, no change. */
+  const cashRoundOff = useMemo(() => {
+    if (cashValue <= due) return 0
+    const delta = Math.round((cashValue - due) * 100) / 100
+    if (delta <= 0) return 0
+    const nearestFive = Math.ceil(due / 5) * 5
+    const wholeSar = Number.isInteger(cashValue) && delta <= 0.999
+    const quickRound = Math.abs(cashValue - nearestFive) < 0.001 && delta < 5
+    return wholeSar || quickRound ? delta : 0
+  }, [cashValue, due])
 
   const subTypes =
     parentPick != null ? payTypes.filter((p) => p.parent === parentPick) : []
@@ -128,6 +183,34 @@ export default function SettleModal({
     }
   }
 
+  async function runSoftPos(
+    methodName: string,
+    amountSar: number,
+  ): Promise<{ ok: true; authCode: string; rrn: string } | { ok: false }> {
+    if (!methodNeedsCardTerminal(methodName, payTypes)) {
+      return { ok: true, authCode: '', rrn: '' }
+    }
+    setCardBusy(true)
+    setCardError('')
+    try {
+      const result = await requestCardPayment({
+        amountSar: Math.round(amountSar * 100) / 100,
+        currency: 'SAR',
+        reference: `SET-${Date.now()}-${Math.floor(Math.random() * 9999)}`,
+      })
+      if (!result.ok) {
+        setCardError(result.reason || t.softposSettleFail)
+        return { ok: false }
+      }
+      return { ok: true, authCode: result.authCode, rrn: result.rrn }
+    } catch (err) {
+      setCardError(err instanceof Error ? err.message : t.softposSettleFail)
+      return { ok: false }
+    } finally {
+      setCardBusy(false)
+    }
+  }
+
   function appendDigit(d: string) {
     if (d === 'X') {
       setTendered((v) => v.slice(0, -1))
@@ -137,18 +220,60 @@ export default function SettleModal({
     setTendered((v) => `${v}${d}`)
   }
 
-  function addPayment() {
+  async function addPayment() {
+    if (cardBusy) return
     const amount = Number(payAmount)
     if (!amount || amount <= 0) return
-    const nextAmount = Math.min(amount, remaining || due)
+    if (remaining < 0.01) return
+    const nextAmount = Math.min(amount, remaining)
     if (nextAmount <= 0) return
-    setPayments((prev) => [...prev, { method: payMethod, amount: Math.round(nextAmount * 100) / 100 }])
+    const soft = await runSoftPos(payMethod, nextAmount)
+    if (!soft.ok) return
+    const label =
+      soft.authCode && methodNeedsCardTerminal(payMethod, payTypes)
+        ? `${payMethod} · ${soft.authCode}`
+        : payMethod
+    setPayments((prev) => [
+      ...prev,
+      {
+        method: label,
+        amount: Math.round(nextAmount * 100) / 100,
+        cardAuthCode: soft.authCode || undefined,
+        cardRrn: soft.rrn || undefined,
+      },
+    ])
     setPayAmount('')
   }
 
-  function addEqualSlice(methodName: string) {
+  async function addEqualSlice(methodName: string) {
+    if (cardBusy) return
     if (remaining < 0.01) return
-    setPayments((prev) => [...prev, { method: methodName, amount: Math.round(remaining * 100) / 100 }])
+    const amount = Math.round(remaining * 100) / 100
+    const soft = await runSoftPos(methodName, amount)
+    if (!soft.ok) return
+    const label =
+      soft.authCode && methodNeedsCardTerminal(methodName, payTypes)
+        ? `${methodName} · ${soft.authCode}`
+        : methodName
+    setPayments((prev) => [
+      ...prev,
+      {
+        method: label,
+        amount,
+        cardAuthCode: soft.authCode || undefined,
+        cardRrn: soft.rrn || undefined,
+      },
+    ])
+  }
+
+  function fillRemainingAmount() {
+    if (remaining < 0.01) return
+    setPayAmount(String(Math.round(remaining * 100) / 100))
+  }
+
+  function fillHalfRemaining() {
+    if (remaining < 0.01) return
+    setPayAmount(String(Math.round((remaining / 2) * 100) / 100))
   }
 
   function removePayment(idx: number) {
@@ -165,18 +290,27 @@ export default function SettleModal({
     setSplitMode('custom')
   }
 
-  function confirm() {
-    if (!method) return
+  async function confirm() {
+    if (!method || cardBusy) return
     const loyalty = loyaltyPayload()
+    const withVoucher = (base: string) =>
+      pendingVoucher ? `${base} · Food voucher ${pendingVoucher.voucherCode}` : base
     if (isCash) {
       if (cashValue < due) return
-      onConfirm({ method: 'Cash', tendered: cashValue, change: Math.max(0, change), ...loyalty })
+      const useRoundOff = cashRoundOff > 0
+      onConfirm({
+        method: withVoucher('Cash'),
+        tendered: cashValue,
+        change: useRoundOff ? 0 : Math.max(0, change),
+        roundOff: useRoundOff ? cashRoundOff : undefined,
+        ...loyalty,
+      })
       return
     }
     if (method === 'Split bill') {
       if (splitMode === 'equal') {
         onConfirm({
-          method: `Split ×${parts}`,
+          method: withVoucher(`Split ×${parts}`),
           splitParts: parts,
           splitPayments: Array.from({ length: parts }, () => ({
             method: 'equal share',
@@ -189,14 +323,29 @@ export default function SettleModal({
       if (!isFullyPaid || payments.length === 0) return
       const label = payments.map((p) => `${p.method} ${money(p.amount)}`).join(' + ')
       onConfirm({
-        method: `Split · ${label}`,
+        method: withVoucher(`Split · ${label}`),
         splitParts: payments.length,
         splitPayments: payments,
         ...loyalty,
       })
       return
     }
-    onConfirm({ method: String(method), ...loyalty })
+
+    if (methodNeedsCardTerminal(String(method), payTypes)) {
+      const soft = await runSoftPos(String(method), due)
+      if (!soft.ok) return
+      onConfirm({
+        method: withVoucher(
+          soft.authCode ? `${method} · ${soft.authCode}` : String(method),
+        ),
+        cardAuthCode: soft.authCode || undefined,
+        cardRrn: soft.rrn || undefined,
+        ...loyalty,
+      })
+      return
+    }
+
+    onConfirm({ method: withVoucher(String(method)), ...loyalty })
   }
 
   function confirmGift(result: GiftCardPayResult) {
@@ -232,7 +381,18 @@ export default function SettleModal({
   function confirmFoodVoucher(result: FoodVoucherPayResult) {
     setShowFoodVoucher(false)
     setPendingVoucher(result)
-    if (result.amount + 0.001 >= Math.max(0, total - redeemSar)) {
+    setPayments((prev) => prev.filter((p) => !/^Food voucher/i.test(p.method)))
+    setTendered('')
+    const nextDue = Math.max(
+      0,
+      Math.round(
+        (computeDue
+          ? computeDue(result.amount, redeemSar)
+          : total - redeemSar - result.amount) * 100,
+      ) / 100,
+    )
+    // Voucher covers the full bill after tax recalculation.
+    if (nextDue < 0.01) {
       onConfirm({
         method: 'Food Voucher',
         customerId: customerId || undefined,
@@ -245,20 +405,13 @@ export default function SettleModal({
         giftCardNumber: pendingGift?.giftCardNumber,
         giftCardAmount: pendingGift?.amount,
       })
-      return
     }
-    setMethod('Split bill')
-    setSplitMode('custom')
-    setPayments((prev) => {
-      const rest = prev.filter((p) => !/^Food voucher/i.test(p.method))
-      return [...rest, { method: `Food voucher ${result.voucherCode}`, amount: result.amount }]
-    })
   }
 
   const loyaltyBlock =
     customers.length > 0 ? (
       <div className="settle-loyalty">
-        <label className="field-label">Loyalty customer (optional)</label>
+        <label className="field-label">{t.settleLoyaltyCustomer}</label>
         <MesaSelect
           value={customerId}
           onChange={(v) => {
@@ -268,14 +421,19 @@ export default function SettleModal({
             setTendered('')
           }}
           options={[
-            { value: '', label: 'Walk-in / no customer' },
-            ...customers.map((c) => ({ value: c.id, label: `${c.name} · ${c.points} pts` })),
+            { value: '', label: t.settleWalkInCustomer },
+            ...customers.map((c) => ({
+              value: c.id,
+              label: `${c.name} · ${c.points} ${t.settlePts}`,
+            })),
           ]}
         />
         {customer ? (
           <>
             <label className="field-label">
-              Redeem points (1 pt = {money(SAR_PER_POINT)}) · max {customer.points}
+              {t.settleRedeemPts
+                .replace('{rate}', money(SAR_PER_POINT))
+                .replace('{max}', String(customer.points))}
             </label>
             <input
               className="search"
@@ -290,7 +448,10 @@ export default function SettleModal({
             />
             {redeemSar > 0 ? (
               <p className="modal-lead">
-                Redeem {redeemPtsNum} pts → −{money(redeemSar)} · due {money(due)}
+                {t.settleRedeemSummary
+                  .replace('{pts}', String(redeemPtsNum))
+                  .replace('{amount}', money(redeemSar))
+                  .replace('{due}', money(due))}
               </p>
             ) : null}
           </>
@@ -303,15 +464,52 @@ export default function SettleModal({
       <div className="modal-card settle-card settle-card-wide">
         <div className="dine-pick-head settle-head">
           <div>
-            <h2>Settle — {title}</h2>
+            <h2>{t.settleTitle.replace('{title}', title)}</h2>
             <p className="modal-lead">
-              Amount due <strong>{money(due)}</strong>
-              <span className="settle-vat">incl. VAT</span>
-              {redeemSar > 0 ? ` · after ${money(redeemSar)} loyalty` : ''}
-              {voucherSar > 0 ? ` · after ${money(voucherSar)} food voucher` : ''}
+              {t.settleAmountDue} <strong>{money(due)}</strong>
+              <span className="settle-vat">{t.settleInclVat}</span>
+              {redeemSar > 0
+                ? ` ${t.settleAfterLoyalty.replace('{amount}', money(redeemSar))}`
+                : ''}
+              {voucherSar > 0 ? (
+                <span className="settle-voucher-note">
+                  {' '}
+                  {t.settleAfterVoucher.replace('{amount}', money(voucherSar))}
+                </span>
+              ) : null}
             </p>
+            {cardBusy ? (
+              <p className="settle-card-busy" role="status">
+                {t.softposSettleWaiting}
+              </p>
+            ) : null}
+            {cardError ? (
+              <p className="settle-card-error" role="alert">
+                {cardError}
+              </p>
+            ) : null}
+            {pendingVoucher ? (
+              <div className="settle-voucher-chip" role="status">
+                <span className="settle-voucher-chip-label">{t.settleVoucherApplied}</span>
+                <strong>
+                  {pendingVoucher.voucherCode} · {pendingVoucher.voucherName} ·{' '}
+                  {money(pendingVoucher.amount)}
+                </strong>
+                <button
+                  type="button"
+                  className="settle-voucher-chip-clear"
+                  onClick={() => {
+                    setPendingVoucher(null)
+                    setPayments((prev) => prev.filter((p) => !/^Food voucher/i.test(p.method)))
+                    setTendered('')
+                  }}
+                >
+                  {t.settleRemove}
+                </button>
+              </div>
+            ) : null}
           </div>
-          <button type="button" className="dine-ticket-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="dine-ticket-close" onClick={onClose} aria-label={t.close}>
             <svg viewBox="0 0 24 24" fill="none" aria-hidden>
               <path d="M7 7l10 10M17 7 7 17" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
             </svg>
@@ -342,18 +540,16 @@ export default function SettleModal({
           <>
             {loyaltyBlock}
             <div className="method-grid settle-parent-grid">
-              {paymentParents.map((p) => (
+              {paymentParents
+                // Food vouchers have their own button below — avoid a second "Voucher" that does the same thing.
+                .filter((p) => p.id !== 'voucher')
+                .map((p) => (
                 <button
                   key={p.id}
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => {
-                    if (p.id === 'voucher') {
-                      setShowFoodVoucher(true)
-                      setParentPick(null)
-                      return
-                    }
-                    const kids = payTypes.filter((t) => t.parent === p.id)
+                    const kids = payTypes.filter((x) => x.parent === p.id)
                     if (p.id === 'cash' || kids.length <= 1) {
                       setMethod(kids[0]?.name ?? 'Cash')
                       setParentPick(null)
@@ -363,18 +559,25 @@ export default function SettleModal({
                     setParentPick(p.id)
                   }}
                 >
-                  {p.label}
+                  {parentPayLabel(p.id, t)}
                 </button>
               ))}
               <button
                 type="button"
-                className="btn btn-secondary"
+                className={
+                  voucherSar > 0
+                    ? 'btn btn-teal settle-method-applied'
+                    : 'btn btn-secondary'
+                }
+                aria-pressed={voucherSar > 0}
                 onClick={() => {
                   setParentPick(null)
                   setShowFoodVoucher(true)
                 }}
               >
-                Food Voucher
+                {voucherSar > 0
+                  ? t.settleFoodVoucherAmt.replace('{amount}', money(voucherSar))
+                  : t.settleFoodVoucher}
               </button>
               <button
                 type="button"
@@ -384,7 +587,7 @@ export default function SettleModal({
                   setShowGiftPay(true)
                 }}
               >
-                Customer Account
+                {t.settleCustomerAccount}
               </button>
               <button
                 type="button"
@@ -396,7 +599,7 @@ export default function SettleModal({
                   setSplitMode('equal')
                 }}
               >
-                Split bill
+                {t.settleSplitBill}
               </button>
             </div>
           </>
@@ -405,34 +608,34 @@ export default function SettleModal({
         {!method && parentPick ? (
           <div className="settle-detail">
             <button type="button" className="settle-back" onClick={() => setParentPick(null)}>
-              ← Back
+              {t.settleBack}
             </button>
             <p className="modal-lead">
-              Sub payment · {paymentParents.find((p) => p.id === parentPick)?.label}
+              {t.settleSubPayment.replace('{label}', parentPayLabel(parentPick, t))}
             </p>
             <div className="method-grid settle-parent-grid">
-              {subTypes.map((t) => (
+              {subTypes.map((row) => (
                 <button
-                  key={t.id}
+                  key={row.id}
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => {
-                    if (/customer|gift/i.test(t.name)) {
+                    if (/customer|gift/i.test(row.name)) {
                       setShowGiftPay(true)
                       setParentPick(null)
                       return
                     }
-                    if (/food\s*voucher|voucher/i.test(t.name)) {
+                    if (/food\s*voucher|voucher/i.test(row.name)) {
                       setShowFoodVoucher(true)
                       setParentPick(null)
                       return
                     }
-                    setMethod(t.name)
+                    setMethod(row.name)
                     setParentPick(null)
-                    if (t.parent === 'cash') setTendered(String(due))
+                    if (row.parent === 'cash') setTendered(String(due))
                   }}
                 >
-                  {t.name}
+                  {row.name}
                 </button>
               ))}
             </div>
@@ -442,11 +645,13 @@ export default function SettleModal({
         {method && isCash ? (
           <div className="settle-detail settle-cash-layout">
             <button type="button" className="settle-back" onClick={() => setMethod(null)}>
-              ← Back
+              {t.settleBack}
             </button>
             <div className="settle-cash-head">
-              <strong>Total {money(due)}</strong>
-              <span>Charged {money(cashValue)}</span>
+              <strong>
+                {t.total} {money(due)}
+              </strong>
+              <span>{t.settleCharged.replace('{amount}', money(cashValue))}</span>
             </div>
             <div className="settle-cash-grid">
               <div className="settle-denoms">
@@ -469,13 +674,13 @@ export default function SettleModal({
               </div>
               <div className="settle-cash-quick">
                 <button type="button" onClick={() => setTendered(String(due))}>
-                  All
+                  {t.all}
                 </button>
                 <button
                   type="button"
                   onClick={() => setTendered(String(Math.round((due / 2) * 100) / 100))}
                 >
-                  Half
+                  {t.settleHalf}
                 </button>
                 {quickCash.map((n) => (
                   <button key={n} type="button" onClick={() => setTendered(String(n))}>
@@ -485,29 +690,57 @@ export default function SettleModal({
               </div>
             </div>
             <p className="modal-lead">
-              Tendered {money(cashValue)} · Change <strong>{money(Math.max(0, change))}</strong>
+              {t.settleTendered} {money(cashValue)} ·{' '}
+              {cashRoundOff > 0 ? (
+                <>
+                  {t.settleRoundOff} <strong>{money(cashRoundOff)}</strong> · {t.settleBill}{' '}
+                  <strong>{money(cashValue)}</strong>
+                </>
+              ) : (
+                <>
+                  {t.settleChange} <strong>{money(Math.max(0, change))}</strong>
+                </>
+              )}
             </p>
             <button
               type="button"
               className="btn btn-primary"
-              disabled={cashValue < due}
-              onClick={confirm}
+              disabled={cashValue < due || cardBusy}
+              onClick={() => void confirm()}
             >
-              Confirm cash
+              {t.settleConfirmCash}
             </button>
           </div>
         ) : null}
 
         {method && !isCash && method !== 'Split bill' ? (
           <div className="settle-detail">
-            <button type="button" className="settle-back" onClick={() => setMethod(null)}>
-              ← Back
+            <button
+              type="button"
+              className="settle-back"
+              disabled={cardBusy}
+              onClick={() => {
+                setMethod(null)
+                setCardError('')
+              }}
+            >
+              {t.settleBack}
             </button>
             <p className="modal-lead">
-              Pay {money(due)} with <strong>{method}</strong>
+              {t.settlePayWith.replace('{amount}', money(due)).replace('{method}', method)}
             </p>
-            <button type="button" className="btn btn-primary" onClick={confirm}>
-              Confirm {method}
+            {methodNeedsCardTerminal(String(method), payTypes) ? (
+              <p className="modal-lead settle-softpos-hint">{t.softposSettleHint}</p>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={cardBusy}
+              onClick={() => void confirm()}
+            >
+              {cardBusy
+                ? t.softposSettleWaiting
+                : t.settleConfirmMethod.replace('{method}', method)}
             </button>
           </div>
         ) : null}
@@ -515,7 +748,7 @@ export default function SettleModal({
         {method === 'Split bill' ? (
           <div className="settle-detail settle-split">
             <button type="button" className="settle-back" onClick={() => setMethod(null)}>
-              ← Back
+              {t.settleBack}
             </button>
             <div className="split-tabs">
               <button
@@ -523,19 +756,19 @@ export default function SettleModal({
                 className={splitMode === 'equal' ? 'active' : ''}
                 onClick={() => setSplitMode('equal')}
               >
-                Equal
+                {t.settleEqual}
               </button>
               <button
                 type="button"
                 className={splitMode === 'custom' ? 'active' : ''}
                 onClick={() => setSplitMode('custom')}
               >
-                Custom
+                {t.settleCustom}
               </button>
             </div>
             {splitMode === 'equal' ? (
               <>
-                <label className="field-label">Parts</label>
+                <label className="field-label">{t.settleParts}</label>
                 <div className="qty-controls">
                   <button type="button" onClick={() => setParts((p) => Math.max(2, p - 1))}>
                     -
@@ -545,66 +778,135 @@ export default function SettleModal({
                     +
                   </button>
                 </div>
-                <p className="modal-lead">≈ {money(perPart)} each</p>
+                <p className="modal-lead">{t.settleEach.replace('{amount}', money(perPart))}</p>
                 <button type="button" className="btn btn-ghost" onClick={applyEqualParts}>
-                  Convert to custom lines
+                  {t.settleConvertCustom}
                 </button>
-                <button type="button" className="btn btn-teal settle-confirm" onClick={confirm}>
-                  Confirm equal split
+                <button
+                  type="button"
+                  className="btn btn-teal settle-confirm"
+                  disabled={cardBusy}
+                  onClick={() => void confirm()}
+                >
+                  {t.settleConfirmEqual}
                 </button>
               </>
             ) : (
               <>
-                <div className={`settle-remain${remaining > 0.009 ? '' : ' ok'}`}>
-                  <span>Remaining</span>
-                  <strong>{money(remaining)}</strong>
+                <div
+                  className={`settle-remain${isOverpaid ? ' over' : isFullyPaid ? ' ok' : ''}`}
+                  role={isOverpaid ? 'alert' : undefined}
+                >
+                  {isOverpaid ? (
+                    <>
+                      <span className="settle-remain-copy">
+                        <span className="settle-over-badge">{t.settleExtra}</span>
+                        {t.settleOverpaid}
+                      </span>
+                      <strong>{money(overage)}</strong>
+                    </>
+                  ) : isFullyPaid ? (
+                    <>
+                      <span>{t.settleFullyPaid}</span>
+                      <strong>{money(due)}</strong>
+                    </>
+                  ) : (
+                    <>
+                      <span>{t.settleRemaining}</span>
+                      <strong>{money(remaining)}</strong>
+                    </>
+                  )}
                 </div>
+                <p className="settle-split-summary">
+                  {t.settlePaidOf
+                    .replace('{paid}', money(paid))
+                    .replace('{due}', money(due))}
+                  {payments.length
+                    ? ` · ${payments.length} ${
+                        payments.length === 1 ? t.settlePaymentOne : t.settlePaymentMany
+                      }`
+                    : ''}
+                </p>
                 <div className="settle-split-rest">
-                  {payTypes.slice(0, 6).map((t) => (
+                  {payTypes.slice(0, 6).map((row) => (
                     <button
-                      key={t.id}
+                      key={row.id}
                       type="button"
-                      onClick={() => addEqualSlice(t.name)}
+                      disabled={remaining < 0.01 || cardBusy}
+                      onClick={() => void addEqualSlice(row.name)}
                     >
-                      Rest → {t.name}
+                      {t.settleRestTo.replace('{name}', row.name)}
                     </button>
                   ))}
+                </div>
+                <div className="settle-split-fill">
+                  <button
+                    type="button"
+                    disabled={remaining < 0.01 || cardBusy}
+                    onClick={fillRemainingAmount}
+                  >
+                    {t.settleFillRemaining}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={remaining < 0.01 || cardBusy}
+                    onClick={fillHalfRemaining}
+                  >
+                    {t.settleHalfRemaining}
+                  </button>
                 </div>
                 <div className="settle-split-add">
                   <MesaSelect
                     value={payMethod}
                     onChange={setPayMethod}
-                    options={payTypes.map((t) => ({ value: t.name, label: t.name }))}
+                    options={payTypes.map((row) => ({ value: row.name, label: row.name }))}
                   />
                   <input
                     className="search"
+                    inputMode="decimal"
                     value={payAmount}
                     onChange={(e) => setPayAmount(e.target.value)}
-                    placeholder="Amount"
+                    placeholder={remaining > 0.009 ? String(remaining) : t.settleAmount}
+                    disabled={remaining < 0.01 || cardBusy}
+                    aria-label={t.settleAmount}
                   />
-                  <button type="button" className="btn btn-teal" onClick={addPayment}>
-                    Add
+                  <button
+                    type="button"
+                    className="btn btn-teal"
+                    disabled={remaining < 0.01 || cardBusy}
+                    onClick={() => void addPayment()}
+                  >
+                    {cardBusy ? t.softposSettleWaiting : t.settleAdd}
                   </button>
                 </div>
-                <ul className="settle-pay-list">
-                  {payments.map((p, i) => (
-                    <li key={`${p.method}-${i}`}>
-                      <span>
-                        {p.method} · {money(p.amount)}
-                      </span>
-                      <button type="button" className="dine-void-btn" onClick={() => removePayment(i)}>
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                {payments.length === 0 ? (
+                  <p className="settle-split-hint">{t.settleSplitHint}</p>
+                ) : (
+                  <ul className="settle-pay-list">
+                    {payments.map((p, i) => (
+                      <li key={`${p.method}-${i}`}>
+                        <span>
+                          {p.method} · {money(p.amount)}
+                        </span>
+                        <button
+                          type="button"
+                          className="dine-void-btn"
+                          disabled={cardBusy}
+                          onClick={() => removePayment(i)}
+                        >
+                          {t.settleRemove}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <button
                   type="button"
                   className="btn btn-teal settle-confirm"
-                  disabled={!isFullyPaid}
-                  onClick={confirm}
+                  disabled={!isFullyPaid || cardBusy}
+                  onClick={() => void confirm()}
                 >
-                  Confirm split
+                  {isOverpaid ? t.settleFixOverpay : t.settleConfirmSplit}
                 </button>
               </>
             )}

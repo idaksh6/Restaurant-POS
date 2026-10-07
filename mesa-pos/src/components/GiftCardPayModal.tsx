@@ -6,6 +6,7 @@ import {
   type GiftCard,
 } from '../data/giftCards'
 import { money } from '../data/mock'
+import { useI18n } from '../locale/i18n'
 import { useCatalog } from '../state/CatalogContext'
 
 export type GiftCardPayResult = {
@@ -34,6 +35,7 @@ export default function GiftCardPayModal({
   onConfirm,
   embedded,
 }: Props) {
+  const { t } = useI18n()
   const { giftCards } = useCatalog()
   const [search, setSearch] = useState('')
   const [card, setCard] = useState<GiftCard | null>(null)
@@ -76,7 +78,7 @@ export default function GiftCardPayModal({
     const hit = findGiftCard(q, giftCards)
     if (!hit) {
       setCard(null)
-      setHint('No active gift card / customer account found')
+      setHint(t.gcNotFound)
       return
     }
     setCard(hit)
@@ -106,13 +108,13 @@ export default function GiftCardPayModal({
     <>
       {embedded ? (
         <button type="button" className="settle-back" onClick={onClose}>
-          ← Back
+          {t.settleBack}
         </button>
       ) : (
         <header className="gcp-head">
-          <span>Card Type</span>
-          <strong>Customer Account</strong>
-          <button type="button" className="btn btn-ghost" onClick={onClose} aria-label="Close">
+          <span>{t.gcCardType}</span>
+          <strong>{t.gcCustomerAccount}</strong>
+          <button type="button" className="btn btn-ghost" onClick={onClose} aria-label={t.close}>
             ✕
           </button>
         </header>
@@ -120,7 +122,7 @@ export default function GiftCardPayModal({
 
       <div className={embedded ? 'settle-pay-fields gcp-fields-embed' : 'gcp-fields'}>
           <label>
-            Search Card No
+            {t.gcSearchCardNo}
             <input
               className="search"
               value={search}
@@ -128,7 +130,7 @@ export default function GiftCardPayModal({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') lookup()
               }}
-              placeholder="Card number, phone, or name"
+              placeholder={t.gcPlaceholder}
               autoFocus
             />
           </label>
@@ -143,24 +145,24 @@ export default function GiftCardPayModal({
           ) : null}
 
           <label>
-            Customer Name
+            {t.gcCustomerName}
             <input className="search" readOnly value={card?.customerName ?? ''} />
           </label>
           <label>
-            Gift Card Amount
+            {t.gcGiftCardAmount}
             <input className="search" readOnly value={card ? balance.toFixed(2) : ''} />
           </label>
           <label className="gcp-bill-row">
-            Bill Amount
+            {t.gcBillAmount}
             <span>
               <input className="search" readOnly value={billAmount.toFixed(2)} />
               <button type="button" className="btn btn-secondary" onClick={applyAll} disabled={!card}>
-                All
+                {t.all}
               </button>
             </span>
           </label>
           <label>
-            Received
+            {t.gcReceived}
             <input
               className="search"
               inputMode="decimal"
@@ -170,29 +172,29 @@ export default function GiftCardPayModal({
             />
           </label>
           <label>
-            Expiry Date
+            {t.gcExpiry}
             <input className="search" readOnly value={card?.expiryDate ?? ''} />
           </label>
           <label>
-            Remaining Balance
+            {t.gcRemaining}
             <input className="search" readOnly value={card ? remaining.toFixed(2) : ''} />
           </label>
         </div>
 
         {hint ? <p className="gcp-hint">{hint}</p> : null}
         {card && recv > billAmount + 0.001 ? (
-          <p className="gcp-hint">Received cannot exceed bill amount</p>
+          <p className="gcp-hint">{t.gcExceedBill}</p>
         ) : null}
         {card && recv > balance + 0.001 ? (
-          <p className="gcp-hint">Received exceeds gift card balance</p>
+          <p className="gcp-hint">{t.gcExceedBalance}</p>
         ) : null}
 
         <div className={embedded ? 'settle-pay-actions' : 'gcp-actions'}>
           <button type="button" className="btn btn-ghost" onClick={() => lookup()}>
-            Lookup
+            {t.gcLookup}
           </button>
           <button type="button" className="btn btn-teal" disabled={!canOk} onClick={submit}>
-            Apply account
+            {t.gcApply}
           </button>
         </div>
     </>

@@ -1,9 +1,9 @@
 import type { Ingredient } from '../data/ingredients'
 import type { StockItem } from '../data/mock'
-import { DEFAULT_SUPPLIERS, type PurchaseOrder, type Supplier } from '../data/purchasing'
+import type { PurchaseOrder, Supplier } from '../data/purchasing'
 import type { StockReceipt } from '../data/stockReceiving'
 
-/** Fallback vendor labels by stock category when no supplier/PO link exists. */
+/** Legacy category → demo vendor labels (templates only; not auto-applied). */
 export const STOCK_VENDOR_BY_CATEGORY: Record<string, string> = {
   Meat: 'Al Nakheel Meats',
   Seafood: 'Red Sea Catch',
@@ -23,11 +23,11 @@ const CATEGORY_VENDOR_ID: Record<string, string> = {
 }
 
 export function defaultVendorForCategory(category: string) {
-  return STOCK_VENDOR_BY_CATEGORY[category] ?? 'General Supplier'
+  return STOCK_VENDOR_BY_CATEGORY[category] ?? ''
 }
 
 export function defaultVendorIdForCategory(category: string) {
-  return CATEGORY_VENDOR_ID[category] ?? 'vnd-general'
+  return CATEGORY_VENDOR_ID[category] ?? ''
 }
 
 /** Resolve preferred vendor from receipts → POs → supplier roster. */
@@ -69,7 +69,7 @@ export function vendorHintsFromPurchasing(
   return { nameById, idByName, byStock }
 }
 
-/** Fill missing vendor fields on dynamic stock rows so the table always has a name. */
+/** Fill missing vendor fields from receipts / POs / ingredient master — never invent seed vendors. */
 export function enrichStockVendors(
   items: StockItem[],
   suppliers: Supplier[] = [],
@@ -77,17 +77,16 @@ export function enrichStockVendors(
   receipts: StockReceipt[] = [],
   ingredients: Ingredient[] = [],
 ): StockItem[] {
-  const roster = suppliers.length ? suppliers : DEFAULT_SUPPLIERS
+  const roster = suppliers
   const { nameById, idByName, byStock } = vendorHintsFromPurchasing(
     roster,
     purchaseOrders,
     receipts,
   )
   const ingById = new Map(ingredients.map((ing) => [ing.id, ing]))
-  const active = roster.filter((s) => s.active)
   let changed = false
 
-  const next = items.map((item, idx) => {
+  const next = items.map((item) => {
     const preferred = ingById.get(item.ingredientId || item.id)
     let vendorId = preferred?.vendorId?.trim() || item.vendorId?.trim() || undefined
     let vendor = preferred?.vendor?.trim() || item.vendor?.trim() || undefined
@@ -95,7 +94,6 @@ export function enrichStockVendors(
     if (vendorId && !vendor) vendor = nameById.get(vendorId)
     if (vendor && !vendorId) vendorId = idByName.get(vendor.toLowerCase())
 
-    // Infer from receipts / POs only when no preferred vendor is set on the master.
     if (!vendorId && !vendor) {
       const hint = byStock.get(item.id)
       if (hint) {
@@ -103,17 +101,6 @@ export function enrichStockVendors(
         vendor = hint.vendor
       }
     }
-
-    if (!vendor && active.length) {
-      const pick = active[idx % active.length]
-      vendorId = vendorId ?? pick.id
-      vendor = pick.name
-    }
-    if (!vendor) {
-      vendor = defaultVendorForCategory(item.category)
-      vendorId = vendorId ?? defaultVendorIdForCategory(item.category)
-    }
-    if (!vendorId && vendor) vendorId = idByName.get(vendor.toLowerCase())
 
     if (vendor === item.vendor && vendorId === item.vendorId) return item
     changed = true

@@ -1,12 +1,20 @@
 import { useMemo, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
-import type { KitchenTicketStatus } from '../data/mock'
+import type { KitchenTicket, KitchenTicketStatus } from '../data/mock'
+import {
+  aggregateKitchenStatus,
+  lineEffectiveStatus,
+  listKdsStations,
+  type KdsBoardMode,
+  type KdsStation,
+} from '../lib/kdsStations'
 import { useI18n } from '../locale/i18n'
 import { useMasters } from '../state/MastersContext'
 import { usePos } from '../state/PosContext'
 
-type StatusFilter = 'open' | KitchenTicketStatus
+type StatusFilter = 'open' | Exclude<KitchenTicketStatus, 'done'>
 
 function KdsIcon({ children }: { children: ReactNode }) {
   return (
@@ -78,26 +86,6 @@ function IconAll() {
   )
 }
 
-function IconFood() {
-  return (
-    <KdsIcon>
-      <path d="M4 11h16v2a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6v-2Z" />
-      <path d="M8 11V7M12 11V5M16 11V8" />
-    </KdsIcon>
-  )
-}
-
-function IconPizza() {
-  return (
-    <KdsIcon>
-      <path d="M3 10.5 12 3l9 7.5-3.5 10H6.5L3 10.5Z" />
-      <circle cx="10" cy="11" r="1" />
-      <circle cx="14" cy="13" r="1" />
-      <circle cx="12" cy="16" r="1" />
-    </KdsIcon>
-  )
-}
-
 function IconCup() {
   return (
     <KdsIcon>
@@ -107,87 +95,123 @@ function IconCup() {
   )
 }
 
-function IconCake() {
-  return (
-    <KdsIcon>
-      <path d="M4 14h16v5H4v-5Z" />
-      <path d="M5 14c0-2.5 2-4.5 7-4.5s7 2 7 4.5" />
-      <path d="M12 6v3.5M10 6.5l2-.8 2 .8" />
-    </KdsIcon>
+function parseBoard(value: string | null): KdsBoardMode {
+  if (value === 'kitchen' || value === 'bar' || value === 'expo') return value
+  return 'all'
+}
+
+function isOpenStatus(st: KitchenTicketStatus) {
+  return st !== 'ready' && st !== 'done'
+}
+
+function visibleLines(
+  ticket: KitchenTicket,
+  stationId: string | 'all',
+  board: KdsBoardMode,
+  stations: KdsStation[],
+) {
+  return ticket.lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => {
+      const ls = lineEffectiveStatus(line.status, ticket.status)
+      if (ls === 'done') return false
+      if (board === 'expo' && ls !== 'ready') return false
+      const sid = line.stationId
+      const station = stations.find((s) => s.id === sid)
+      if (board === 'kitchen' && station?.board === 'bar') return false
+      if (board === 'bar' && station?.board !== 'bar') return false
+      if (stationId !== 'all' && sid !== stationId) return false
+      return true
+    })
+}
+
+function ticketBoardStatus(
+  ticket: KitchenTicket,
+  lines: ReturnType<typeof visibleLines>,
+): KitchenTicketStatus {
+  if (!lines.length) return ticket.status
+  return aggregateKitchenStatus(
+    lines.map(({ line }) => lineEffectiveStatus(line.status, ticket.status)),
   )
 }
 
-function IconFolder() {
-  return (
-    <KdsIcon>
-      <path d="M3 8.5A1.5 1.5 0 0 1 4.5 7H9l2 2h8.5A1.5 1.5 0 0 1 21 10.5v7A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-9Z" />
-    </KdsIcon>
-  )
-}
-
-function categoryIcon(name: string) {
-  const n = name.toLowerCase()
-  if (/food|grill|main|starter|side|مطعم|طعام|مشوي|مقبل/.test(n)) return <IconFood />
-  if (/pizza|بيتزا/.test(n)) return <IconPizza />
-  if (/bev|drink|coffee|tea|juice|مشروب|بارد|ساخن|قهوة/.test(n)) return <IconCup />
-  if (/dessert|sweet|cake|حلو|حلوا|كنافة/.test(n)) return <IconCake />
-  return <IconFolder />
+function stationOpenCount(kitchen: KitchenTicket[], stationId: string) {
+  return kitchen.filter((ticket) =>
+    ticket.lines.some((line) => {
+      if (line.stationId !== stationId) return false
+      return isOpenStatus(lineEffectiveStatus(line.status, ticket.status))
+    }),
+  ).length
 }
 
 export default function KitchenPage() {
   const { t } = useI18n()
-  const { kitchen, setKitchenStatus, dismissKitchen } = usePos()
+  const { kitchen, setKitchenStatus, setKitchenLineStatus, dismissKitchen } = usePos()
   const { categories, dishes } = useMasters()
-  const [deptId, setDeptId] = useState<'all' | string>('all')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const board = parseBoard(searchParams.get('board'))
+  const stationId = searchParams.get('station') || 'all'
   const [status, setStatus] = useState<StatusFilter>('open')
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [search, setSearch] = useState('')
 
-  const mains = useMemo(
-    () => categories.filter((c) => !c.parentId && c.active).sort((a, b) => a.sort - b.sort),
-    [categories],
-  )
-  const subs = useMemo(
-    () => categories.filter((c) => c.parentId && c.active).sort((a, b) => a.sort - b.sort),
-    [categories],
+  const stations = useMemo(
+    () => listKdsStations(undefined, categories),
+    [kitchen.length, dishes.length, categories],
   )
 
-  const counts = useMemo(
-    () => ({
-      open: kitchen.filter((k) => k.status !== 'ready').length,
-      queued: kitchen.filter((k) => k.status === 'queued').length,
-      cooking: kitchen.filter((k) => k.status === 'cooking').length,
-      ready: kitchen.filter((k) => k.status === 'ready').length,
-      high: kitchen.filter((k) => k.priority === 'high' && k.status !== 'ready').length,
-    }),
-    [kitchen],
-  )
+  const stationCounts = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const s of stations) map[s.id] = stationOpenCount(kitchen, s.id)
+    return map
+  }, [kitchen, stations])
+
+  const counts = useMemo(() => {
+    const scoped = kitchen
+      .map((ticket) => {
+        const lines = visibleLines(ticket, stationId, board, stations)
+        if (!lines.length) {
+          if (board === 'expo') return null
+          if (stationId !== 'all' || board === 'kitchen' || board === 'bar') return null
+        }
+        const st =
+          board === 'expo'
+            ? 'ready'
+            : ticketBoardStatus(
+                ticket,
+                lines.length ? lines : ticket.lines.map((line, index) => ({ line, index })),
+              )
+        if (board === 'expo' && !lines.length) return null
+        return { ticket, lines, st }
+      })
+      .filter(Boolean) as Array<{
+      ticket: KitchenTicket
+      lines: ReturnType<typeof visibleLines>
+      st: KitchenTicketStatus
+    }>
+
+    return {
+      open: scoped.filter((k) => isOpenStatus(k.st)).length,
+      queued: scoped.filter((k) => k.st === 'queued').length,
+      cooking: scoped.filter((k) => k.st === 'cooking').length,
+      ready: scoped.filter((k) => k.st === 'ready').length,
+      high: scoped.filter((k) => k.ticket.priority === 'high' && isOpenStatus(k.st)).length,
+      scoped,
+    }
+  }, [kitchen, stationId, board, stations])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return kitchen.filter((ticket) => {
-      if (status === 'open' && ticket.status === 'ready') return false
-      if (status !== 'open' && ticket.status !== status) return false
-      if (deptId !== 'all') {
-        const inDept = ticket.lines.some((line) => {
-          const dish = dishes.find((d) => d.id === line.itemId)
-          if (!dish) return false
-          const cat = categories.find((c) => c.id === dish.categoryId)
-          return dish.categoryId === deptId || cat?.parentId === deptId || cat?.id === deptId
-        })
-        if (!inDept) return false
-      }
+    return counts.scoped.filter(({ ticket, st, lines }) => {
+      if (board === 'expo') return lines.some(({ line }) => lineEffectiveStatus(line.status, ticket.status) === 'ready')
+      if (status === 'open' && !isOpenStatus(st)) return false
+      if (status !== 'open' && st !== status) return false
       if (!q) return true
-      const hay = [
-        ticket.source,
-        ticket.id,
-        ...ticket.lines.map((l) => `${l.name} ${l.qty}`),
-      ]
+      const hay = [ticket.source, ticket.id, ...lines.map(({ line }) => `${line.name} ${line.qty}`)]
         .join(' ')
         .toLowerCase()
       return hay.includes(q)
     })
-  }, [kitchen, status, deptId, dishes, categories, search])
+  }, [counts.scoped, status, search, board])
 
   const tabs = [
     { id: 'open' as const, label: t.kotBoard, count: counts.open, icon: <IconBoard />, tone: 'board' },
@@ -195,6 +219,21 @@ export default function KitchenPage() {
     { id: 'cooking' as const, label: t.kotCooking, count: counts.cooking, icon: <IconFlame />, tone: 'cooking' },
     { id: 'ready' as const, label: t.kotReady, count: counts.ready, icon: <IconCheck />, tone: 'ready' },
   ]
+
+  function setBoard(next: KdsBoardMode) {
+    const params = new URLSearchParams(searchParams)
+    if (next === 'all') params.delete('board')
+    else params.set('board', next)
+    if (next === 'expo') params.delete('station')
+    setSearchParams(params, { replace: true })
+  }
+
+  function setStation(id: string) {
+    const params = new URLSearchParams(searchParams)
+    if (id === 'all') params.delete('station')
+    else params.set('station', id)
+    setSearchParams(params, { replace: true })
+  }
 
   return (
     <div className="zk-dept zk-kds">
@@ -204,10 +243,18 @@ export default function KitchenPage() {
         <header className="kds-hero">
           <div className="kds-hero-brand">
             <span className="kds-hero-mark">
-              <IconPot />
+              {board === 'bar' ? <IconCup /> : <IconPot />}
             </span>
             <div>
-              <h1>{t.kitchen}</h1>
+              <h1>
+                {board === 'expo'
+                  ? t.kdsTitleExpo
+                  : board === 'bar'
+                    ? t.kdsTitleBar
+                    : board === 'kitchen'
+                      ? t.kdsTitleKitchen
+                      : t.kitchen}
+              </h1>
               <p>
                 {counts.open} {t.kotOpen}
                 {counts.high ? ` · ${counts.high} ${t.kotHigh}` : ''}
@@ -233,99 +280,108 @@ export default function KitchenPage() {
           </div>
         </header>
 
-        <div className="kds-filters kds-status" role="tablist">
-          {tabs.map((tab) => (
+        <div className="kds-filters kds-boards" role="tablist" aria-label={t.kdsStations}>
+          {(
+            [
+              ['all', t.kdsBoardAll],
+              ['kitchen', t.kdsBoardKitchen],
+              ['bar', t.kdsBoardBar],
+              ['expo', t.kdsBoardExpo],
+            ] as const
+          ).map(([id, label]) => (
             <button
-              key={tab.id}
+              key={id}
               type="button"
-              className={`kds-tab tone-${tab.tone}${status === tab.id ? ' on' : ''}`}
-              onClick={() => setStatus(tab.id)}
+              className={`kds-tab tone-board${board === id ? ' on' : ''}`}
+              onClick={() => setBoard(id)}
             >
-              <span className="kds-tab-ico">{tab.icon}</span>
-              <span>{tab.label}</span>
-              <em className="mesa-ltr-nums">{tab.count}</em>
+              <span>{label}</span>
             </button>
           ))}
         </div>
 
+        {board !== 'expo' ? (
+          <div className="kds-filters kds-status" role="tablist">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`kds-tab tone-${tab.tone}${status === tab.id ? ' on' : ''}`}
+                onClick={() => setStatus(tab.id)}
+              >
+                <span className="kds-tab-ico">{tab.icon}</span>
+                <span>{tab.label}</span>
+                <em className="mesa-ltr-nums">{tab.count}</em>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         <div className="zk-dept-body kds-body">
-          <aside className="zk-dept-tree kds-tree" aria-label="Departments">
+          <aside className="zk-dept-tree kds-tree" aria-label={t.kdsStations}>
             <div className="kds-tree-head">
-              <strong>Departments</strong>
-              <span>{mains.length}</span>
+              <strong>{t.kdsStations}</strong>
+              <span>{stations.length}</span>
             </div>
             <button
               type="button"
-              className={`zk-tree-all kds-tree-all${deptId === 'all' ? ' active' : ''}`}
-              onClick={() => setDeptId('all')}
+              className={`zk-tree-all kds-tree-all${stationId === 'all' ? ' active' : ''}`}
+              onClick={() => setStation('all')}
             >
               <span className="kds-tree-ico">
                 <IconAll />
               </span>
               {t.all}
             </button>
-            {mains.map((main) => {
-              const children = subs.filter((s) => s.parentId === main.id)
-              const open = expanded[main.id] ?? true
-              return (
-                <div key={main.id} className="zk-tree-block">
-                  <div className="zk-tree-main">
-                    <button
-                      type="button"
-                      className="zk-tree-toggle"
-                      aria-label={open ? t.collapse : t.expand}
-                      onClick={() => setExpanded((prev) => ({ ...prev, [main.id]: !open }))}
-                    >
-                      {open ? '▾' : '▸'}
-                    </button>
-                    <button
-                      type="button"
-                      className={`zk-tree-label kds-tree-label${deptId === main.id ? ' active' : ''}`}
-                      onClick={() => setDeptId(main.id)}
-                    >
-                      <span className="kds-tree-ico">{categoryIcon(main.name)}</span>
-                      {main.name}
-                    </button>
-                  </div>
-                  {open ? (
-                    <div className="zk-tree-subs">
-                      {children.map((sub) => (
-                        <button
-                          key={sub.id}
-                          type="button"
-                          className={deptId === sub.id ? 'active' : ''}
-                          onClick={() => setDeptId(sub.id)}
-                        >
-                          {sub.name}
-                        </button>
-                      ))}
-                    </div>
+            {stations
+              .filter((s) => board === 'all' || board === 'expo' || s.board === board)
+              .map((station) => (
+                <button
+                  key={station.id}
+                  type="button"
+                  className={`zk-tree-label kds-tree-label${stationId === station.id ? ' active' : ''}`}
+                  onClick={() => setStation(station.id)}
+                  style={{ display: 'flex', width: '100%', marginTop: 4, alignItems: 'center', gap: 8 }}
+                >
+                  <span className="kds-tree-ico">
+                    {station.board === 'bar' ? <IconCup /> : <IconPot />}
+                  </span>
+                  <span style={{ flex: 1, textAlign: 'start' }}>{station.name}</span>
+                  {(stationCounts[station.id] ?? 0) > 0 ? (
+                    <em className="mesa-ltr-nums" style={{ opacity: 0.75, fontStyle: 'normal' }}>
+                      {stationCounts[station.id]}
+                    </em>
                   ) : null}
-                </div>
-              )
-            })}
+                </button>
+              ))}
+            <p className="kds-tree-hint">{t.kdsStationsHint}</p>
           </aside>
 
           <section className="zk-dept-grid-wrap kds-board">
             <div className="kds-board-head">
               <div>
                 <strong>
-                  {status === 'open'
-                    ? t.kotBoard
-                    : status === 'queued'
-                      ? t.kotQueued
-                      : status === 'cooking'
-                        ? t.kotCooking
-                        : t.kotReady}
+                  {board === 'expo'
+                    ? t.kdsExpoReady
+                    : status === 'open'
+                      ? t.kotBoard
+                      : status === 'queued'
+                        ? t.kotQueued
+                        : status === 'cooking'
+                          ? t.kotCooking
+                          : t.kotReady}
                 </strong>
                 <p>
-                  {filtered.length} ticket{filtered.length === 1 ? '' : 's'}
-                  {deptId !== 'all'
-                    ? ` · ${categories.find((c) => c.id === deptId)?.name ?? ''}`
+                  {filtered.length}{' '}
+                  {filtered.length === 1 ? t.kdsTicketsOne : t.kdsTicketsMany}
+                  {stationId !== 'all'
+                    ? ` · ${stations.find((s) => s.id === stationId)?.name ?? ''}`
                     : ''}
                 </p>
               </div>
-              <span className={`kds-board-chip tone-${status}`}>{filtered.length}</span>
+              <span className={`kds-board-chip tone-${board === 'expo' ? 'ready' : status}`}>
+                {filtered.length}
+              </span>
             </div>
             {filtered.length === 0 ? (
               <div className="kds-empty">
@@ -337,26 +393,27 @@ export default function KitchenPage() {
               </div>
             ) : (
               <div className="kds-grid">
-                {filtered.map((ticket) => {
+                {filtered.map(({ ticket, lines, st }) => {
+                  const showLines = lines.length
+                    ? lines
+                    : ticket.lines
+                        .map((line, index) => ({ line, index }))
+                        .filter(({ line }) => lineEffectiveStatus(line.status, ticket.status) !== 'done')
                   const statusLabel =
-                    ticket.status === 'cooking'
-                      ? t.kotCooking
-                      : ticket.status === 'ready'
-                        ? t.kotReady
-                        : t.kotQueued
+                    st === 'cooking' ? t.kotCooking : st === 'ready' ? t.kotReady : t.kotQueued
                   const priorityLabel = ticket.priority === 'high' ? t.kotHigh : t.kotNormal
                   return (
                     <article
                       key={ticket.id}
-                      className={`kds-card status-${ticket.status}${ticket.priority === 'high' ? ' priority-high' : ''}`}
+                      className={`kds-card status-${st}${ticket.priority === 'high' ? ' priority-high' : ''}`}
                     >
-                      <div className={`kds-card-stripe status-${ticket.status}`} />
+                      <div className={`kds-card-stripe status-${st}`} />
                       <header>
                         <div className="kds-card-title">
-                          <span className={`kds-source-ico status-${ticket.status}`}>
-                            {ticket.status === 'cooking' ? (
+                          <span className={`kds-source-ico status-${st}`}>
+                            {st === 'cooking' ? (
                               <IconFlame />
-                            ) : ticket.status === 'ready' ? (
+                            ) : st === 'ready' ? (
                               <IconCheck />
                             ) : (
                               <IconQueue />
@@ -366,13 +423,7 @@ export default function KitchenPage() {
                         </div>
                         <span
                           className={`kds-badge ${
-                            ticket.status === 'ready'
-                              ? 'ok'
-                              : ticket.status === 'cooking'
-                                ? 'cook'
-                                : ticket.priority === 'high'
-                                  ? 'high'
-                                  : 'warn'
+                            st === 'ready' ? 'ok' : st === 'cooking' ? 'cook' : ticket.priority === 'high' ? 'high' : 'warn'
                           }`}
                         >
                           {priorityLabel} · {statusLabel}
@@ -382,14 +433,52 @@ export default function KitchenPage() {
                         {t.kotReceived} {ticket.createdAt}
                       </p>
                       <ul>
-                        {ticket.lines.map((line, idx) => (
-                          <li key={`${ticket.id}-${idx}`}>
-                            <strong className="mesa-ltr-nums">{line.qty}×</strong> {line.name}
-                          </li>
-                        ))}
+                        {showLines.map(({ line, index }) => {
+                          const ls = lineEffectiveStatus(line.status, ticket.status)
+                          const stationName = stations.find((s) => s.id === line.stationId)?.name
+                          return (
+                            <li key={`${ticket.id}-${index}`} className={`kds-line status-${ls}`}>
+                              <div>
+                                <strong className="mesa-ltr-nums">{line.qty}×</strong> {line.name}
+                                {stationName && stationId === 'all' ? (
+                                  <em style={{ opacity: 0.65, marginInlineStart: 6 }}>{stationName}</em>
+                                ) : null}
+                              </div>
+                              <div className="kds-line-actions">
+                                {ls === 'queued' ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost kds-act cook"
+                                    onClick={() => setKitchenLineStatus(ticket.id, index, 'cooking')}
+                                  >
+                                    {t.kotCooking}
+                                  </button>
+                                ) : null}
+                                {ls === 'queued' || ls === 'cooking' ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn-teal kds-act ready"
+                                    onClick={() => setKitchenLineStatus(ticket.id, index, 'ready')}
+                                  >
+                                    {t.kotReady}
+                                  </button>
+                                ) : null}
+                                {ls === 'ready' ? (
+                                  <button
+                                    type="button"
+                                    className="btn btn-teal kds-act done"
+                                    onClick={() => setKitchenLineStatus(ticket.id, index, 'done')}
+                                  >
+                                    {t.kotDone}
+                                  </button>
+                                ) : null}
+                              </div>
+                            </li>
+                          )
+                        })}
                       </ul>
                       <div className="action-row kds-actions">
-                        {ticket.status === 'queued' ? (
+                        {board !== 'expo' && st === 'queued' ? (
                           <>
                             <button
                               type="button"
@@ -408,7 +497,8 @@ export default function KitchenPage() {
                               {t.kotReady}
                             </button>
                           </>
-                        ) : ticket.status === 'cooking' ? (
+                        ) : null}
+                        {board !== 'expo' && st === 'cooking' ? (
                           <button
                             type="button"
                             className="btn btn-teal kds-act ready"
@@ -417,7 +507,8 @@ export default function KitchenPage() {
                             <IconCheck />
                             {t.kotReady}
                           </button>
-                        ) : (
+                        ) : null}
+                        {st === 'ready' || board === 'expo' ? (
                           <button
                             type="button"
                             className="btn btn-teal kds-act done"
@@ -426,7 +517,7 @@ export default function KitchenPage() {
                             <IconCheck />
                             {t.kotDone}
                           </button>
-                        )}
+                        ) : null}
                       </div>
                     </article>
                   )

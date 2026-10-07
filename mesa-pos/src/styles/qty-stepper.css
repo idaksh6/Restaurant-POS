@@ -1,0 +1,230 @@
+/* Editable quantity stepper — shared across POS ticket modules */
+
+.qty-controls {
+  align-items: center;
+  gap: 0.35rem;
+  display: inline-flex;
+}
+
+.qty-controls button {
+  width: 1.75rem;
+  height: 1.75rem;
+  box-shadow: none;
+  background: var(--teal-soft);
+  color: var(--teal);
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.qty-controls button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--teal) 22%, #fff);
+}
+
+.qty-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.qty-controls .qty-input {
+  width: 2.35rem;
+  min-width: 2.35rem;
+  height: 1.75rem;
+  padding: 0 0.15rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 800;
+  text-align: center;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.qty-controls .qty-input:focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--teal) 22%, transparent);
+}
+
+.qty-controls .qty-input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: var(--surface-2);
+}
+
+.qty-controls .qty-input::-webkit-outer-spin-button,
+.qty-controls .qty-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Quick Serve line qty — match compact card layout */
+.zk-qs .qs-line-qty.qty-controls button {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.zk-qs .qs-line-qty.qty-controls .qty-input {
+  width: 2.5rem;
+  min-width: 2.5rem;
+  height: 1.85rem;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 960px) {
+  .qty-controls button {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .qty-controls .qty-input {
+    width: 2.65rem;
+    min-width: 2.65rem;
+    height: 2rem;
+    font-size: 16px;
+  }
+
+  .zk-qs .qs-line-qty.qty-controls button {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .zk-qs .qs-line-qty.qty-controls .qty-input {
+    width: 2.75rem;
+    min-width: 2.75rem;
+    height: 2rem;
+  }
+}
+
+/* Dine-in order table — qty column wide enough for stepper */
+.dine-order-head {
+  grid-template-columns: minmax(0, 1fr) 7.25rem 4.75rem 3.25rem !important;
+}
+
+.dine-order-table th:nth-child(2),
+.dine-order-table td:nth-child(2) {
+  width: 7.25rem !important;
+  min-width: 7.25rem;
+  max-width: 7.25rem;
+  padding-inline: 0.25rem !important;
+  overflow: visible;
+}
+
+.dine-order-table th:nth-child(3),
+.dine-order-table td:nth-child(3) {
+  width: 4.75rem !important;
+  min-width: 4.75rem;
+}
+
+.dine-order-table .qty-controls,
+.dine-order-table td.num .qty-controls {
+  justify-content: center !important;
+  width: 100%;
+  max-width: 100%;
+}
+
+.dine-order-table .qty-controls.dine-qty {
+  gap: 0.25rem;
+}
+
+.dine-order-table .qty-controls.dine-qty button {
+  width: 1.45rem;
+  height: 1.45rem;
+  font-size: 0.85rem;
+}
+
+.dine-order-table .qty-controls.dine-qty .qty-input {
+  width: 2rem;
+  min-width: 2rem;
+  height: 1.45rem;
+  font-size: 0.8rem;
+  padding: 0 0.1rem;
+}
+
+.dine-line-note-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.28rem;
+  max-width: 100%;
+}
+
+.dine-line-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  color: #5c6b66;
+  font-weight: 600;
+}
+
+.dine-line-note.muted {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.dine-line-note-btn {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid #c5d0ca;
+  background: #fff;
+  color: #1f6b5c;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dine-line-note-btn:hover {
+  background: #d8ebe5;
+  border-color: #1f6b5c;
+}
+
+/* Note / text prompt suggestion chips */
+.text-prompt-card .text-prompt-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.65rem 0 0.15rem;
+}
+
+.text-prompt-card .text-prompt-chip {
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid #d5ddd8;
+  background: #f4f7f5;
+  color: #2a3b35;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.text-prompt-card .text-prompt-chip:hover {
+  background: #d8ebe5;
+  border-color: #1f6b5c;
+  color: #1f6b5c;
+}
+
+.text-prompt-card .text-prompt-chip.active {
+  background: #1f6b5c;
+  border-color: #1f6b5c;
+  color: #fff;
+}

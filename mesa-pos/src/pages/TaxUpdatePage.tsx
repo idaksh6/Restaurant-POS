@@ -5,7 +5,7 @@ import { HubFooter, HubHeader } from '../components/HubChrome'
 import MesaSelect from '../components/MesaSelect'
 import { settingsHubPath } from '../lib/settingsHub'
 import { useI18n } from '../locale/i18n'
-import { activeTaxes, taxPercentTotal, type TaxRate } from '../data/tax'
+import { activeTaxes, companyDefaultTaxPercent, normalizeTaxIds, type TaxRate } from '../data/tax'
 import type { MasterDish } from '../data/masters'
 import { useAuth } from '../state/AuthContext'
 import { useCatalog } from '../state/CatalogContext'
@@ -13,35 +13,30 @@ import { useMasters } from '../state/MastersContext'
 import { usePos } from '../state/PosContext'
 import SuccessModal from '../components/SuccessModal'
 
-type ApplyMode = 'replace' | 'add' | 'remove' | 'clear'
+type ApplyMode = 'replace' | 'clear'
 type TaxFilter = 'all' | 'assigned' | 'none' | string
 
 function taxLabel(ids: string[] | undefined, taxes: TaxRate[]) {
-  if (!ids?.length) return '—'
-  const parts = ids
-    .map((id) => taxes.find((t) => t.id === id))
-    .filter(Boolean)
-    .map((t) => `${t!.name} ${t!.percent.toFixed(0)}%`)
-  return parts.length ? parts.join(' · ') : '—'
+  const id = normalizeTaxIds(ids)[0]
+  if (!id) return 'Company default'
+  const t = taxes.find((x) => x.id === id)
+  if (!t) return '—'
+  const name = t.name.trim()
+  const pct = `${Number.isInteger(t.percent) ? t.percent.toFixed(0) : t.percent.toFixed(2)}%`
+  // Names like "10%" or "Service tax 2%" already include the rate — don't append again.
+  if (!name) return pct
+  if (/%/.test(name)) return name
+  return `${name} ${pct}`
 }
 
-function nextTaxIds(current: string[] | undefined, mode: ApplyMode, selected: string[]): string[] {
-  const cur = current ?? []
+function nextTaxIds(mode: ApplyMode, selectedId: string | undefined): string[] {
   if (mode === 'clear') return []
-  if (mode === 'replace') return [...selected]
-  if (mode === 'add') {
-    const set = new Set(cur)
-    for (const id of selected) set.add(id)
-    return [...set]
-  }
-  // remove
-  const drop = new Set(selected)
-  return cur.filter((id) => !drop.has(id))
+  return selectedId ? [selectedId] : []
 }
 
 function sameIds(a: string[] | undefined, b: string[]) {
-  const left = [...(a ?? [])].sort()
-  const right = [...b].sort()
+  const left = normalizeTaxIds(a)
+  const right = normalizeTaxIds(b)
   return left.length === right.length && left.every((id, i) => id === right[i])
 }
 
@@ -59,7 +54,7 @@ export default function TaxUpdatePage() {
   const [deptId, setDeptId] = useState('all')
   const [taxFilter, setTaxFilter] = useState<TaxFilter>('all')
   const [mode, setMode] = useState<ApplyMode>('replace')
-  const [pickedTaxes, setPickedTaxes] = useState<Record<string, boolean>>({})
+  const [pickedTaxId, setPickedTaxId] = useState<string>('')
   const [selected, setSelected] = useState<Record<string, boolean>>({})
   const [busy, setBusy] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -98,11 +93,11 @@ export default function TaxUpdatePage() {
         return d.categoryId === deptId || cat?.parentId === deptId
       })
       .filter((d) => {
-        const ids = d.taxIds ?? []
+        const ids = normalizeTaxIds(d.taxIds)
         if (taxFilter === 'all') return true
         if (taxFilter === 'none') return ids.length === 0
         if (taxFilter === 'assigned') return ids.length > 0
-        return ids.includes(taxFilter)
+        return ids[0] === taxFilter
       })
       .filter((d) => {
         if (!q) return true
@@ -120,19 +115,13 @@ export default function TaxUpdatePage() {
     [selected],
   )
 
-  const selectedTaxIds = useMemo(
-    () => selectableTaxes.filter((tx) => pickedTaxes[tx.id]).map((tx) => tx.id),
-    [selectableTaxes, pickedTaxes],
-  )
-
-  const selectedPct = taxPercentTotal(selectedTaxIds, taxes)
+  const selectedTaxId = pickedTaxId || undefined
+  const selectedPct = selectedTaxId
+    ? selectableTaxes.find((t) => t.id === selectedTaxId)?.percent ?? 0
+    : 0
 
   const allFilteredSelected =
     filtered.length > 0 && filtered.every((d) => selected[d.id])
-
-  function toggleTax(id: string) {
-    setPickedTaxes((prev) => ({ ...prev, [id]: !prev[id] }))
-  }
 
   function toggleProduct(id: string) {
     setSelected((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -154,14 +143,10 @@ export default function TaxUpdatePage() {
     })
   }
 
-  function modeNeedsTaxes(m: ApplyMode) {
-    return m === 'replace' || m === 'add' || m === 'remove'
-  }
-
   function validate(): string | null {
     if (!selectedIds.length) return 'Select at least one product'
-    if (modeNeedsTaxes(mode) && !selectedTaxIds.length) {
-      return mode === 'remove' ? 'Select tax rates to remove' : 'Select at least one tax rate'
+    if (mode === 'replace' && !selectedTaxId) {
+      return 'Select one tax rate'
     }
     if (selectableTaxes.length === 0 && mode !== 'clear') {
       return 'No active taxes — create rates in Tax first'
@@ -174,7 +159,7 @@ export default function TaxUpdatePage() {
     const out: MasterDish[] = []
     for (const d of dishes) {
       if (!idSet.has(d.id)) continue
-      const taxIds = nextTaxIds(d.taxIds, mode, selectedTaxIds)
+      const taxIds = nextTaxIds(mode, selectedTaxId)
       if (sameIds(d.taxIds, taxIds)) continue
       out.push({ ...d, taxIds })
     }
@@ -209,13 +194,9 @@ export default function TaxUpdatePage() {
   function modeHelp(m: ApplyMode) {
     switch (m) {
       case 'replace':
-        return 'Overwrite each product’s tax with the rates you select below.'
-      case 'add':
-        return 'Keep existing taxes and add the selected rates.'
-      case 'remove':
-        return 'Remove only the selected rates from each product.'
+        return 'Set each product to one tax rate (single select).'
       case 'clear':
-        return 'Strip all tax rates from the selected products.'
+        return `Clear item tax so POS uses company default (${companyDefaultTaxPercent(taxes).toFixed(0)}%).`
     }
   }
 
@@ -256,10 +237,8 @@ export default function TaxUpdatePage() {
           <div className="zk-tu-modes" role="radiogroup" aria-label="Update mode">
             {(
               [
-                ['replace', 'Replace'],
-                ['add', 'Add'],
-                ['remove', 'Remove'],
-                ['clear', 'Clear'],
+                ['replace', 'Set rate'],
+                ['clear', 'Company default'],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -279,7 +258,7 @@ export default function TaxUpdatePage() {
           {mode !== 'clear' ? (
             <div className="zk-tu-tax-block">
               <div className="zk-tu-block-head">
-                <strong>Tax rates</strong>
+                <strong>Tax rate</strong>
                 <Link to="/settings/tax" className="zk-tu-link">
                   Manage master →
                 </Link>
@@ -290,16 +269,17 @@ export default function TaxUpdatePage() {
                   <Link to="/settings/tax">Create a tax rate</Link>
                 </div>
               ) : (
-                <ul className="zk-tu-tax-list">
+                <ul className="zk-tu-tax-list" role="radiogroup" aria-label="Bulk tax rate">
                   {selectableTaxes.map((tx) => {
-                    const on = !!pickedTaxes[tx.id]
+                    const on = pickedTaxId === tx.id
                     return (
                       <li key={tx.id}>
                         <label className={`zk-tu-tax-row${on ? ' on' : ''}`}>
                           <input
-                            type="checkbox"
+                            type="radio"
+                            name="bulk-tax"
                             checked={on}
-                            onChange={() => toggleTax(tx.id)}
+                            onChange={() => setPickedTaxId(tx.id)}
                           />
                           <span className="zk-tu-tax-name">{tx.name}</span>
                           <span className="zk-tu-tax-pct">{tx.percent.toFixed(2)}%</span>
@@ -309,16 +289,16 @@ export default function TaxUpdatePage() {
                   })}
                 </ul>
               )}
-              {selectedTaxIds.length > 0 ? (
+              {selectedTaxId ? (
                 <p className="zk-tu-sum">
-                  Combined rate · <strong>{selectedPct.toFixed(2)}%</strong>
+                  Selected rate · <strong>{selectedPct.toFixed(2)}%</strong>
                 </p>
               ) : null}
             </div>
           ) : (
             <div className="zk-tu-clear-note">
-              Clear mode does not need a tax selection — all rates will be removed from selected
-              products.
+              Products will use the company default tax (
+              {companyDefaultTaxPercent(taxes).toFixed(2)}%) at settle.
             </div>
           )}
 
@@ -458,7 +438,7 @@ export default function TaxUpdatePage() {
               className="zk-vendors-action"
               onClick={() => {
                 setSelected({})
-                setPickedTaxes({})
+                setPickedTaxId('')
               }}
             >
               {t.clear}
@@ -488,11 +468,9 @@ export default function TaxUpdatePage() {
             <div className="zk-confirm-head">Confirm tax update</div>
             <p className="zk-confirm-msg">
               {mode === 'clear'
-                ? `Clear all taxes on ${selectedIds.length} product${selectedIds.length === 1 ? '' : 's'}?`
-                : `${mode === 'replace' ? 'Replace' : mode === 'add' ? 'Add' : 'Remove'} ${
-                    selectedTaxIds
-                      .map((id) => taxes.find((x) => x.id === id)?.name ?? id)
-                      .join(', ')
+                ? `Reset ${selectedIds.length} product${selectedIds.length === 1 ? '' : 's'} to company default tax?`
+                : `Set tax to ${
+                    taxes.find((x) => x.id === selectedTaxId)?.name ?? selectedTaxId
                   } on ${selectedIds.length} product${selectedIds.length === 1 ? '' : 's'}?`}
             </p>
             <div className="zk-confirm-actions">

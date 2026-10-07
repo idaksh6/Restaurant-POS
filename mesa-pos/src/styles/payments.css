@@ -1,0 +1,735 @@
+/* Payments / settle queue — keep app sidebar; fix header; page scroll; mobile cards */
+
+/* Don’t hide .side-nav — desktop uses the 92px rail; ≤720px uses the top icon bar from mesa-base */
+
+.app-shell:has(.zk-pay) .main-stage {
+  background: #eef3f0 !important;
+  flex-direction: column !important;
+  padding: 0 !important;
+  display: flex !important;
+  overflow: hidden !important;
+  min-height: 0 !important;
+}
+
+.zk-pay {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-rows: none !important;
+  overflow: hidden !important;
+}
+
+/* Full-bleed header — no inset margin that clips brand on narrow screens */
+.zk-pay .zk-dash-header.zk-dash-header-bar {
+  flex-shrink: 0 !important;
+  margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  border-radius: 0 !important;
+  min-width: 0 !important;
+}
+
+.zk-pay .zk-dash-brand {
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+.zk-pay .zk-dash-brand strong {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.zk-pay > .pay-page {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: 1fr !important;
+  margin: 0.55rem 0.65rem 0.35rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+.zk-pay > .zk-hub-foot {
+  flex-shrink: 0 !important;
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  bottom: auto !important;
+  z-index: 20 !important;
+  margin-top: 0 !important;
+  width: 100% !important;
+  align-items: center !important;
+  padding: 0.7rem 1.5rem calc(0.7rem + env(safe-area-inset-bottom, 0px)) !important;
+  box-sizing: border-box !important;
+}
+
+.pay-desk {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  overflow: visible !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.pay-queue {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  overscroll-behavior: auto !important;
+  touch-action: pan-y;
+}
+
+.pay-rail {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.pay-list {
+  overflow: visible !important;
+}
+
+.pay-list-head {
+  position: static !important;
+}
+
+@media (max-width: 860px) {
+  .pay-desk-head {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.55rem !important;
+  }
+
+  .pay-cashier {
+    align-self: flex-start !important;
+    font-size: 0.75rem !important;
+    padding: 0.35rem 0.6rem !important;
+  }
+
+  .pay-list-head {
+    display: none !important;
+  }
+
+  .pay-list {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0.55rem !important;
+    border: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+  }
+
+  .pay-list-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    grid-template-areas:
+      'title badge'
+      'meta meta'
+      'amount amount'
+      'actions actions' !important;
+    gap: 0.4rem 0.65rem !important;
+    padding: 0.8rem 0.85rem !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 12px !important;
+    border-inline-start-width: 3px !important;
+    background: #fff !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .pay-list-title {
+    grid-area: title !important;
+    min-width: 0 !important;
+    font-size: 0.95rem !important;
+  }
+
+  .pay-list-meta {
+    grid-area: meta !important;
+    min-width: 0 !important;
+    overflow-wrap: anywhere;
+  }
+
+  .pay-list-row .pay-badge {
+    grid-area: badge !important;
+    justify-self: end !important;
+    max-width: 100%;
+  }
+
+  .pay-list-amount {
+    grid-area: amount !important;
+    text-align: start !important;
+    font-size: 1.05rem !important;
+  }
+
+  .pay-list-actions {
+    grid-area: actions !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    justify-content: stretch !important;
+    align-items: stretch !important;
+    gap: 0.4rem !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .pay-list-actions .btn,
+  .pay-list-actions .pay-action-btn {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    justify-content: center !important;
+    white-space: nowrap !important;
+    min-height: 2.35rem !important;
+    padding: 0.4rem 0.55rem !important;
+    font-size: 0.82rem !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .zk-pay > .pay-page {
+    margin: 0.4rem 0.45rem 0.25rem !important;
+    border-radius: 12px !important;
+  }
+
+  .pay-desk-head {
+    padding: 0.75rem 0.75rem 0.6rem !important;
+  }
+
+  .pay-desk-head h2 {
+    font-size: 1.05rem !important;
+  }
+
+  .pay-sub {
+    font-size: 0.82rem !important;
+  }
+
+  .pay-queue {
+    padding: 0.65rem 0.65rem 0.85rem !important;
+  }
+
+  .pay-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .pay-metric {
+    padding: 0.55rem 0.65rem !important;
+    gap: 0.4rem !important;
+    min-width: 0 !important;
+  }
+
+  .pay-metric > div {
+    min-width: 0 !important;
+  }
+
+  .pay-metric strong {
+    font-size: 0.95rem !important;
+    overflow-wrap: anywhere;
+  }
+
+  .pay-metric span {
+    font-size: 0.7rem !important;
+  }
+
+  .pay-metric-ico {
+    width: 1.7rem !important;
+    height: 1.7rem !important;
+  }
+
+  .pay-list-row {
+    padding: 0.7rem 0.75rem !important;
+  }
+
+  .pay-list-actions .btn,
+  .pay-list-actions .pay-action-btn {
+    flex: 1 1 calc(50% - 0.2rem) !important;
+  }
+
+  .pay-rail {
+    padding: 0.85rem 0.75rem !important;
+    gap: 0.75rem !important;
+  }
+
+  .pay-floor-btn {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .pay-list-actions .btn,
+  .pay-list-actions .pay-action-btn {
+    flex: 1 1 100% !important;
+  }
+}
+
+/* ---- Metric cards: color, icons, alignment ---- */
+.zk-pay .pay-metrics {
+  gap: 0.55rem !important;
+  padding: 0.65rem 0.75rem !important;
+  border-block: none !important;
+  background: transparent !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+.zk-pay .pay-metric {
+  display: flex !important;
+  align-items: center !important;
+  gap: 0.65rem !important;
+  min-width: 0 !important;
+  padding: 0.75rem 0.85rem !important;
+  border: 1px solid #e2eae5 !important;
+  border-inline-end: 1px solid #e2eae5 !important;
+  border-radius: 14px !important;
+  background: #fff !important;
+  box-shadow: 0 4px 14px rgba(18, 32, 28, 0.04);
+}
+
+.zk-pay .pay-metric > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.zk-pay .pay-metric strong {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 750;
+  line-height: 1.15;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.zk-pay .pay-metric span:not(.pay-metric-ico) {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.zk-pay .pay-metric-ico {
+  width: 2.35rem !important;
+  height: 2.35rem !important;
+  border-radius: 11px !important;
+  place-items: center;
+  display: grid;
+  flex-shrink: 0;
+}
+
+.zk-pay .pay-metric-ico .pay-ico {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.zk-pay .pay-metric.tone-ready .pay-metric-ico {
+  color: #1f7a45;
+  background: #e6f6ec;
+}
+
+.zk-pay .pay-metric.tone-dining .pay-metric-ico {
+  color: #1f6b5c;
+  background: #d8ebe5;
+}
+
+.zk-pay .pay-metric.tone-takeaway .pay-metric-ico {
+  color: #1971c2;
+  background: #e7f1fb;
+}
+
+.zk-pay .pay-metric.tone-total,
+.zk-pay .pay-metric.highlight {
+  background: linear-gradient(145deg, #f3faf7 0%, #e7f3ee 100%) !important;
+  border-color: color-mix(in srgb, var(--teal) 28%, #e2eae5) !important;
+}
+
+.zk-pay .pay-metric.tone-total .pay-metric-ico,
+.zk-pay .pay-metric.highlight .pay-metric-ico {
+  color: #0b3d2e;
+  background: #cfe6dc;
+}
+
+.zk-pay .pay-metric.tone-total strong {
+  color: var(--teal);
+  font-size: 1.05rem;
+}
+
+/* ---- Settle methods ---- */
+.zk-pay .pay-rail-copy h2 {
+  font-size: 1.1rem;
+}
+
+.zk-pay .pay-methods {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 0.45rem !important;
+}
+
+.zk-pay .pay-methods .pay-method {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+  min-height: 2.55rem;
+  padding: 0.55rem 0.7rem !important;
+  border-radius: 11px !important;
+  border: 1px solid #e0e8e3 !important;
+  background: #fff !important;
+  color: var(--ink) !important;
+  font-size: 0.8rem !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgba(18, 32, 28, 0.03);
+}
+
+.zk-pay .pay-methods .pay-method .pay-ico {
+  width: 1.1rem !important;
+  height: 1.1rem !important;
+  flex-shrink: 0;
+}
+
+.zk-pay .pay-method.tone-cash .pay-ico { color: #1f7a45; }
+.zk-pay .pay-method.tone-mada .pay-ico { color: #0b3d2e; }
+.zk-pay .pay-method.tone-card .pay-ico { color: #1971c2; }
+.zk-pay .pay-method.tone-wallet .pay-ico { color: #5c7cfa; }
+.zk-pay .pay-method.tone-stc .pay-ico { color: #c45c26; }
+.zk-pay .pay-method.tone-split .pay-ico { color: #862e9c; }
+
+.zk-pay .pay-empty {
+  border: 1px dashed #cfd8d2;
+  border-radius: 14px;
+  background: #f7faf8;
+  margin: 0.35rem 0;
+  padding: 1.5rem 1rem;
+}
+
+.zk-pay .pay-section-empty {
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+  margin: 0.15rem 0 0.35rem;
+  padding: 1.35rem 1rem;
+  border: 1px dashed #d5ddd8;
+  border-radius: 12px;
+  background: #f8faf9;
+  text-align: center;
+  color: #6b7c74;
+}
+
+.zk-pay .pay-section-empty .pay-ico {
+  width: 1.55rem;
+  height: 1.55rem;
+  color: #9aa8a1;
+  margin-bottom: 0.15rem;
+}
+
+.zk-pay .pay-section-empty strong {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #2f3d37;
+}
+
+.zk-pay .pay-section-empty span {
+  max-width: 28rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.zk-pay .pay-guide li:before {
+  border-radius: 999px !important;
+}
+
+@media (max-width: 1100px) {
+  .zk-pay > .pay-page {
+    grid-template-columns: 1fr !important;
+  }
+
+  .zk-pay .pay-rail {
+    border-inline-start: 0 !important;
+    border-top: 1px solid var(--line) !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .zk-pay .pay-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .zk-pay .pay-metrics {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 0.45rem !important;
+    padding: 0.55rem !important;
+  }
+
+  .zk-pay .pay-metric {
+    padding: 0.65rem 0.7rem !important;
+    gap: 0.5rem !important;
+  }
+
+  .zk-pay .pay-metric-ico {
+    width: 2rem !important;
+    height: 2rem !important;
+    border-radius: 9px !important;
+  }
+
+  .zk-pay .pay-metric strong {
+    font-size: 1rem !important;
+  }
+
+  .zk-pay .pay-methods {
+    grid-template-columns: 1fr !important;
+  }
+
+  .zk-pay .pay-methods .pay-method {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .zk-pay .pay-rail {
+    padding: 0.85rem 0.75rem 1rem !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .zk-pay .pay-metrics {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ---- Settle / split bill (overrides + UX) ---- */
+.settle-remain.over {
+  color: #9b1c1c;
+  background: linear-gradient(180deg, #fff1f0, #fde8e6);
+  border: 1px solid #f0b8b4;
+  box-shadow: inset 0 0 0 1px #fff8f7;
+}
+
+.settle-remain-copy {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.55rem;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.settle-over-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  background: #c62828;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settle-split-summary {
+  margin: -0.25rem 0 0;
+  color: var(--muted, #5f7169);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.settle-split-summary strong {
+  color: var(--ink, #12201c);
+}
+
+.settle-split-hint {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-radius: 10px;
+  background: #f4f7f5;
+  color: var(--muted, #5f7169);
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.settle-split-fill {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.settle-split-fill button {
+  appearance: none;
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border: 1px dashed #c5d0c8;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--teal, #1f6b5c);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.settle-split-fill button:hover:not(:disabled) {
+  border-style: solid;
+  border-color: var(--teal, #1f6b5c);
+}
+
+.settle-split-fill button:disabled,
+.settle-split-rest button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settle-split-add {
+  grid-template-columns: minmax(7.5rem, 1.35fr) minmax(5.5rem, 7.5rem) auto !important;
+  align-items: center !important;
+  gap: 0.5rem !important;
+}
+
+.settle-split-add > .mesa-select,
+.settle-split-add > .mesa-select-field {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.settle-split-add .mesa-select-trigger,
+.settle-split-add .search,
+.settle-split-add > .btn {
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  height: 2.75rem;
+  margin: 0;
+}
+
+.settle-split-add .mesa-select-trigger {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding-block: 0;
+}
+
+.settle-split-add .search {
+  width: 100%;
+  padding-block: 0 0;
+  line-height: 1.2;
+}
+
+.settle-split-add > .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 1rem;
+  white-space: nowrap;
+}
+
+.settle-pay-list li {
+  gap: 0.5rem;
+}
+
+.settle-voucher-note {
+  color: var(--teal);
+  font-weight: 700;
+}
+
+.settle-voucher-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+  margin: 0.65rem 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 12px;
+  border: 1.5px solid color-mix(in srgb, var(--teal) 55%, var(--line));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--teal-soft) 88%, #fff),
+    color-mix(in srgb, var(--ok-soft) 70%, #fff)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--teal) 12%, transparent);
+}
+
+.settle-voucher-chip-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.settle-voucher-chip strong {
+  flex: 1 1 auto;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.settle-voucher-chip-clear {
+  border: 1px solid color-mix(in srgb, var(--teal) 35%, var(--line));
+  background: #fff;
+  color: var(--teal);
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settle-voucher-chip-clear:hover {
+  background: var(--teal-soft);
+}
+
+.settle-method-applied {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--teal) 35%, transparent),
+    0 8px 18px color-mix(in srgb, var(--teal) 22%, transparent);
+  outline: 2px solid color-mix(in srgb, #fff 40%, transparent);
+  outline-offset: -3px;
+}
+
+.fvp-info.is-applied {
+  border-color: color-mix(in srgb, var(--teal) 55%, var(--line));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--teal-soft) 90%, #fff),
+    #fff 55%
+  );
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--teal) 18%, transparent);
+}
+
+.fvp-applied-tag {
+  grid-column: 1 / -1;
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--teal);
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 520px) {
+  .settle-split-add {
+    grid-template-columns: 1fr !important;
+  }
+
+  .settle-split-add > .btn {
+    width: 100%;
+  }
+
+  .settle-remain {
+    flex-wrap: wrap;
+    gap: 0.35rem 0.75rem;
+  }
+}
+

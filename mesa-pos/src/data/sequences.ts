@@ -4,9 +4,9 @@ import { getDeviceId } from '../sync/deviceId'
 import { dropPendingUpsertsFor, enqueueOutbox, loadOutbox } from '../sync/outbox'
 import { tenantGetItem, tenantRemoveItem, tenantSetItem } from './repos/db'
 
-export type SeqKind = 'delivery' | 'driveThru' | 'takeaway' | 'quickServe'
+export type SeqKind = 'delivery' | 'driveThru' | 'takeaway' | 'quickServe' | 'bill'
 
-export const SEQ_KINDS: SeqKind[] = ['delivery', 'driveThru', 'takeaway', 'quickServe']
+export const SEQ_KINDS: SeqKind[] = ['delivery', 'driveThru', 'takeaway', 'quickServe', 'bill']
 
 export type BranchSeq = {
   kind: SeqKind

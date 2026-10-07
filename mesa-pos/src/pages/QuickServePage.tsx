@@ -1,20 +1,20 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { getPermissions } from '../auth/roles'
 import DashHeader from '../components/DashHeader'
 import { HubFooter } from '../components/HubChrome'
 import ConfirmModal from '../components/ConfirmModal'
 import MenuPicker from '../components/MenuPicker'
-import MesaSelect from '../components/MesaSelect'
 import ReceiptModal, { type ReceiptData } from '../components/ReceiptModal'
 import SendOrdersModal from '../components/SendOrdersModal'
 import SettleModal, { type SettleResult } from '../components/SettleModal'
 import TextPromptModal from '../components/TextPromptModal'
 import { redeemFoodVoucher } from '../data/foodVouchers'
-import { lineTotal, money, nowTime, type OpenTicket } from '../data/mock'
+import { lineTotal, nowTime, type OpenTicket } from '../data/mock'
 import { hydrateSequencesFromApi, nextSeq } from '../data/sequences'
-import { calcBill, cashFromSettle, recipesFromDishes } from '../lib/bill'
-import { SAUDI } from '../locale/saudi'
+import { calcBill, calcBillWithFoodVoucher, cashFromSettle, recipesFromDishes, settleAfterFoodVoucher } from '../lib/bill'
+import { orderTaxBillOptions } from '../data/tax'
+import { kitchenPendingLines } from '../lib/kitchenRouting'
 import { useAuth } from '../state/AuthContext'
 import { useBranch } from '../state/BranchContext'
 import { useCatalog } from '../state/CatalogContext'
@@ -24,101 +24,27 @@ import { usePos } from '../state/PosContext'
 import { useShift } from '../state/ShiftContext'
 import { useSync } from '../sync/SyncContext'
 import { attachZatcaToReceipt } from '../hardware/zatca'
+import { buildReceiptIdentity } from '../lib/receiptIds'
+import { IconBolt } from './quick-serve/QuickServeIcons'
+import QuickServeMobileCart from './quick-serve/QuickServeMobileCart'
+import QuickServeMobileTabs from './quick-serve/QuickServeMobileTabs'
+import QuickServeQueue from './quick-serve/QuickServeQueue'
+import QuickServeTicketPanel from './quick-serve/QuickServeTicketPanel'
+import QuickServeToolbar from './quick-serve/QuickServeToolbar'
+import QuickServeTools from './quick-serve/QuickServeTools'
+import {
+  quickServeOpenCount,
+  quickServeTickets,
+  serveNoFromTicket,
+  guestNameFromTicket,
+} from './quick-serve/quickServeTickets'
+import { useQuickServeLayout } from './quick-serve/useQuickServeLayout'
+import { useI18n } from '../locale/i18n'
 
 type OrderTypeOpt = 'takeaway' | 'dine-in' | 'delivery'
 
 function nextServeNo() {
   return nextSeq('quickServe')
-}
-
-function QsIcon({ children }: { children: ReactNode }) {
-  return (
-    <svg
-      className="qs-ico"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      {children}
-    </svg>
-  )
-}
-
-function IconBolt() {
-  return (
-    <QsIcon>
-      <path d="M13 2 6 13h6l-1 9 7-11h-6l1-9Z" />
-    </QsIcon>
-  )
-}
-function IconPlus() {
-  return (
-    <QsIcon>
-      <path d="M12 5v14M5 12h14" />
-    </QsIcon>
-  )
-}
-function IconSend() {
-  return (
-    <QsIcon>
-      <path d="M4 12h12" />
-      <path d="M13 7l5 5-5 5" />
-      <path d="M4 7v10" />
-    </QsIcon>
-  )
-}
-function IconPay() {
-  return (
-    <QsIcon>
-      <rect x="3" y="6" width="18" height="12" rx="2" />
-      <path d="M3 10h18M7 15h4" />
-    </QsIcon>
-  )
-}
-function IconUser() {
-  return (
-    <QsIcon>
-      <circle cx="12" cy="8" r="3.2" />
-      <path d="M5 19c1.2-3.5 4-5 7-5s5.8 1.5 7 5" />
-    </QsIcon>
-  )
-}
-function IconTable() {
-  return (
-    <QsIcon>
-      <rect x="3" y="7" width="18" height="4" rx="1.5" />
-      <path d="M6 11v7M18 11v7M10 11v4M14 11v4" />
-    </QsIcon>
-  )
-}
-function IconNote() {
-  return (
-    <QsIcon>
-      <path d="M7 4h8l2 2v14H7V4Z" />
-      <path d="M9.5 10h5M9.5 13h5M9.5 16h3" />
-    </QsIcon>
-  )
-}
-function IconBag() {
-  return (
-    <QsIcon>
-      <path d="M6 8h12l-1 12H7L6 8Z" />
-      <path d="M9 8V6.5a3 3 0 0 1 6 0V8" />
-    </QsIcon>
-  )
-}
-
-function IconCancel() {
-  return (
-    <QsIcon>
-      <circle cx="12" cy="12" r="8" />
-      <path d="M9 9l6 6M15 9l-6 6" />
-    </QsIcon>
-  )
 }
 
 function statusLabel(lines: { sent?: boolean }[]) {
@@ -128,17 +54,19 @@ function statusLabel(lines: { sent?: boolean }[]) {
 }
 
 export default function QuickServePage() {
+  const { t } = useI18n()
   const { user } = useAuth()
   const perms = user ? getPermissions(user.role) : getPermissions('cashier')
   const { customers, earnPoints, redeemPoints } = useCrm()
   const { dishes } = useMasters()
-  const { redeemGiftCard } = useCatalog()
+  const { redeemGiftCard, taxes } = useCatalog()
   const { addCashIn } = useShift()
-  const { activeBranchId } = useBranch()
+  const { activeBranchId, company } = useBranch()
   const { syncEpoch } = useSync()
   const {
     tickets,
     addTicket,
+    updateTicket,
     addToTicket,
     changeTicketQty,
     sendTicketOrders,
@@ -149,12 +77,18 @@ export default function QuickServePage() {
     dayIsClosed,
   } = usePos()
 
+  const [searchParams] = useSearchParams()
+  const deepTicketId = searchParams.get('ticket')
+
+  const qsRootRef = useRef<HTMLDivElement>(null)
+  const { isMobile, mobileTab, setMobileTab } = useQuickServeLayout(qsRootRef)
+
   useEffect(() => {
     void hydrateSequencesFromApi().catch(() => undefined)
   }, [syncEpoch, activeBranchId])
 
   const [search, setSearch] = useState('')
-  const [ticketId, setTicketId] = useState<string | null>(null)
+  const [ticketId, setTicketId] = useState<string | null>(() => deepTicketId)
   const [serveNo, setServeNo] = useState(0)
   const [orderType, setOrderType] = useState<OrderTypeOpt>('takeaway')
   const [ticketNote, setTicketNote] = useState('')
@@ -164,12 +98,26 @@ export default function QuickServePage() {
   const [showCustomer, setShowCustomer] = useState(false)
   const [showNote, setShowNote] = useState(false)
   const [showCancel, setShowCancel] = useState(false)
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
+  const [cartPulse, setCartPulse] = useState(false)
+  const prevLineCount = useRef(0)
 
   const selected = tickets.find((t) => t.id === ticketId)
 
   useEffect(() => {
+    setTicketNote(selected?.note?.trim() ?? '')
+  }, [selected?.id, selected?.note])
+
+  useEffect(() => {
+    if (deepTicketId && tickets.some((t) => t.id === deepTicketId)) {
+      setTicketId(deepTicketId)
+      const hit = tickets.find((t) => t.id === deepTicketId)
+      if (hit) setServeNo(serveNoFromTicket(hit))
+      return
+    }
     if (ticketId && tickets.some((t) => t.id === ticketId)) return
+    if (deepTicketId) return
     const empty = [...tickets].reverse().find((t) => t.id.startsWith('qs-') && t.lines.length === 0)
     const open = empty ?? [...tickets].reverse().find((t) => t.id.startsWith('qs-'))
     if (open) {
@@ -191,18 +139,66 @@ export default function QuickServePage() {
     addTicket(ticket)
     setTicketId(ticket.id)
     setServeNo(n)
-  }, [ticketId, tickets, addTicket, dayIsClosed])
+  }, [ticketId, tickets, addTicket, dayIsClosed, deepTicketId])
 
   const lines = selected?.lines ?? []
-  const pending = lines.filter((l) => !l.sent).length
+  const pending = useMemo(() => kitchenPendingLines(lines, dishes).length, [lines, dishes])
   const goods = lineTotal(lines)
-  const bill = useMemo(() => calcBill(goods, 0, []), [goods])
+  const taxOpts = useMemo(
+    () => orderTaxBillOptions(lines, dishes, taxes, company.enableTax !== false),
+    [lines, dishes, taxes, company.enableTax],
+  )
+  const bill = useMemo(() => calcBill(goods, 0, [], taxOpts), [goods, taxOpts])
   const { tax, total, taxable } = bill
   const status = statusLabel(lines)
 
-  const linkedCustomer = linkedCustomerId
-    ? customers.find((c) => c.id === linkedCustomerId)
-    : undefined
+  const linkedCustomer = linkedCustomerId ? customers.find((c) => c.id === linkedCustomerId) : undefined
+
+  const qsTickets = useMemo(() => quickServeTickets(tickets), [tickets])
+  const qsOpenCount = useMemo(() => quickServeOpenCount(tickets), [tickets])
+
+  function selectTicket(ticket: OpenTicket) {
+    setTicketId(ticket.id)
+    setServeNo(serveNoFromTicket(ticket))
+    setTicketNote('')
+    const guestName = guestNameFromTicket(ticket)
+    const match = guestName ? customers.find((c) => c.name === guestName) : undefined
+    setLinkedCustomerId(match?.id ?? null)
+    if (isMobile) setMobileTab('menu')
+  }
+
+  function applyCustomer(customerId: string | null) {
+    setLinkedCustomerId(customerId)
+    setShowCustomer(false)
+    if (!selected) return
+    const n = serveNo || serveNoFromTicket(selected)
+    if (!customerId) {
+      updateTicket(selected.id, { customer: `#${n} Quick Serve` })
+      flash(t.qsWalkIn)
+      return
+    }
+    const c = customers.find((x) => x.id === customerId)
+    if (!c) return
+    updateTicket(selected.id, {
+      customer: `#${n} Quick Serve · ${c.name}`,
+      phone: c.phone,
+    })
+    flash(`Customer · ${c.name}`)
+  }
+
+  useEffect(() => {
+    if (!isMobile || lines.length <= prevLineCount.current) {
+      prevLineCount.current = lines.length
+      return
+    }
+    prevLineCount.current = lines.length
+    setCartPulse(true)
+    const id = window.setTimeout(() => setCartPulse(false), 700)
+    return () => window.clearTimeout(id)
+  }, [lines.length, isMobile])
+
+  const showMenu = !isMobile || mobileTab === 'menu'
+  const showTicket = !isMobile || mobileTab === 'ticket'
 
   function newTicket() {
     if (dayIsClosed) {
@@ -228,16 +224,40 @@ export default function QuickServePage() {
 
   function requestCancel() {
     if (!selected) return
+    setCancelTargetId(selected.id)
+    setShowCancel(true)
+  }
+
+  function removeFromQueue(ticket: OpenTicket) {
+    if (dayIsClosed) {
+      flash('Day is closed')
+      return
+    }
+    if (ticket.lines.length === 0) {
+      cancelTicket(ticket.id, 'Empty draft removed')
+      if (ticketId === ticket.id) {
+        setTicketId(null)
+        setLinkedCustomerId(null)
+        setTicketNote('')
+      }
+      flash(`Removed #${serveNoFromTicket(ticket)}`)
+      return
+    }
+    setCancelTargetId(ticket.id)
     setShowCancel(true)
   }
 
   function confirmCancel() {
-    if (!selected) return
-    cancelTicket(selected.id, 'Cancelled from quick serve')
+    const id = cancelTargetId ?? selected?.id
+    if (!id) return
+    cancelTicket(id, 'Cancelled from quick serve')
     setShowCancel(false)
-    setTicketId(null)
-    setLinkedCustomerId(null)
-    setTicketNote('')
+    setCancelTargetId(null)
+    if (ticketId === id) {
+      setTicketId(null)
+      setLinkedCustomerId(null)
+      setTicketNote('')
+    }
   }
 
   function completeSettle(result: SettleResult) {
@@ -260,38 +280,62 @@ export default function QuickServePage() {
     if (result.foodVoucherId) {
       redeemFoodVoucher(result.foodVoucherId)
     }
-    const payable = Math.max(0, Math.round((total - redeemSar) * 100) / 100)
+    const roundOff = Math.round((result.roundOff ?? 0) * 100) / 100
+    const { bill: settledBill, payable, voucherSar } = settleAfterFoodVoucher({
+      goods,
+      taxOptions: taxOpts,
+      baseBill: bill,
+      foodVoucherSar: result.foodVoucherAmount,
+      loyaltySar: redeemSar,
+      roundOff,
+    })
     const customerId = result.customerId ?? linkedCustomerId ?? undefined
     if (customerId) earnPoints(customerId, payable)
+    const paySplits = (result.splitPayments ?? []).filter((p) => !/^Food voucher/i.test(p.method))
+    const ids = buildReceiptIdentity({ ticketId: selected.id, staff: user })
     settleTicket(selected.id, {
       method: result.method,
       source: `Quick Serve #${serveNo || selected.customer}`,
       staff: user?.name,
-      subtotal: taxable,
-      tax,
+      staffUsername: ids.user,
+      billNo: ids.billNo,
+      orderId: ids.orderId,
+      subtotal: settledBill.taxable,
+      tax: settledBill.tax,
       total: payable,
+      roundOff: roundOff || undefined,
+      tendered: result.tendered,
+      change: result.change,
       lines,
-      splitPayments: result.splitPayments,
+      splitPayments: paySplits.length ? paySplits : undefined,
       customerId,
       loyaltyRedeem: redeemSar || undefined,
     })
     deductRecipeStock(lines, recipesFromDishes(dishes))
-    addCashIn(cashFromSettle(result.method, payable, result.splitPayments))
+    addCashIn(cashFromSettle(result.method, payable, paySplits.length ? paySplits : undefined))
     setShowSettle(false)
-    setReceipt(attachZatcaToReceipt({
-      title: `Quick Serve #${serveNo || selected.customer}`,
-      method: result.method,
-      lines,
-      subtotal: taxable,
-      tax,
-      total: payable,
-      loyaltyRedeem: redeemSar || undefined,
-      splitPayments: result.splitPayments,
-      staff: user?.name,
-      time: new Date().toLocaleString(),
-      customerName: linkedCustomer?.name ?? selected.customer,
-      kind: 'paid',
-    }))
+    setReceipt(
+      attachZatcaToReceipt({
+        title: `Quick Serve #${serveNo || selected.customer}`,
+        method: result.method,
+        lines,
+        subtotal: goods,
+        tax: settledBill.tax,
+        total: payable,
+        loyaltyRedeem: redeemSar || undefined,
+        foodVoucherAmt: voucherSar || undefined,
+        foodVoucherCode: result.foodVoucherCode,
+        splitPayments: paySplits.length ? paySplits : undefined,
+        staff: user?.name,
+        staffUsername: ids.user,
+        billNo: ids.billNo,
+        orderId: ids.orderId,
+        time: new Date().toLocaleString(),
+        customerName: linkedCustomer?.name ?? selected.customer,
+        kind: 'paid',
+        orderType: selected.type,
+      }),
+    )
     flash(`Paid by ${result.method}`)
     setTicketId(null)
     setLinkedCustomerId(null)
@@ -299,230 +343,141 @@ export default function QuickServePage() {
   }
 
   return (
-    <div className="zk-qs">
+    <div
+      className={`zk-qs${isMobile ? ' qs-mobile' : ''}${isMobile ? ` qs-tab-${mobileTab}` : ''}`}
+      ref={qsRootRef}
+    >
       <DashHeader search={search} onSearchChange={setSearch} brandTo="/" />
 
       <div className="qs-page">
-        <header className="qs-toolbar">
-          <div className="qs-toolbar-brand">
-            <span className="qs-hero-mark">
-              <IconBolt />
-            </span>
-            <div>
-              <h1>Quick Serve</h1>
-              <p>
-                #{serveNo || '—'} · {status.label}
-                {dayIsClosed ? ' · day closed' : ''}
-              </p>
-            </div>
-          </div>
-          <div className="qs-toolbar-actions">
-            {dayIsClosed ? <span className="qs-pill closed">Day closed</span> : null}
-            <Link to="/takeaway" className="qs-link-btn">
-              <IconBag /> Takeaway list
-            </Link>
-            <button
-              type="button"
-              className="btn btn-primary qs-new-btn"
-              disabled={dayIsClosed}
-              onClick={newTicket}
-            >
-              <IconPlus /> New ticket
-            </button>
-          </div>
-        </header>
+        <QuickServeQueue
+          tickets={qsTickets}
+          selectedId={ticketId}
+          dayIsClosed={dayIsClosed}
+          onSelect={selectTicket}
+          onNew={newTicket}
+          onRemove={removeFromQueue}
+        />
 
-        <nav className="qs-tools" aria-label="Quick actions">
-          <Link to="/dine-in" className="qs-tool">
-            <IconTable /> Table
-          </Link>
-          <button type="button" className="qs-tool" onClick={() => setShowCustomer(true)}>
-            <IconUser /> Customer
-          </button>
-          <button type="button" className="qs-tool" onClick={() => setShowNote(true)}>
-            <IconNote /> Note
-          </button>
-          <button type="button" className="qs-tool" disabled={dayIsClosed} onClick={newTicket}>
-            <IconPlus /> New
-          </button>
-          {perms.canSendOrders ? (
-            <button
-              type="button"
-              className="qs-tool accent"
-              disabled={dayIsClosed}
-              onClick={() => {
-                if (!selected || pending === 0) {
+        <div className="qs-chrome">
+          {isMobile ? (
+            <QuickServeMobileTabs
+              tab={mobileTab}
+              lineCount={lines.length}
+              total={total}
+              onChange={setMobileTab}
+            />
+          ) : null}
+          <QuickServeToolbar
+            serveNo={serveNo}
+            statusLabel={status.label}
+            openCount={qsOpenCount}
+            dayIsClosed={dayIsClosed}
+            compact={isMobile}
+            onNewTicket={newTicket}
+          />
+          <QuickServeTools
+            perms={perms}
+            dayIsClosed={dayIsClosed}
+            pending={pending}
+            linesCount={lines.length}
+            compact={isMobile}
+            onCustomer={() => setShowCustomer(true)}
+            onNote={() => setShowNote(true)}
+            onNewTicket={newTicket}
+            onSend={() => {
+              if (!selected || pending === 0) {
+                flash('Nothing new to send')
+                return
+              }
+              setShowSend(true)
+            }}
+            onTempBill={() => flash('Temporary bill printed to preview')}
+          />
+        </div>
+
+        <div className="qs-desk">
+          {showMenu ? (
+            <section className="qs-menu-panel" id="qs-panel-menu" role={isMobile ? 'tabpanel' : undefined}>
+              {selected ? (
+                <MenuPicker
+                  onAdd={(item, note) => {
+                    if (dayIsClosed) {
+                      flash('Day is closed')
+                      return
+                    }
+                    addToTicket(selected.id, item, note)
+                  }}
+                />
+              ) : (
+                <div className="qs-empty">
+                  <IconBolt />
+                  <strong>Opening ticket…</strong>
+                </div>
+              )}
+            </section>
+          ) : null}
+
+          {showTicket ? (
+            <QuickServeTicketPanel
+              panelId="qs-panel-ticket"
+              isTabPanel={isMobile}
+              serveNo={serveNo}
+              status={status}
+              selected={selected}
+              linkedCustomer={linkedCustomer}
+              orderType={orderType}
+              onOrderTypeChange={setOrderType}
+              ticketNote={ticketNote}
+              lines={lines}
+              taxable={taxable}
+              tax={tax}
+              total={total}
+              pending={pending}
+              perms={perms}
+              dayIsClosed={dayIsClosed}
+              onChangeQty={(lineId, delta) => {
+                if (selected) changeTicketQty(selected.id, lineId, delta)
+              }}
+              onRemoveLine={(lineId, qty) => {
+                if (selected) changeTicketQty(selected.id, lineId, -qty)
+              }}
+              onSend={() => {
+                if (!pending) {
                   flash('Nothing new to send')
                   return
                 }
                 setShowSend(true)
               }}
-            >
-              <IconSend /> Send{pending > 0 ? ` (${pending})` : ''}
-            </button>
+              onSettle={() => setShowSettle(true)}
+              onRequestPay={() => flash('Payment requested — cashier will settle')}
+              onCancel={requestCancel}
+            />
           ) : null}
-          <Link to="/delivery" className="qs-tool">
-            Delivery
-          </Link>
-          <button
-            type="button"
-            className="qs-tool"
-            disabled={lines.length === 0}
-            onClick={() => flash('Temporary bill printed to preview')}
-          >
-            Temp bill
-          </button>
-        </nav>
-
-        <div className="qs-desk">
-          <section className="qs-menu-panel">
-            {selected ? (
-              <MenuPicker
-                onAdd={(item, note) => {
-                  if (dayIsClosed) {
-                    flash('Day is closed')
-                    return
-                  }
-                  addToTicket(selected.id, item, note)
-                }}
-              />
-            ) : (
-              <div className="qs-empty">
-                <IconBolt />
-                <strong>Opening ticket…</strong>
-              </div>
-            )}
-          </section>
-
-          <section className="qs-ticket-panel">
-            <div className="qs-ticket-head">
-              <div>
-                <h2>
-                  #{serveNo || '—'} <em>Quick Serve</em>
-                </h2>
-                <div className="qs-tags">
-                  <span className={`qs-status-pill ${status.tone}`}>{status.label}</span>
-                  <span className="qs-chip soft">{selected?.customer ?? '—'}</span>
-                  {linkedCustomer ? (
-                    <span className="qs-chip soft">
-                      <IconUser /> {linkedCustomer.name}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-              <label className="qs-type">
-                Type
-                <MesaSelect
-                  value={orderType}
-                  onChange={(v) => setOrderType(v as OrderTypeOpt)}
-                  options={[
-                    { value: 'takeaway', label: 'Takeaway' },
-                    { value: 'dine-in', label: 'Dine-in' },
-                    { value: 'delivery', label: 'Delivery' },
-                  ]}
-                />
-              </label>
-            </div>
-
-            {ticketNote ? <p className="qs-note">Note: {ticketNote}</p> : null}
-
-            <div className="qs-lines">
-              {lines.length === 0 ? (
-                <div className="qs-empty inline">
-                  <strong>No items yet</strong>
-                  <span>Tap products on the left to build the ticket.</span>
-                </div>
-              ) : (
-                lines.map((line) => (
-                  <div key={line.id} className="order-line">
-                    <div className="name">{line.name}</div>
-                    <strong>{money(line.qty * line.price)}</strong>
-                    <div className="sub">
-                      {money(line.price)} · {line.sent ? 'Sent' : 'New'}
-                      {line.note ? ` · ${line.note}` : ''}
-                    </div>
-                    <div className="qty-controls">
-                      <button
-                        type="button"
-                        disabled={dayIsClosed || line.sent}
-                        onClick={() => selected && changeTicketQty(selected.id, line.id, -1)}
-                      >
-                        −
-                      </button>
-                      <span>{line.qty}</span>
-                      <button
-                        type="button"
-                        disabled={dayIsClosed}
-                        onClick={() => selected && changeTicketQty(selected.id, line.id, 1)}
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="qs-totals">
-              <div>
-                <span>Subtotal</span>
-                <span>{money(taxable)}</span>
-              </div>
-              <div>
-                <span>{SAUDI.vatLabel}</span>
-                <span>{money(tax)}</span>
-              </div>
-              <div className="grand">
-                <span>Total</span>
-                <span>{money(total)}</span>
-              </div>
-            </div>
-
-            <div className="qs-ticket-actions">
-              {perms.canSendOrders ? (
-                <button
-                  type="button"
-                  className="btn btn-teal"
-                  disabled={dayIsClosed}
-                  onClick={() => {
-                    if (!pending) {
-                      flash('Nothing new to send')
-                      return
-                    }
-                    setShowSend(true)
-                  }}
-                >
-                  <IconSend /> Send orders{pending > 0 ? ` (${pending})` : ''}
-                </button>
-              ) : null}
-              {perms.canSettle ? (
-                <button
-                  type="button"
-                  className="btn btn-teal"
-                  disabled={lines.length === 0 || dayIsClosed}
-                  onClick={() => setShowSettle(true)}
-                >
-                  <IconPay /> Settle
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={lines.length === 0}
-                  onClick={() => flash('Payment requested — cashier will settle')}
-                >
-                  Request pay
-                </button>
-              )}
-              <button type="button" className="btn btn-ghost qs-cancel-btn" onClick={requestCancel}>
-                <IconCancel /> Cancel ticket
-              </button>
-            </div>
-          </section>
         </div>
       </div>
 
-      <HubFooter backTo="/takeaway" backLabel="Takeaway list" />
+      {isMobile && mobileTab === 'menu' && lines.length > 0 ? (
+        <QuickServeMobileCart
+          lineCount={lines.length}
+          total={total}
+          pulse={cartPulse}
+          canSettle={perms.canSettle}
+          dayIsClosed={dayIsClosed}
+          onViewTicket={() => setMobileTab('ticket')}
+          onSettle={() => setShowSettle(true)}
+        />
+      ) : null}
+
+      <HubFooter
+        backTo="/payments"
+        backLabel={t.qsFooterUnsettled}
+        actions={
+          <Link to="/back-office" className="qs-foot-link">
+            {t.qsPaidHistory}
+          </Link>
+        }
+      />
 
       {showSend && selected ? (
         <SendOrdersModal
@@ -542,6 +497,10 @@ export default function QuickServePage() {
           total={total}
           customers={customers}
           preselectCustomerId={linkedCustomerId ?? undefined}
+          computeDue={(voucherSar, loyaltySar) => {
+            const next = calcBillWithFoodVoucher(goods, 0, [], taxOpts, voucherSar)
+            return Math.max(0, Math.round((next.total - loyaltySar) * 100) / 100)
+          }}
           onClose={() => setShowSettle(false)}
           onConfirm={completeSettle}
         />
@@ -560,23 +519,16 @@ export default function QuickServePage() {
               <button
                 type="button"
                 className="btn btn-ghost"
-                onClick={() => {
-                  setLinkedCustomerId(null)
-                  setShowCustomer(false)
-                }}
+                onClick={() => applyCustomer(null)}
               >
-                Walk-in
+                {t.qsWalkIn}
               </button>
               {customers.map((c) => (
                 <button
                   key={c.id}
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => {
-                    setLinkedCustomerId(c.id)
-                    setShowCustomer(false)
-                    flash(`Customer · ${c.name}`)
-                  }}
+                  onClick={() => applyCustomer(c.id)}
                 >
                   {c.name} · {c.points} pts
                 </button>
@@ -596,25 +548,33 @@ export default function QuickServePage() {
           cancelLabel="Close"
           onClose={() => setShowNote(false)}
           onConfirm={(value) => {
-            setTicketNote(value)
+            const cleaned = value.trim()
+            setTicketNote(cleaned)
             setShowNote(false)
-            if (value) flash('Note saved')
+            if (selected) updateTicket(selected.id, { note: cleaned || undefined })
+            if (cleaned) flash('Note saved')
           }}
         />
       ) : null}
 
-      {showCancel && selected ? (
+      {showCancel && (cancelTargetId ?? selected) ? (
         <ConfirmModal
           title="Cancel ticket"
-          message={
-            selected.lines.some((l) => l.sent)
-              ? `Cancel Quick Serve #${serveNo}? Kitchen may already have items.`
-              : `Cancel Quick Serve #${serveNo}? This removes the ticket.`
-          }
+          message={(() => {
+            const target = tickets.find((t) => t.id === (cancelTargetId ?? selected?.id))
+            const no = target ? serveNoFromTicket(target) : serveNo
+            const sent = target?.lines.some((l) => l.sent)
+            return sent
+              ? `Cancel Quick Serve #${no}? Kitchen may already have items.`
+              : `Cancel Quick Serve #${no}? This removes the ticket.`
+          })()}
           confirmLabel="Cancel ticket"
           cancelLabel="Keep ticket"
           danger
-          onClose={() => setShowCancel(false)}
+          onClose={() => {
+            setShowCancel(false)
+            setCancelTargetId(null)
+          }}
           onConfirm={confirmCancel}
         />
       ) : null}

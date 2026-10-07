@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useAuth } from '../state/AuthContext'
+import { useBranch } from '../state/BranchContext'
 import { notifyTicketsSynced } from '../data/repos/ticketsRepo'
 import { applyBootstrap, applyIncoming, type SyncEntity } from './applyIncoming'
 import { reconcileZatcaOutbox } from '../hardware/zatca'
@@ -35,8 +36,10 @@ type SyncValue = {
   queued: number
   outbox: OutboxOp[]
   syncEpoch: number
+  /** Epoch ms of last successful pull/bootstrap; 0 if never. */
+  lastSyncAt: number
   refreshOutbox: () => void
-  runSync: (opts?: { quiet?: boolean; force?: boolean }) => Promise<void>
+  runSync: (opts?: { quiet?: boolean; force?: boolean; masters?: boolean }) => Promise<void>
   recheckConnection: () => Promise<boolean>
 }
 
@@ -53,6 +56,7 @@ function isTicketSyncOp(type?: string) {
 
 export function SyncProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth()
+  const { activeBranchId } = useBranch()
   const deviceId = useMemo(() => getDeviceId(), [])
   const [browserOnline, setBrowserOnline] = useState(() =>
     typeof navigator !== 'undefined' ? navigator.onLine : true,
@@ -62,9 +66,13 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [queued, setQueued] = useState(() => pendingCount())
   const [outbox, setOutbox] = useState<OutboxOp[]>(() => loadOutbox())
   const [syncEpoch, setSyncEpoch] = useState(0)
+  const [lastSyncAt, setLastSyncAt] = useState(0)
+  /** Bootstrap once per login + branch — branch switch must re-snapshot. */
   const bootstrapped = useRef<string | null>(null)
   const flushLock = useRef(false)
   const flushAgain = useRef(false)
+
+  const bootKey = token && activeBranchId ? `${token}::${activeBranchId}` : null
 
   const refreshOutbox = useCallback(() => {
     pruneRedundantOutbox()
@@ -127,7 +135,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     }
   }, [browserOnline, serverReachable, deviceId, refreshOutbox])
 
-  const runSync = useCallback(async (opts?: { quiet?: boolean; force?: boolean }) => {
+  const runSync = useCallback(async (opts?: { quiet?: boolean; force?: boolean; masters?: boolean }) => {
     const base = apiBase()
     if (!browserOnline || !base) {
       refreshOutbox()
@@ -142,6 +150,18 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     try {
       // Manual / forced sync retries poison once; quiet interval sync must not.
       if (!quiet) sanitizePoisonOutbox({ requeue: true })
+      if (opts?.masters) {
+        // Full masters refresh: re-bootstrap catalog so desktop/web converge.
+        try {
+          const data = await bootstrapSync(base)
+          await applyBootstrap(data as never)
+          if (data.cursor) setSyncCursor(data.cursor, activeBranchId)
+          bumpEpoch()
+          setLastSyncAt(Date.now())
+        } catch {
+          /* fall through to normal pull */
+        }
+      }
       await runFlush()
       await reconcileZatcaOutbox()
       pruneRedundantOutbox()
@@ -149,15 +169,16 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const entities = Array.isArray(pulled.entities) ? (pulled.entities as SyncEntity[]) : []
       const n = await applyIncoming(entities, deviceId)
       const mastersChanged = n > 0 && entities.some((e) => !isTicketSyncOp(e.type))
-      if (mastersChanged) bumpEpoch()
+      if (mastersChanged || opts?.masters) bumpEpoch()
       if (entities.some((e) => isTicketSyncOp(e.type))) notifyTicketsSynced()
+      setLastSyncAt(Date.now())
       refreshOutbox()
     } catch {
       refreshOutbox()
     } finally {
       if (!quiet) setSyncing(false)
     }
-  }, [browserOnline, serverReachable, refreshOutbox, bumpEpoch, runFlush, deviceId])
+  }, [browserOnline, serverReachable, refreshOutbox, bumpEpoch, runFlush, deviceId, activeBranchId])
 
   const recheckConnection = useCallback(async () => {
     if (!apiBase() || (typeof navigator !== 'undefined' && !navigator.onLine)) {
@@ -252,8 +273,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const base = apiBase()
-    if (!browserOnline || !serverReachable || !base || !token) return
-    if (bootstrapped.current === token) {
+    if (!browserOnline || !serverReachable || !base || !bootKey) return
+    if (bootstrapped.current === bootKey) {
       void runFlush()
       return
     }
@@ -261,12 +282,17 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     ;(async () => {
       setSyncing(true)
       try {
+        // Flush prior branch/outbox before loading the new branch snapshot.
+        await flushOutbox(base, deviceId).catch(() => undefined)
         const data = await bootstrapSync(base)
         if (cancelled) return
         await applyBootstrap(data as never)
-        if (data.cursor) setSyncCursor(data.cursor)
-        bootstrapped.current = token
+        // Prefer serverTime so we don't re-pull the whole history after snapshot.
+        const watermark = data.serverTime || data.cursor
+        if (watermark) setSyncCursor(watermark, activeBranchId)
+        bootstrapped.current = bootKey
         bumpEpoch()
+        setLastSyncAt(Date.now())
         await flushOutbox(base, deviceId)
         refreshOutbox()
       } catch {
@@ -278,7 +304,26 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [browserOnline, serverReachable, token, runSync, runFlush, deviceId, refreshOutbox, bumpEpoch])
+  }, [
+    browserOnline,
+    serverReachable,
+    bootKey,
+    activeBranchId,
+    runSync,
+    runFlush,
+    deviceId,
+    refreshOutbox,
+    bumpEpoch,
+  ])
+
+  useEffect(() => {
+    if (!browserOnline || !serverReachable || !apiBase() || !token) return
+    // Safety net when WS invalidate is missed: refresh masters from REST.
+    const id = window.setInterval(() => {
+      bumpEpoch()
+    }, 30000)
+    return () => window.clearInterval(id)
+  }, [browserOnline, serverReachable, token, bumpEpoch])
 
   useEffect(() => {
     const base = apiBase()
@@ -310,11 +355,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       queued,
       outbox,
       syncEpoch,
+      lastSyncAt,
       refreshOutbox,
       runSync,
       recheckConnection,
     }),
-    [deviceId, connectivity, queued, outbox, syncEpoch, refreshOutbox, runSync, recheckConnection],
+    [deviceId, connectivity, queued, outbox, syncEpoch, lastSyncAt, refreshOutbox, runSync, recheckConnection],
   )
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>

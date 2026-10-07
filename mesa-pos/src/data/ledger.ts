@@ -16,29 +16,56 @@ export type LedgerEntry = {
   tax: number
   total: number
   discountAmt?: number
+  /** Cash round-up absorbed into paid total */
+  roundOff?: number
+  tendered?: number
+  change?: number
   staff?: string
-  lines?: { name: string; qty: number; price: number }[]
+  /** Login username printed as User on the invoice */
+  staffUsername?: string
+  /** Sequential bill number (branch-scoped) */
+  billNo?: number
+  /** Ticket / order identifier shown on the invoice */
+  orderId?: string
+  /** Table label when dine-in */
+  tableLabel?: string
+  /** ZATCA invoice id issued at settle — reprints must reuse it (never mint a new QR). */
+  invoiceUuid?: string
+  lines?: { name: string; nameAr?: string; itemId?: string; qty: number; price: number }[]
   splitPayments?: { method: string; amount: number }[]
   customerId?: string
   loyaltyRedeem?: number
   charges?: { id: string; name: string; amount: number }[]
   voidReason?: string
   voidLineName?: string
+  /** Shared id when settling a merge target + source tables together. */
+  masterTxnId?: string
+  mergedTableIds?: string[]
 }
 
 export type SettleMeta = {
   method: string
   source: string
   staff?: string
+  staffUsername?: string
+  billNo?: number
+  orderId?: string
+  tableLabel?: string
+  invoiceUuid?: string
   subtotal: number
   tax: number
   total: number
   discountAmt?: number
+  roundOff?: number
+  tendered?: number
+  change?: number
   lines: OrderLine[]
   splitPayments?: { method: string; amount: number }[]
   customerId?: string
   loyaltyRedeem?: number
   charges?: { id: string; name: string; amount: number }[]
+  masterTxnId?: string
+  mergedTableIds?: string[]
 }
 
 export const LEDGER_KEY = 'mesa-sales-ledger'
@@ -92,7 +119,15 @@ export function fromApiLedgerEntry(row: Record<string, unknown>): LedgerEntry {
     tax: Number(row.tax ?? 0),
     total: Number(row.total ?? 0),
     discountAmt: row.discountAmt != null ? Number(row.discountAmt) : undefined,
+    roundOff: row.roundOff != null ? Number(row.roundOff) : undefined,
+    tendered: row.tendered != null ? Number(row.tendered) : undefined,
+    change: row.change != null ? Number(row.change) : undefined,
     staff: row.staff ? String(row.staff) : undefined,
+    staffUsername: row.staffUsername ? String(row.staffUsername) : undefined,
+    billNo: row.billNo != null && Number.isFinite(Number(row.billNo)) ? Number(row.billNo) : undefined,
+    orderId: row.orderId ? String(row.orderId) : undefined,
+    tableLabel: row.tableLabel ? String(row.tableLabel) : undefined,
+    invoiceUuid: row.invoiceUuid ? String(row.invoiceUuid) : undefined,
     lines: Array.isArray(row.lines) ? (row.lines as LedgerEntry['lines']) : undefined,
     splitPayments: Array.isArray(row.splitPayments)
       ? (row.splitPayments as LedgerEntry['splitPayments'])
@@ -102,6 +137,10 @@ export function fromApiLedgerEntry(row: Record<string, unknown>): LedgerEntry {
     charges: Array.isArray(row.charges) ? (row.charges as LedgerEntry['charges']) : undefined,
     voidReason: row.voidReason ? String(row.voidReason) : undefined,
     voidLineName: row.voidLineName ? String(row.voidLineName) : undefined,
+    masterTxnId: row.masterTxnId ? String(row.masterTxnId) : undefined,
+    mergedTableIds: Array.isArray(row.mergedTableIds)
+      ? row.mergedTableIds.map(String)
+      : undefined,
   }
 }
 
@@ -159,7 +198,7 @@ export function saveDayClosed(day: string | null, branchId = getActiveBranchId()
 export function makeSaleEntry(meta: SettleMeta, branchId = getActiveBranchId()): LedgerEntry {
   const day = todayKey()
   return {
-    id: `led-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    id: meta.masterTxnId ?? `led-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     branchId,
     at: new Date().toISOString(),
     day,
@@ -170,12 +209,28 @@ export function makeSaleEntry(meta: SettleMeta, branchId = getActiveBranchId()):
     tax: meta.tax,
     total: meta.total,
     discountAmt: meta.discountAmt,
+    roundOff: meta.roundOff,
+    tendered: meta.tendered,
+    change: meta.change,
     staff: meta.staff,
-    lines: meta.lines.map((l) => ({ name: l.name, qty: l.qty, price: l.price })),
+    staffUsername: meta.staffUsername,
+    billNo: meta.billNo,
+    orderId: meta.orderId,
+    tableLabel: meta.tableLabel,
+    invoiceUuid: meta.invoiceUuid,
+    lines: meta.lines.map((l) => ({
+      name: l.name,
+      nameAr: l.nameAr?.trim() || undefined,
+      itemId: l.itemId,
+      qty: l.qty,
+      price: l.price,
+    })),
     splitPayments: meta.splitPayments,
     customerId: meta.customerId,
     loyaltyRedeem: meta.loyaltyRedeem,
     charges: meta.charges,
+    masterTxnId: meta.masterTxnId,
+    mergedTableIds: meta.mergedTableIds,
   }
 }
 

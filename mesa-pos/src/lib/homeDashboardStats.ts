@@ -3,6 +3,9 @@ import { lineTotal, type KitchenTicket, type OpenTicket, type OrderLine, type Ta
 import { calcBill } from './bill'
 import { isExternalChannelOrder } from './ksaDelivery'
 import type { AppliedCharge } from '../state/PosContext'
+import { loadCompanyProfile } from '../data/company'
+import { peekDishes } from '../data/repos/mastersRepo'
+import { loadTaxes, orderTaxBillOptions } from '../data/tax'
 
 export type HomeDashboardStats = {
   openTablesCount: number
@@ -26,9 +29,23 @@ function activeTickets(tickets: OpenTicket[]) {
   return tickets.filter((t) => t.lines.length > 0)
 }
 
+function taxOpts(lines: OrderLine[]) {
+  return orderTaxBillOptions(
+    lines,
+    peekDishes(),
+    loadTaxes(),
+    loadCompanyProfile().enableTax !== false,
+  )
+}
+
 function ticketPayable(ticket: OpenTicket) {
-  const goods = lineTotal(ticket.lines) + (ticket.deliveryFee ?? 0)
-  return calcBill(goods, 0, []).total
+  const fee = ticket.deliveryFee ?? 0
+  return calcBill(
+    lineTotal(ticket.lines),
+    0,
+    fee > 0 ? [{ id: 'delivery-fee', name: 'Delivery fee', amount: fee }] : [],
+    taxOpts(ticket.lines),
+  ).total
 }
 
 export function useHomeDashboardStats({
@@ -72,7 +89,7 @@ export function useHomeDashboardStats({
       const goods = lineTotal(lines)
       const discountPct = tableDiscounts[table.id] ?? 0
       const charges = getTableChargeLines(table.id, goods)
-      openValue += calcBill(goods, discountPct, charges).total
+      openValue += calcBill(goods, discountPct, charges, taxOpts(lines)).total
     }
     for (const ticket of ticketQueue) {
       openValue += ticketPayable(ticket)

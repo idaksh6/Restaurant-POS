@@ -1,5 +1,11 @@
 import { useEffect, useState, type KeyboardEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import {
+  incomingBranchTransfers,
+  pendingBranchDispatch,
+  TRANSFERS_CHANGED,
+  transferItemName,
+} from '../data/stockTransfers'
 import { branchDisplayName, companyDisplayName } from '../lib/branding'
 import { localeTag, useI18n } from '../locale/i18n'
 import { useAuth } from '../state/AuthContext'
@@ -21,19 +27,31 @@ export default function DashHeader({
   brandTo?: string
 }) {
   const { user, logout } = useAuth()
-  const { kitchen, tables } = usePos()
-  const { branches, activeBranch, switchBranch, company } = useBranch()
+  const { kitchen, tables, flash } = usePos()
+  const { allowedBranches, activeBranch, switchBranch, company } = useBranch()
   const { t, lang } = useI18n()
-  const { connectivity, outbox, runSync } = useSync()
+  const { connectivity, queued, outbox, runSync, syncEpoch, refreshOutbox, lastSyncAt } = useSync()
   const navigate = useNavigate()
   const [notesOpen, setNotesOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const [transferTick, setTransferTick] = useState(0)
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    const bump = () => setTransferTick((n) => n + 1)
+    window.addEventListener(TRANSFERS_CHANGED, bump)
+    return () => window.removeEventListener(TRANSFERS_CHANGED, bump)
+  }, [])
+
+  useEffect(() => {
+    // Keep chip honest with HubHeader — prune online-redundant masters then refresh count.
+    refreshOutbox()
+  }, [syncEpoch, refreshOutbox])
 
   useEffect(() => {
     if (!profileOpen && !notesOpen) return
@@ -49,21 +67,55 @@ export default function DashHeader({
   if (!user) return null
 
   const poison = outbox.filter((op) => op.status === 'poison').length
+  const pendingOps = outbox.filter((op) => op.status === 'pending' || op.status === 'syncing')
   const lastErr = outbox.find((op) => op.lastError)?.lastError
+  const queueHint = pendingOps.length
+    ? Object.entries(
+        pendingOps.reduce<Record<string, number>>((acc, op) => {
+          acc[op.type] = (acc[op.type] ?? 0) + 1
+          return acc
+        }, {}),
+      )
+        .map(([type, n]) => `${type} × ${n}`)
+        .join(', ')
+    : ''
   const syncLabel =
     connectivity === 'offline'
       ? t.offline
       : connectivity === 'syncing'
-        ? t.syncing
+        ? `${t.syncing}${queued ? ` (${queued})` : ''}`
         : poison
           ? t.syncPoison
-          : t.online
+          : queued
+            ? `${t.online} · ${queued} ${t.queuedCount}`
+            : t.online
+  const lastSyncLabel = lastSyncAt
+    ? new Date(lastSyncAt).toLocaleTimeString(localeTag(lang), {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      })
+    : ''
+  const syncTitle =
+    [
+      queueHint ? `Pending: ${queueHint}` : '',
+      lastErr,
+      lastSyncLabel ? `Last sync ${lastSyncLabel}` : '',
+      'Click: sync · Double-click: pull menu/masters',
+    ]
+      .filter(Boolean)
+      .join(' — ') || syncLabel
 
   const brandName = companyDisplayName(company, lang)
   const branchLabel = `${activeBranch.code} - ${branchDisplayName(activeBranch, lang)}`
   const billing = tables.filter((table) => table.status === 'billing')
   const kitchenQueue = kitchen.filter((ticket) => ticket.status !== 'ready').length
-  const alertCount = kitchenQueue + billing.length
+  const incomingTransfers = incomingBranchTransfers(activeBranch.id)
+  const dispatchRequests = pendingBranchDispatch(activeBranch.id)
+  void transferTick
+  void syncEpoch
+  const alertCount =
+    kitchenQueue + billing.length + incomingTransfers.length + dispatchRequests.length
   const clockDate = new Date(now)
     .toLocaleDateString(localeTag(lang), {
       day: '2-digit',
@@ -117,9 +169,7 @@ export default function DashHeader({
               switchBranch(id)
               window.location.reload()
             }}
-            options={branches
-              .filter((b) => b.active)
-              .map((b) => ({
+            options={allowedBranches.map((b) => ({
                 value: b.id,
                 label: `${b.code} - ${branchDisplayName(b, lang)}`,
               }))}
@@ -134,8 +184,14 @@ export default function DashHeader({
             type="button"
             className={`mesa-sync-chip ${poison ? 'poison' : connectivity}`}
             onClick={() => void runSync({ force: true })}
-            title={lastErr ? `${syncLabel} — ${lastErr}` : syncLabel}
-            aria-label={lastErr ? `${syncLabel} — ${lastErr}` : syncLabel}
+            onDoubleClick={(e) => {
+              e.preventDefault()
+              void runSync({ force: true, masters: true }).then(() => {
+                flash('Menu & masters refreshed from server')
+              })
+            }}
+            title={syncTitle}
+            aria-label={syncTitle}
           >
             <span className="mesa-sync-dot" aria-hidden />
             <span className="zk-dash-sync-text">{syncLabel}</span>
@@ -157,6 +213,30 @@ export default function DashHeader({
           </button>
           {notesOpen ? (
             <div className="zk-dash-note-pop">
+              {incomingTransfers.map((row) => (
+                <Link
+                  key={`in-${row.id}`}
+                  to="/settings/inventory/transfer"
+                  onClick={() => setNotesOpen(false)}
+                >
+                  Approve receive · {transferItemName(row)} · {row.qty} {row.unit}
+                  <small>
+                    From {row.fromBranchName || 'branch'}
+                  </small>
+                </Link>
+              ))}
+              {dispatchRequests.map((row) => (
+                <Link
+                  key={`out-${row.id}`}
+                  to="/settings/inventory/transfer"
+                  onClick={() => setNotesOpen(false)}
+                >
+                  Approve &amp; dispatch · {transferItemName(row)} · {row.qty} {row.unit}
+                  <small>
+                    Requested by {row.toBranchName || 'branch'}
+                  </small>
+                </Link>
+              ))}
               <Link to="/kitchen" onClick={() => setNotesOpen(false)}>
                 {t.kotWaiting} · {kitchenQueue}
               </Link>

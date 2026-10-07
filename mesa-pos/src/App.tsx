@@ -2,11 +2,13 @@ import type { ReactNode } from 'react'
 import { BrowserRouter, HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import AppShell from './components/AppShell'
 import FlashPopup from './components/FlashPopup'
+import PrintFailureHost from './components/printers/PrintFailureHost'
 import RequireAuth from './components/RequireAuth'
 import RoleRoute from './components/RoleRoute'
 import BackOfficePage from './pages/BackOfficePage'
 import CrmPage from './pages/CrmPage'
 import CompanyDetailsPage from './pages/CompanyDetailsPage'
+import ZatcaInvoicesPage from './pages/ZatcaInvoicesPage'
 import DepartmentsPage from './pages/DepartmentsPage'
 import DeliveryPage from './pages/DeliveryPage'
 import DeliveryIntegrationsPage from './pages/DeliveryIntegrationsPage'
@@ -23,6 +25,13 @@ import DatabaseImportPage from './pages/DatabaseImportPage'
 import HomePage from './pages/HomePage'
 import IngredientMasterPage from './pages/IngredientMasterPage'
 import RecipeUsagePage from './pages/RecipeUsagePage'
+import ReportsPage from './pages/ReportsPage'
+import AccountsPage from './pages/AccountsPage'
+import ChartOfAccountsPage from './pages/ChartOfAccountsPage'
+import GlExportPage from './pages/GlExportPage'
+import ApBillsPage from './pages/ApBillsPage'
+import ExpensesPage from './pages/ExpensesPage'
+import BarcodePage from './pages/BarcodePage'
 import InventoryPage from './pages/InventoryPage'
 import KitchenPage from './pages/KitchenPage'
 import MastersPage from './pages/MastersPage'
@@ -33,6 +42,11 @@ import ProductsPage from './pages/ProductsPage'
 import PurchaseOrdersPage from './pages/PurchaseOrdersPage'
 import QuickServePage from './pages/QuickServePage'
 import DriveThruPage from './pages/DriveThruPage'
+import BeverageQtyMasterPage from './pages/BeverageQtyMasterPage'
+import BeveragePriceMasterPage from './pages/BeveragePriceMasterPage'
+import AddonsMasterPage from './pages/AddonsMasterPage'
+import LoyaltyCampaignsPage from './pages/LoyaltyCampaignsPage'
+import GuestMenuPage from './pages/GuestMenuPage'
 import SettingsPage from './pages/SettingsPage'
 import StockReceivingPage from './pages/StockReceivingPage'
 import StockTransferPage from './pages/StockTransferPage'
@@ -48,6 +62,7 @@ import ExtraChargesPage from './pages/ExtraChargesPage'
 import RiderAppPage from './pages/RiderAppPage'
 import CourierPickupPage from './pages/CourierPickupPage'
 import PrintersPage from './pages/PrintersPage'
+import CardTerminalPage from './pages/CardTerminalPage'
 import UnitsPage from './pages/UnitsPage'
 import UsersPage from './pages/UsersPage'
 import RolesPage from './pages/RolesPage'
@@ -64,6 +79,7 @@ import { MastersProvider } from './state/MastersContext'
 import { PosProvider } from './state/PosContext'
 import { PurchasingProvider } from './state/PurchasingContext'
 import { ShiftProvider } from './state/ShiftContext'
+import { TimeClockProvider } from './state/TimeClockContext'
 import { SyncProvider } from './sync/SyncContext'
 
 function Guard({ children }: { children: ReactNode }) {
@@ -86,8 +102,10 @@ export default function App() {
                   <PosProvider>
                     <PurchasingProvider>
                       <ShiftProvider>
+                        <TimeClockProvider>
                         <Routes>
                           <Route path="/developer" element={<DeveloperPortalPage />} />
+                          <Route path="/order/:token" element={<GuestMenuPage />} />
                           <Route element={<RequireAuth />}>
                             <Route element={<AppShell />}>
                               <Route path="/" element={<Guard><HomePage /></Guard>} />
@@ -110,8 +128,10 @@ export default function App() {
                               <Route path="/masters" element={<Guard><MastersPage /></Guard>} />
                               <Route path="/settings" element={<Guard><SettingsPage /></Guard>} />
                               <Route path="/settings/company" element={<Guard><CompanyDetailsPage /></Guard>} />
+                              <Route path="/settings/zatca/invoices" element={<Guard><ZatcaInvoicesPage /></Guard>} />
                               <Route path="/settings/customers" element={<Guard><CrmPage /></Guard>} />
                               <Route path="/settings/gift-cards" element={<Guard><GiftCardsPage /></Guard>} />
+                              <Route path="/settings/loyalty-campaigns" element={<Guard><LoyaltyCampaignsPage /></Guard>} />
                               <Route path="/settings/food-vouchers" element={<Guard><FoodVouchersPage /></Guard>} />
                               <Route path="/settings/menu-timetable" element={<Guard><MenuTimetablePage /></Guard>} />
                               <Route path="/settings/floor" element={<Guard><FloorTablesMasterPage /></Guard>} />
@@ -125,10 +145,14 @@ export default function App() {
                               <Route path="/settings/discount" element={<Guard><DiscountPage /></Guard>} />
                               <Route path="/settings/extra-charges" element={<Guard><ExtraChargesPage /></Guard>} />
                               <Route path="/settings/printers" element={<Guard><PrintersPage /></Guard>} />
+                              <Route path="/settings/card-terminal" element={<Guard><CardTerminalPage /></Guard>} />
                               <Route path="/settings/delivery-riders" element={<Guard><DeliveryRidersPage /></Guard>} />
                               <Route path="/settings/delivery-integrations" element={<Guard><DeliveryIntegrationsPage /></Guard>} />
                               <Route path="/settings/notifications" element={<Guard><DeliveryIntegrationsPage /></Guard>} />
                               <Route path="/settings/units" element={<Guard><UnitsPage /></Guard>} />
+                              <Route path="/settings/beverages/quantities" element={<Guard><BeverageQtyMasterPage /></Guard>} />
+                              <Route path="/settings/beverages/prices" element={<Guard><BeveragePriceMasterPage /></Guard>} />
+                              <Route path="/settings/addons" element={<Guard><AddonsMasterPage /></Guard>} />
                               <Route path="/settings/users" element={<Guard><UsersPage /></Guard>} />
                               <Route path="/settings/roles" element={<Guard><RolesPage /></Guard>} />
                               <Route path="/settings/menu-details" element={<Guard><ProductsPage /></Guard>} />
@@ -137,9 +161,16 @@ export default function App() {
                               <Route path="/settings/accounts/payment-types" element={<Navigate to="/expenses/payment-types" replace />} />
                               <Route path="/settings/accounts/expense-types" element={<Navigate to="/expenses/types" replace />} />
                               <Route path="/settings/accounts/expense-details" element={<Navigate to="/expenses" replace />} />
+                              <Route path="/accounts" element={<Guard><AccountsPage /></Guard>} />
+                              <Route path="/accounts/coa" element={<Guard><ChartOfAccountsPage /></Guard>} />
+                              <Route path="/accounts/gl-export" element={<Guard><GlExportPage /></Guard>} />
+                              <Route path="/accounts/ap" element={<Guard><ApBillsPage /></Guard>} />
+                              <Route path="/expenses/hub" element={<Guard><ExpensesPage /></Guard>} />
                               <Route path="/expenses" element={<Guard><ExpenseDetailsPage /></Guard>} />
                               <Route path="/expenses/types" element={<Guard><ExpenseTypesPage /></Guard>} />
                               <Route path="/expenses/payment-types" element={<Guard><PaymentTypesPage /></Guard>} />
+                              <Route path="/reports" element={<Guard><ReportsPage /></Guard>} />
+                              <Route path="/barcode" element={<Guard><BarcodePage /></Guard>} />
                               <Route path="/settings/vendors" element={<Guard><VendorsPage /></Guard>} />
                               <Route path="/settings/inventory" element={<Navigate to="/settings?tab=inventory" replace />} />
                               <Route path="/settings/inventory/receiving" element={<Guard><StockReceivingPage /></Guard>} />
@@ -151,9 +182,11 @@ export default function App() {
                             </Route>
                           </Route>
                         </Routes>
+                        </TimeClockProvider>
                       </ShiftProvider>
                     </PurchasingProvider>
                     <FlashPopup />
+                    <PrintFailureHost />
                   </PosProvider>
                   </CatalogProvider>
                   </FoodVoucherProvider>

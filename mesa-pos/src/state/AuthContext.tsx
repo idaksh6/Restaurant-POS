@@ -48,13 +48,34 @@ type AuthContextValue = {
   loginRider: (pin: string) => Promise<boolean>
   logout: () => void
   refreshStaff: () => Promise<boolean>
+  /** Keep signed-in user in sync after editing users (branch, name, role). */
+  applyUserProfile: (patch: Partial<StaffAccount> & { id: string }) => void
   bindTerminal: (company: ApiCompany) => Promise<void>
   activateTerminal: (taxId: string) => Promise<void>
+  /** Clear company bind (e.g. license expired) so activation page shows again. */
+  clearTerminalBinding: () => void
   updateSelectedCompany: (company: ApiCompany) => void | Promise<void>
 }
 
 const TOKEN_KEY = 'mesa-token'
 const USER_KEY = 'mesa-user'
+const USER_BRANCH_KEY = 'mesa-user-branch'
+
+function persistUserSession(user: StaffAccount, accessToken?: string | null) {
+  sessionStorage.setItem(USER_KEY, user.id)
+  if (user.branchId) sessionStorage.setItem(USER_BRANCH_KEY, user.branchId)
+  else sessionStorage.removeItem(USER_BRANCH_KEY)
+  if (accessToken) {
+    sessionStorage.setItem(TOKEN_KEY, accessToken)
+  }
+}
+
+function clearUserSession() {
+  sessionStorage.removeItem(USER_KEY)
+  sessionStorage.removeItem(USER_BRANCH_KEY)
+  sessionStorage.removeItem(TOKEN_KEY)
+  sessionStorage.removeItem('mesa-rider-session')
+}
 const COMPANY_KEY = 'mesa-login-company-id'
 const TERMINAL_COMPANY_KEY = 'mesa-terminal-company'
 const STAFF_CACHE_PREFIX = 'mesa-staff-cache:'
@@ -131,6 +152,7 @@ function fromApiStaff(s: ApiStaff): CachedStaff {
     roleLabel: roleDisplayName(role),
     pin: '',
     initials: initials(s.name),
+    branchId: s.branchId ?? null,
     username: s.username,
     pinHash: s.pinHash,
     companyId: s.companyId,
@@ -171,6 +193,11 @@ function saveTerminalCompany(company: ApiCompany) {
   localStorage.setItem(COMPANY_KEY, company.id)
 }
 
+function clearTerminalCompany() {
+  localStorage.removeItem(TERMINAL_COMPANY_KEY)
+  localStorage.removeItem(COMPANY_KEY)
+}
+
 function demoUsernameFor(staffId: string, role: StaffAccount['role']) {
   const map: Record<string, string> = {
     st1: 'admin',
@@ -202,7 +229,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!saved) return null
     const id = loadTerminalCompany()?.id ?? localStorage.getItem(COMPANY_KEY)
     const cached = id ? loadStaffCache(id) : []
-    return cached.find((s) => s.id === saved) ?? staffAccounts.find((s) => s.id === saved) ?? null
+    const found =
+      cached.find((s) => s.id === saved) ?? staffAccounts.find((s) => s.id === saved) ?? null
+    if (!found) return null
+    // Prefer staff/API branchId (including explicit null = all branches).
+    // Do not fall back to session when cache says null — that kept Admin locked to one branch.
+    return {
+      ...found,
+      branchId: found.branchId ?? null,
+    }
   })
 
   const authMode: 'api' | 'local' | 'offline-cache' = !apiConfigured()
@@ -227,7 +262,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadStaffFor = useCallback(async (id: string) => {
     const rows = await apiListStaff(id)
     saveStaffCache(id, rows)
-    setCachedApiStaff(rows.map(fromApiStaff))
+    const mapped = rows.map(fromApiStaff)
+    setCachedApiStaff(mapped)
+    setUser((prev) => {
+      if (!prev) return prev
+      const match = mapped.find((s) => s.id === prev.id)
+      if (!match) return prev
+      const next: StaffAccount = {
+        ...prev,
+        name: match.name,
+        role: match.role,
+        roleLabel: match.roleLabel,
+        branchId: match.branchId ?? null,
+        initials: match.initials,
+      }
+      persistUserSession(next)
+      return next
+    })
     void syncCompanyRoles(id).catch(() => undefined)
     const fromStaff = rows[0]?.company
     if (fromStaff?.companyName) {
@@ -244,6 +295,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return next
       })
     }
+  }, [])
+
+  const applyUserProfile = useCallback((patch: Partial<StaffAccount> & { id: string }) => {
+    setUser((prev) => {
+      if (!prev || prev.id !== patch.id) return prev
+      const next: StaffAccount = {
+        ...prev,
+        ...patch,
+        branchId: patch.branchId !== undefined ? patch.branchId : prev.branchId,
+      }
+      persistUserSession(next)
+      return next
+    })
   }, [])
 
   const bindTerminal = useCallback(
@@ -281,6 +345,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (prevDb !== company.id) window.location.reload()
   }, [])
 
+  const clearTerminalBinding = useCallback(() => {
+    clearTerminalCompany()
+    setSelectedCompany(null)
+    setCompanyId(null)
+    setCachedApiStaff([])
+    setUser(null)
+    setToken(null)
+    clearUserSession()
+  }, [])
+
   const activateTerminal = useCallback(
     async (taxId: string) => {
       const vat = taxId.trim()
@@ -293,7 +367,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await bindTerminal(LOCAL_COMPANY)
         return
       }
-      throw new Error('No company for this VAT / tax ID')
+      throw new Error('No company for this company code or VAT / tax ID')
     },
     [bindTerminal],
   )
@@ -378,11 +452,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             roleLabel: roleDisplayName(role),
             pin: '',
             initials: initials(result.user.name),
+            branchId: result.user.branchId ?? null,
           }
           setUser(next)
           setToken(result.accessToken)
-          sessionStorage.setItem(USER_KEY, next.id)
-          sessionStorage.setItem(TOKEN_KEY, result.accessToken)
+          persistUserSession(next, result.accessToken)
           if (result.company) {
             const bound: ApiCompany = {
               id: result.company.id,
@@ -408,6 +482,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const code = err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code) : ''
           const msg = err instanceof Error ? err.message : ''
           if (code === 'inactive' || /inactive/i.test(msg)) return 'inactive'
+          if (/license expired|suspended|not activated/i.test(msg)) {
+            throw err instanceof Error ? err : new Error(msg || 'POS license blocked')
+          }
           setApiOnline(false)
         }
       }
@@ -418,7 +495,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (ok) {
           setUser(cached)
           setToken(null)
-          sessionStorage.setItem(USER_KEY, cached.id)
+          persistUserSession(cached)
           sessionStorage.removeItem(TOKEN_KEY)
           return true
         }
@@ -430,7 +507,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const next = toStaffAccount(managed)
         setUser(next)
         setToken(null)
-        sessionStorage.setItem(USER_KEY, next.id)
+        persistUserSession(next)
         sessionStorage.removeItem(TOKEN_KEY)
         return true
       }
@@ -439,7 +516,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (local && local.pin === pin) {
         setUser(local)
         setToken(null)
-        sessionStorage.setItem(USER_KEY, local.id)
+        persistUserSession(local)
         sessionStorage.removeItem(TOKEN_KEY)
         return true
       }
@@ -456,7 +533,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const cid = companyId ?? loadTerminalCompany()?.id
       if (!cid) return false
 
-      const applyRider = (riderId: string, name: string, accessToken?: string) => {
+      const applyRider = (
+        riderId: string,
+        name: string,
+        accessToken?: string,
+        branchId?: string | null,
+      ) => {
         const next: StaffAccount = {
           id: `rider:${riderId}`,
           name,
@@ -465,24 +547,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           pin: '',
           initials: initials(name),
           riderId,
+          branchId: branchId ?? null,
         }
         setUser(next)
-        sessionStorage.setItem(USER_KEY, next.id)
+        persistUserSession(next, accessToken)
         sessionStorage.setItem(
           'mesa-rider-session',
           JSON.stringify({ riderId, name }),
         )
-        if (accessToken) {
-          setToken(accessToken)
-          sessionStorage.setItem(TOKEN_KEY, accessToken)
-        }
+        if (accessToken) setToken(accessToken)
       }
 
       if (apiConfigured() && (apiOnline || navigator.onLine)) {
         try {
           const result = await apiRiderLogin(code, cid)
           const riderId = result.user.riderId ?? String(result.user.id).replace(/^rider:/, '')
-          applyRider(riderId, result.user.name, result.accessToken)
+          applyRider(riderId, result.user.name, result.accessToken, result.user.branchId)
           if (result.company) {
             const bound: ApiCompany = {
               id: result.company.id,
@@ -514,7 +594,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return digits.slice(-4) === code
       })
       if (matched.length !== 1) return false
-      applyRider(matched[0].id, matched[0].name)
+      applyRider(matched[0].id, matched[0].name, undefined, matched[0].branchId)
       return true
     },
     [apiOnline, companyId],
@@ -523,9 +603,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setUser(null)
     setToken(null)
-    sessionStorage.removeItem(USER_KEY)
-    sessionStorage.removeItem(TOKEN_KEY)
-    sessionStorage.removeItem('mesa-rider-session')
+    clearUserSession()
   }, [])
 
   const value = useMemo(
@@ -541,8 +619,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginRider,
       logout,
       refreshStaff,
+      applyUserProfile,
       bindTerminal,
       activateTerminal,
+      clearTerminalBinding,
       updateSelectedCompany,
     }),
     [
@@ -557,8 +637,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginRider,
       logout,
       refreshStaff,
+      applyUserProfile,
       bindTerminal,
       activateTerminal,
+      clearTerminalBinding,
       updateSelectedCompany,
     ],
   )

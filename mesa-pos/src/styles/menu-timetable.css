@@ -1,0 +1,329 @@
+/* Menu Timetable — fixed action dock + responsive transfer lists */
+
+.zk-mt {
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.zk-mt > .zk-hub-top,
+.zk-mt > .zk-hub-foot {
+  flex-shrink: 0;
+}
+
+.zk-mt-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.75rem clamp(0.65rem, 2vw, 1rem) 0;
+  padding: 0.65rem 0.9rem;
+  min-width: 0;
+}
+
+.zk-mt-bar h1 {
+  grid-column: 1;
+  justify-self: start;
+  text-align: start;
+  max-width: 100%;
+}
+
+.zk-mt-bar-actions {
+  grid-column: 2;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.zk-mt-grid-wrap {
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.75rem clamp(0.65rem, 2vw, 1rem) 1rem;
+}
+
+/* Form shell: scroll body + docked actions (never overlay content) */
+.zk-mt-form-wrap {
+  display: flex !important;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden !important;
+  padding: 0.75rem clamp(0.65rem, 2vw, 1rem) 0.65rem;
+  gap: 0;
+  align-content: stretch;
+  grid-template-rows: none;
+}
+
+.zk-mt-form-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 0.35rem;
+}
+
+.zk-mt-form {
+  min-width: 0;
+  align-self: stretch;
+  margin: 0;
+}
+
+.zk-mt-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.zk-mt-active {
+  user-select: none;
+  position: relative;
+}
+
+.zk-mt-active input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  pointer-events: none;
+}
+
+.zk-mt-active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid #c5d0c8;
+  background: #eef3f0;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  font-weight: 750;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.zk-mt-active-pill::before {
+  content: '';
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  box-sizing: border-box;
+  opacity: 0.55;
+}
+
+.zk-mt-active.is-on .zk-mt-active-pill {
+  color: var(--ok, #167a43);
+  background: var(--ok-soft, #e6f6ec);
+  border-color: color-mix(in srgb, var(--ok, #167a43) 35%, #fff);
+}
+
+.zk-mt-active.is-on .zk-mt-active-pill::before {
+  opacity: 1;
+  border: 0;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Ccircle cx='8' cy='8' r='8' fill='%23167a43'/%3E%3Cpath d='M4.5 8.2l2.2 2.2 4.8-4.8' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+.zk-mt-tile-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #126739;
+  background: #d8f3e4;
+}
+
+.zk-mt-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 0.85rem;
+}
+
+.zk-mt-field {
+  min-width: 0;
+}
+
+.zk-mt-field.full {
+  grid-column: 1 / -1;
+}
+
+.zk-mt-input-icon {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+
+.zk-mt-input-icon > input {
+  width: 100%;
+  box-sizing: border-box;
+  padding-inline-end: 2.5rem;
+  min-height: var(--touch-min, 2.75rem);
+}
+
+.zk-mt-input-icon > svg {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+[dir='rtl'] .zk-mt-input-icon > input {
+  padding-inline-end: 0.75rem;
+  padding-inline-start: 2.5rem;
+}
+
+[dir='rtl'] .zk-mt-input-icon > svg {
+  right: auto;
+  left: 0.75rem;
+}
+
+.zk-mt-transfer-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.zk-mt-list {
+  min-height: 9.5rem;
+  max-height: min(14rem, 32vh);
+}
+
+.zk-mt-list-empty {
+  min-height: 9.5rem;
+}
+
+.zk-mt-transfer-btns {
+  align-content: center;
+  gap: 0.45rem;
+  display: grid;
+  align-self: center;
+}
+
+.zk-mt-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 2.5rem;
+}
+
+.zk-mt-mini svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+/* Docked footer — not sticky over scroll content */
+.zk-mt-actions {
+  position: static !important;
+  flex: 0 0 auto;
+  z-index: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.7rem 0.15rem 0.35rem;
+  border-top: 1px solid #d5ddd8;
+  background: linear-gradient(180deg, #eef3f0ee 0%, #eef3f0 40%);
+  box-shadow: none;
+}
+
+.zk-mt-action {
+  min-height: var(--touch-min, 2.75rem);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.zk-mt-action svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+  .zk-mt-transfer-row {
+    grid-template-columns: 1fr;
+  }
+
+  .zk-mt-transfer-btns {
+    grid-template-columns: 1fr 1fr;
+    order: 2;
+  }
+
+  .zk-mt-transfer-row > .zk-mt-list-panel:first-of-type {
+    order: 1;
+  }
+
+  .zk-mt-transfer-row > .zk-mt-list-panel:last-of-type {
+    order: 3;
+  }
+
+  .zk-mt-mini {
+    width: 100%;
+  }
+
+  .zk-mt-list,
+  .zk-mt-list-empty {
+    max-height: min(12rem, 28vh);
+  }
+}
+
+@media (max-width: 640px) {
+  .zk-mt-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .zk-mt-form-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .zk-mt-active {
+    align-self: flex-start;
+  }
+
+  .zk-mt-bar {
+    margin-inline: 0.55rem;
+    padding: 0.55rem 0.7rem;
+  }
+
+  .zk-mt-bar h1 {
+    font-size: 1.1rem;
+  }
+
+  .zk-mt-grid {
+    grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  }
+
+  .zk-mt-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .zk-mt-action.primary {
+    grid-column: 1 / -1;
+  }
+}

@@ -1,4 +1,12 @@
-import { loadOutbox, markOutboxStatuses, clearAckedOutbox, sanitizePoisonOutbox, pruneRedundantOutbox, type OutboxOp } from './outbox'
+import {
+  loadOutbox,
+  markOutboxStatuses,
+  clearAckedOutbox,
+  sanitizePoisonOutbox,
+  pruneRedundantOutbox,
+  withBranchStamped,
+  type OutboxOp,
+} from './outbox'
 import { getActiveBranchId } from '../data/company'
 import { tenantGetItem, tenantSetItem } from '../data/repos/db'
 
@@ -24,12 +32,40 @@ function authHeaders(json = false): HeadersInit {
   return headers
 }
 
-export function getSyncCursor() {
-  return tenantGetItem(CURSOR_KEY) ?? '0'
+function cursorStorageKey(branch = branchId()) {
+  return branch ? `${CURSOR_KEY}::${branch}` : CURSOR_KEY
 }
 
-export function setSyncCursor(cursor: string) {
-  tenantSetItem(CURSOR_KEY, cursor)
+/** Drop legacy count-based cursors (pure digits) so pull uses appliedAt watermarks. */
+export function normalizeSyncCursor(raw: string | null | undefined): string {
+  if (!raw || raw === '0') return '0'
+  if (/^\d+$/.test(raw)) return '0'
+  const t = Date.parse(raw)
+  if (Number.isNaN(t)) return '0'
+  return raw
+}
+
+export function getSyncCursor(branch = branchId()) {
+  const keyed = tenantGetItem(cursorStorageKey(branch))
+  if (keyed != null) return normalizeSyncCursor(keyed)
+  // One-shot migrate company-wide cursor into branch-scoped key.
+  const legacy = tenantGetItem(CURSOR_KEY)
+  const normalized = normalizeSyncCursor(legacy)
+  if (legacy != null && branch) tenantSetItem(cursorStorageKey(branch), normalized)
+  return normalized
+}
+
+export function setSyncCursor(cursor: string, branch = branchId()) {
+  const next = normalizeSyncCursor(cursor)
+  tenantSetItem(cursorStorageKey(branch), next)
+  // Keep legacy key warm for older builds reading company-wide cursor.
+  tenantSetItem(CURSOR_KEY, next)
+}
+
+/** Clear watermark so next bootstrap/pull starts clean for this branch. */
+export function resetSyncCursor(branch = branchId()) {
+  tenantSetItem(cursorStorageKey(branch), '0')
+  tenantSetItem(CURSOR_KEY, '0')
 }
 
 const PUSH_BATCH = 8
@@ -51,14 +87,17 @@ async function pushBatch(apiBase: string, deviceId: string, batch: OutboxOp[]) {
     headers: authHeaders(true),
     body: JSON.stringify({
       deviceId,
-      ops: batch.map((o: OutboxOp) => ({
-        id: o.id,
-        type: o.type,
-        entityId: o.entityId,
-        payload: o.payload,
-        createdAt: o.createdAt,
-        branchId: o.branchId ?? branchId(),
-      })),
+      ops: batch.map((o: OutboxOp) => {
+        const stamped = withBranchStamped(o)
+        return {
+          id: stamped.id,
+          type: stamped.type,
+          entityId: stamped.entityId,
+          payload: stamped.payload,
+          createdAt: stamped.createdAt,
+          branchId: stamped.branchId ?? branchId(),
+        }
+      }),
     }),
   })
   if (res.status === 413 && batch.length > 1) {
@@ -151,7 +190,7 @@ export async function pullSync(apiBase: string) {
   const res = await fetch(`${apiBase}/sync/pull?${qs}`, { headers: authHeaders() })
   if (!res.ok) throw new Error(`pull ${res.status}`)
   const data = (await res.json()) as { cursor?: string; entities?: unknown[] }
-  if (data.cursor) setSyncCursor(data.cursor)
+  if (data.cursor) setSyncCursor(data.cursor, br)
   return data
 }
 

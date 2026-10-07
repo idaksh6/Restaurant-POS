@@ -13,6 +13,7 @@ import {
   starterChargesForBranch,
   type ExtraCharge,
 } from '../data/charges'
+import { activeTaxes, companyDefaultTaxPercent, normalizeTaxIds } from '../data/tax'
 import { useAuth } from '../state/AuthContext'
 import { useBranch } from '../state/BranchContext'
 import { useCatalog } from '../state/CatalogContext'
@@ -26,14 +27,23 @@ const blank = (sort: number): ExtraCharge => ({
   percent: false,
   active: true,
   sort,
+  taxIds: [],
 })
+
+function chargeTaxLabel(row: ExtraCharge, taxes: ReturnType<typeof activeTaxes>, defaultPct: number) {
+  const id = normalizeTaxIds(row.taxIds)[0]
+  if (!id) return `Tax · default ${defaultPct}%`
+  const tx = taxes.find((t) => t.id === id)
+  if (!tx) return `Tax · default ${defaultPct}%`
+  return `Tax · ${tx.percent}%`
+}
 
 export default function ExtraChargesPage() {
   const { user } = useAuth()
   const { flash } = usePos()
   const { activeBranchId } = useBranch()
   const canAccess = user ? getPermissions(user.role).canMasters || user.role === 'admin' : false
-  const { extraCharges: allRows, saveExtraCharge, deleteExtraCharge } = useCatalog()
+  const { extraCharges: allRows, saveExtraCharge, deleteExtraCharge, taxes } = useCatalog()
   const [editing, setEditing] = useState<ExtraCharge | null>(null)
   const [isNew, setIsNew] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
@@ -44,6 +54,9 @@ export default function ExtraChargesPage() {
     [allRows, activeBranchId],
   )
 
+  const selectableTaxes = useMemo(() => activeTaxes(taxes), [taxes])
+  const defaultTaxPct = useMemo(() => companyDefaultTaxPercent(taxes), [taxes])
+
   const sorted = useMemo(
     () =>
       [...rows].sort(
@@ -52,9 +65,19 @@ export default function ExtraChargesPage() {
     [rows],
   )
 
+  function closeEditor() {
+    setEditing(null)
+    setIsNew(false)
+  }
+
   function startNew() {
     setIsNew(true)
     setEditing(blank(Math.max(0, ...rows.map((r) => r.sort ?? 0)) + 1))
+  }
+
+  function openEdit(row: ExtraCharge) {
+    setIsNew(false)
+    setEditing({ ...row, taxIds: normalizeTaxIds(row.taxIds) })
   }
 
   function loadStarter() {
@@ -94,11 +117,11 @@ export default function ExtraChargesPage() {
       branchId: editing.branchId ?? activeBranchId,
       name: editing.name.trim(),
       amount,
+      taxIds: normalizeTaxIds(editing.taxIds),
     }
     saveExtraCharge(row)
     setSuccessMsg(isNew ? 'Charge created' : 'Charge updated')
-    setEditing(null)
-    setIsNew(false)
+    closeEditor()
     flash(isNew ? 'Charge created' : 'Charge updated')
   }
 
@@ -108,7 +131,7 @@ export default function ExtraChargesPage() {
       name: editing.name,
       onConfirm: () => {
         deleteExtraCharge(editing.id)
-        setEditing(null)
+        closeEditor()
         flash('Charge deleted')
       },
     })
@@ -145,7 +168,7 @@ export default function ExtraChargesPage() {
         </div>
       </div>
 
-      <div className="zk-et-body">
+      <div className="zk-et-body zk-et-body-solo">
         <div className="zk-et-list">
           {sorted.length === 0 ? (
             <div className="zk-et-empty">
@@ -165,15 +188,14 @@ export default function ExtraChargesPage() {
               <button
                 key={r.id}
                 type="button"
-                className={`zk-et-tile${editing?.id === r.id ? ' selected' : ''}${r.active ? '' : ' off'}`}
-                onClick={() => {
-                  setIsNew(false)
-                  setEditing({ ...r })
-                }}
+                className={`zk-et-tile${r.active ? '' : ' off'}`}
+                onClick={() => openEdit(r)}
               >
                 <strong>{r.name}</strong>
                 <small>
                   {r.percent ? `${r.amount}%` : `SAR ${r.amount.toFixed(2)}`}
+                  {' · '}
+                  {chargeTaxLabel(r, selectableTaxes, defaultTaxPct)}
                   {r.active ? '' : ' · inactive'}
                 </small>
                 <span className={`zk-et-tile-badge${r.active ? '' : ' off'}`}>
@@ -183,16 +205,34 @@ export default function ExtraChargesPage() {
             ))
           )}
         </div>
+      </div>
 
-        <section className={`zk-et-form-panel${editing ? ' open' : ''}`}>
-          {editing ? (
-            <>
-              <div className="zk-et-form-head">
+      {editing ? (
+        <div
+          className="zk-et-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="zk-et-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeEditor()
+          }}
+        >
+          <div className="zk-et-sheet">
+            <div className="zk-et-sheet-head">
+              <div>
                 <p className="zk-et-kicker">{isNew ? 'New charge' : 'Edit charge'}</p>
-                <h2>{editing.name.trim() || 'Untitled charge'}</h2>
+                <h2 id="zk-et-modal-title">{editing.name.trim() || 'Untitled charge'}</h2>
               </div>
+              <button type="button" className="zk-et-sheet-close" onClick={closeEditor} aria-label="Close">
+                ✕
+              </button>
+            </div>
+
+            <div className="zk-et-form-fields">
               <label>
-                Name <Req />
+                <span className="zk-et-label-text">
+                  Name <Req />
+                </span>
                 <input
                   className="search"
                   value={editing.name}
@@ -201,28 +241,34 @@ export default function ExtraChargesPage() {
                   autoFocus
                 />
               </label>
-              <label>
-                Amount
-                <input
-                  className="search"
-                  inputMode="decimal"
-                  value={String(editing.amount)}
-                  onChange={(e) => setEditing({ ...editing, amount: Number(e.target.value) || 0 })}
-                />
-              </label>
+              <div className="zk-et-form-row">
+                <label>
+                  <span className="zk-et-label-text">
+                    Amount <Req />
+                  </span>
+                  <input
+                    className="search"
+                    inputMode="decimal"
+                    value={String(editing.amount)}
+                    onChange={(e) =>
+                      setEditing({ ...editing, amount: Number(e.target.value) || 0 })
+                    }
+                  />
+                </label>
+                <label className="zk-et-status">
+                  <span className="zk-et-label-text">Type</span>
+                  <MesaSelect
+                    value={editing.percent ? 'percent' : 'fixed'}
+                    onChange={(v) => setEditing({ ...editing, percent: v === 'percent' })}
+                    options={[
+                      { value: 'fixed', label: 'Fixed SAR' },
+                      { value: 'percent', label: 'Percent of goods' },
+                    ]}
+                  />
+                </label>
+              </div>
               <label className="zk-et-status">
-                Type
-                <MesaSelect
-                  value={editing.percent ? 'percent' : 'fixed'}
-                  onChange={(v) => setEditing({ ...editing, percent: v === 'percent' })}
-                  options={[
-                    { value: 'fixed', label: 'Fixed SAR' },
-                    { value: 'percent', label: 'Percent of goods' },
-                  ]}
-                />
-              </label>
-              <label className="zk-et-status">
-                Status
+                <span className="zk-et-label-text">Status</span>
                 <MesaSelect
                   value={editing.active ? 'active' : 'inactive'}
                   onChange={(v) => setEditing({ ...editing, active: v === 'active' })}
@@ -232,35 +278,71 @@ export default function ExtraChargesPage() {
                   ]}
                 />
               </label>
-              <div className="zk-et-actions">
-                <button type="button" className="zk-et-action primary" onClick={save}>
-                  Save
-                </button>
-                {!isNew ? (
-                  <button type="button" className="zk-et-action danger" onClick={remove}>
-                    Delete
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  className="zk-et-action"
-                  onClick={() => {
-                    setEditing(null)
-                    setIsNew(false)
-                  }}
-                >
-                  Cancel
-                </button>
+
+              <div className="zk-et-tax">
+                <span className="zk-et-label-text">VAT / tax</span>
+                <p className="zk-et-tax-hint">
+                  Pick one rate for this charge. Company default uses the Tax master default (usually
+                  15%). Choose a 0% rate from Tax master if this fee should not add VAT.
+                </p>
+                {selectableTaxes.length === 0 ? (
+                  <div className="zk-et-tax-empty">
+                    No active taxes yet. <Link to="/settings/tax">Manage tax master →</Link>
+                  </div>
+                ) : (
+                  <ul className="zk-et-tax-list" role="radiogroup" aria-label="Charge tax rate">
+                    <li>
+                      <label
+                        className={`zk-et-tax-row${!normalizeTaxIds(editing.taxIds).length ? ' on' : ''}`}
+                      >
+                        <input
+                          type="radio"
+                          name="charge-tax"
+                          checked={!normalizeTaxIds(editing.taxIds).length}
+                          onChange={() => setEditing({ ...editing, taxIds: [] })}
+                        />
+                        <span className="zk-et-tax-name">Company default</span>
+                        <span className="zk-et-tax-pct">{defaultTaxPct}%</span>
+                      </label>
+                    </li>
+                    {selectableTaxes.map((tx) => {
+                      const on = normalizeTaxIds(editing.taxIds)[0] === tx.id
+                      return (
+                        <li key={tx.id}>
+                          <label className={`zk-et-tax-row${on ? ' on' : ''}`}>
+                            <input
+                              type="radio"
+                              name="charge-tax"
+                              checked={on}
+                              onChange={() => setEditing({ ...editing, taxIds: [tx.id] })}
+                            />
+                            <span className="zk-et-tax-name">{tx.name}</span>
+                            <span className="zk-et-tax-pct">{tx.percent}%</span>
+                          </label>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
               </div>
-            </>
-          ) : (
-            <div className="zk-et-empty panel">
-              <strong>Select a charge</strong>
-              <span>Or tap + to add one for this branch</span>
             </div>
-          )}
-        </section>
-      </div>
+
+            <div className="zk-et-actions">
+              <button type="button" className="zk-et-action primary" onClick={save}>
+                Save
+              </button>
+              {!isNew ? (
+                <button type="button" className="zk-et-action danger" onClick={remove}>
+                  Delete
+                </button>
+              ) : null}
+              <button type="button" className="zk-et-action" onClick={closeEditor}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <HubFooter backTo={settingsHubPath('products')} backLabel="Products" />
       {deleteConfirmDialog}

@@ -5,6 +5,7 @@ import { HubFooter, HubHeader } from '../components/HubChrome'
 import MesaSelect from '../components/MesaSelect'
 import {
   clearNotifyLog,
+  channelHonestyStatus,
   loadDeliveryIntegrations,
   loadNotifyLog,
   posApiBaseUrl,
@@ -17,6 +18,7 @@ import { envApiBaseUrl, setApiBaseUrlOverride } from '../lib/apiBase'
 import {
   apiListChannelConfigs,
   apiSyncChannelMenu,
+  apiTestChannelConnection,
   apiUpsertChannelConfig,
   type ChannelConfigRow,
 } from '../lib/apiDeliveryChannels'
@@ -165,6 +167,23 @@ export default function DeliveryIntegrationsPage() {
       setServerConfigs(rows)
     } catch (err) {
       flash(err instanceof Error ? err.message : 'Sync failed', 'err')
+    } finally {
+      setSyncBusy(null)
+    }
+  }
+
+  async function testConnection(channelId: string) {
+    if (!apiMastersReady() || !activeBranchId) {
+      flash('API not connected', 'err')
+      return
+    }
+    setSyncBusy(`test-${channelId}`)
+    try {
+      const res = await apiTestChannelConnection(activeBranchId, channelId)
+      const label = `${channelId}: ${res.mode} — ${res.message}`
+      flash(label, res.ok ? undefined : 'err')
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Test failed', 'err')
     } finally {
       setSyncBusy(null)
     }
@@ -358,6 +377,10 @@ X-Webhook-Secret: ${cfg.ingestWebhookSecret || '<secret>'}
                           <div>
                             <strong>{meta.label}</strong>
                             <em>{meta.payModel === 'prepaid' ? 'Prepaid' : 'COD'}</em>
+                            {' '}
+                            <span className={`ol-honesty ol-honesty-${channelHonestyStatus(row).status}`}>
+                              {channelHonestyStatus(row).label}
+                            </span>
                           </div>
                           <button
                             type="button"
@@ -405,7 +428,15 @@ X-Webhook-Secret: ${cfg.ingestWebhookSecret || '<secret>'}
                             <button
                               type="button"
                               className="zk-co-btn"
-                              disabled={!row.enabled || syncBusy === row.channelId}
+                              disabled={!row.enabled || syncBusy === `test-${row.channelId}` || syncBusy === row.channelId}
+                              onClick={() => void testConnection(row.channelId)}
+                            >
+                              {syncBusy === `test-${row.channelId}` ? 'Testing…' : 'Test connection'}
+                            </button>
+                            <button
+                              type="button"
+                              className="zk-co-btn"
+                              disabled={!row.enabled || syncBusy === row.channelId || syncBusy === `test-${row.channelId}`}
                               onClick={() => void syncMenu(row.channelId)}
                             >
                               {syncBusy === row.channelId ? 'Syncing…' : 'Sync menu to platform'}

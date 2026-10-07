@@ -12,12 +12,14 @@ import { migrateLocalStorageToDexie } from '../data/repos/db'
 import {
   isDemoCategory,
   isDemoDish,
+  getAddonGroups,
   type ItemCustomizer,
   type MasterDish,
   type MenuCategory,
   type MenuItem,
 } from '../data/masters'
 import { recipeLineIngredientId } from '../data/masters'
+import { normalizeTaxIds } from '../data/tax'
 import {
   apiDeleteCategory,
   apiDeleteProduct,
@@ -105,11 +107,14 @@ function fromApiProduct(row: ApiProduct): MasterDish {
     hsn: meta.hsn ? String(meta.hsn) : undefined,
     details: meta.details ? String(meta.details) : undefined,
     productType: meta.productType === 'combo' ? 'combo' : meta.productType === 'single' ? 'single' : undefined,
-    taxIds: Array.isArray(meta.taxIds) ? meta.taxIds.map((x) => String(x)) : undefined,
+    taxIds: Array.isArray(meta.taxIds)
+      ? normalizeTaxIds(meta.taxIds.map((x) => String(x)))
+      : undefined,
     discountIds: Array.isArray(meta.discountIds)
       ? meta.discountIds.map((x) => String(x))
       : undefined,
     imageDataUrl: meta.imageDataUrl ? String(meta.imageDataUrl) : undefined,
+    requiresKitchen: meta.requiresKitchen === false ? false : meta.requiresKitchen === true ? true : undefined,
   }
 }
 
@@ -153,6 +158,45 @@ function pushCategory(cat: MenuCategory) {
   }
 }
 
+function categoriesUiSig(rows: MenuCategory[]) {
+  return rows
+    .map(
+      (c) =>
+        `${c.id}:${c.name}:${c.parentId ?? ''}:${c.active ? 1 : 0}:${c.sort ?? 0}:${c.branchId ?? ''}`,
+    )
+    .sort()
+    .join('|')
+}
+
+/** Fields that affect POS menu / tax / recipe / options UI (skip image bytes). */
+function dishesUiSig(rows: MasterDish[]) {
+  return rows
+    .map((d) => {
+      const tax = (d.taxIds ?? []).join(',')
+      const recipe = (d.recipe ?? [])
+        .map((r) => `${recipeLineIngredientId(r)}:${r.qty}`)
+        .sort()
+        .join(',')
+      const cz = d.customizer
+      const customizer = cz
+        ? [
+            (cz.variations ?? []).map((v) => `${v.id}:${v.name}:${v.price}`).join(','),
+            getAddonGroups(cz)
+              .map(
+                (g) =>
+                  `${g.id}:${g.name}:${g.min}:${g.max}:${g.addons
+                    .map((a) => `${a.id}:${a.name}:${a.price}`)
+                    .join('+')}`,
+              )
+              .join(';'),
+          ].join('#')
+        : ''
+      return `${d.id}:${d.name}:${d.alias ?? ''}:${d.price}:${d.categoryId}:${d.active ? 1 : 0}:${tax}:${d.code ?? ''}:${d.popular ? 1 : 0}:${d.imageDataUrl ? 1 : 0}:${recipe}:${customizer}`
+    })
+    .sort()
+    .join('|')
+}
+
 export function MastersProvider({ children }: { children: ReactNode }) {
   const { token, companyId } = useAuth()
   const { activeBranchId } = useBranch()
@@ -171,8 +215,9 @@ export function MastersProvider({ children }: { children: ReactNode }) {
         mastersRepo.listDishes(branchId),
       ])
       if (cancelled) return
-      setCategories(cats)
-      setDishes(dsh)
+      // Keep previous React references when content is unchanged (background sync must not blink UI).
+      setCategories((prev) => (categoriesUiSig(prev) === categoriesUiSig(cats) ? prev : cats))
+      setDishes((prev) => (dishesUiSig(prev) === dishesUiSig(dsh) ? prev : dsh))
       setReady(true)
 
       if (!apiMastersReady()) return
@@ -182,7 +227,7 @@ export function MastersProvider({ children }: { children: ReactNode }) {
           .filter((c) => !isDemoCategory(c.id))
         if (cancelled) return
         const nextCats = await mastersRepo.replaceCategories(remote, branchId)
-        setCategories(nextCats)
+        setCategories((prev) => (categoriesUiSig(prev) === categoriesUiSig(nextCats) ? prev : nextCats))
       } catch {
         /* keep local categories */
       }
@@ -194,7 +239,7 @@ export function MastersProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         // Empty remote list is authoritative (peer deleted all / wiped branch).
         const nextDishes = await mastersRepo.replaceDishes(remoteDishes, branchId)
-        setDishes(nextDishes)
+        setDishes((prev) => (dishesUiSig(prev) === dishesUiSig(nextDishes) ? prev : nextDishes))
       } catch {
         /* keep local dishes */
       }
@@ -208,21 +253,24 @@ export function MastersProvider({ children }: { children: ReactNode }) {
     async (cat: MenuCategory) => {
       if (isDemoCategory(cat.id)) return
       const stamped = { ...cat, branchId: cat.branchId ?? getActiveBranchId() }
-      const nextCats = categories.some((c) => c.id === stamped.id)
-        ? categories.map((c) => (c.id === stamped.id ? stamped : c))
-        : [...categories, stamped].sort((a, b) => a.sort - b.sort)
-      setCategories(nextCats)
-      await mastersRepo.saveCategory(stamped)
-      const nextDishes = dishes.map((d) =>
-        d.categoryId === stamped.id ? { ...d, category: stamped.name } : d,
+      setCategories((prev) =>
+        prev.some((c) => c.id === stamped.id)
+          ? prev.map((c) => (c.id === stamped.id ? stamped : c))
+          : [...prev, stamped].sort((a, b) => a.sort - b.sort),
       )
-      setDishes(nextDishes)
-      for (const d of nextDishes.filter((x) => x.categoryId === stamped.id)) {
-        await mastersRepo.saveDish(d)
-      }
+      await mastersRepo.saveCategory(stamped)
+      setDishes((prevDishes) => {
+        const nextDishes = prevDishes.map((d) =>
+          d.categoryId === stamped.id ? { ...d, category: stamped.name } : d,
+        )
+        for (const d of nextDishes.filter((x) => x.categoryId === stamped.id)) {
+          void mastersRepo.saveDish(d)
+        }
+        return nextDishes
+      })
       pushCategory(stamped)
     },
-    [categories, dishes],
+    [],
   )
 
   const deleteCategory = useCallback(

@@ -1,0 +1,455 @@
+.zk-bev-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.zk-bev-scope {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 0.25rem;
+}
+
+.zk-bev-scope .zk-tax-tool.on {
+  background: var(--teal);
+  color: #fff;
+  border-color: var(--teal);
+}
+
+.zk-bev-hint {
+  margin: 0 1rem 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warn-soft) 80%, #fff);
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.zk-bev-search {
+  flex: 1 1 160px;
+  min-width: min(160px, 100%);
+  max-width: 280px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  background: var(--panel);
+  box-sizing: border-box;
+}
+
+.zk-bev-price-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem 1rem;
+  padding: 1rem 1rem 0.85rem;
+}
+
+.zk-bev-price-toolbar-copy h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.zk-bev-price-toolbar-copy p {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.zk-bev-price-toolbar .zk-bev-tools {
+  flex: 1 1 280px;
+  justify-content: flex-end;
+}
+
+.zk-bev-save-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.zk-bev-empty {
+  display: grid;
+  place-items: center;
+  gap: 0.55rem;
+  margin: 0.5rem 1rem 1.1rem;
+  padding: 1.75rem 1.25rem;
+  border: 1.5px dashed color-mix(in srgb, var(--line) 80%, #9ab);
+  border-radius: 14px;
+  background: #fbfcfb;
+  text-align: center;
+}
+
+.zk-bev-empty strong {
+  font-size: 1.05rem;
+}
+
+.zk-bev-empty p {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.zk-bev-confirm-body {
+  padding: 0 0.15rem 0.35rem;
+}
+
+.zk-bev-confirm-body p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.zk-bev-price-card .zk-tax-list-head {
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.zk-bev-table-wrap {
+  overflow: auto;
+  max-height: min(62vh, 720px);
+  border-top: 1px solid var(--line);
+  -webkit-overflow-scrolling: touch;
+}
+
+.zk-bev-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.zk-bev-table th,
+.zk-bev-table td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.zk-bev-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  z-index: 1;
+  font-weight: 650;
+}
+
+.zk-bev-table .mono {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.zk-bev-table .muted {
+  color: var(--muted);
+}
+
+.zk-bev-def {
+  color: var(--teal);
+  font-weight: 600;
+  font-size: 0.8em;
+}
+
+.zk-bev-price-input {
+  width: 5.5rem;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  font: inherit;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.zk-bev .zk-tax-check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.zk-bev-sheet {
+  width: min(520px, calc(100vw - 2rem));
+  max-height: min(88vh, 720px);
+  overflow: auto;
+}
+
+.zk-bev-sheet .zk-tax-form {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.zk-bev-sheet .zk-tax-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem 1rem;
+  width: 100%;
+  align-items: start;
+}
+
+.zk-bev-sheet .zk-tax-form-grid > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  width: 100%;
+  font-weight: 650;
+}
+
+.zk-bev-sheet .zk-tax-form-grid label > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.zk-bev-sheet .zk-tax-form-grid input.search {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 44px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 0.55rem 0.75rem;
+  font: inherit;
+  color: var(--ink);
+}
+
+.zk-bev-sheet .zk-tax-form-grid input.search:focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 22%, transparent);
+}
+
+.zk-bev-sheet .zk-tax-form-flags {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+  margin-top: 1rem;
+  width: 100%;
+}
+
+.zk-bev-sheet .zk-tax-check {
+  width: 100% !important;
+  max-width: none;
+  box-sizing: border-box;
+  align-items: center !important;
+  margin: 0;
+}
+
+.zk-bev-sheet .zk-tax-check > span {
+  min-width: 0;
+}
+
+.zk-bev-sheet .zk-tax-check span small {
+  display: block;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+.zk-bev-sheet .zk-vendors-actions {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Keep wide price grid scrolling inside the card — do not widen the page */
+.zk-bev,
+.zk-bev .zk-tax-body,
+.zk-bev .zk-tax-hero,
+.zk-bev .zk-tax-hero-copy,
+.zk-bev .zk-tax-hero-meta,
+.zk-bev .zk-tax-list-card,
+.zk-bev-price-card,
+.zk-bev-price-toolbar,
+.zk-bev-tools {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.zk-bev {
+  overflow-x: clip;
+}
+
+.zk-bev .zk-tax-body {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.zk-bev .zk-tax-hero-meta {
+  width: 100%;
+}
+
+.zk-bev .zk-tax-stats {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.zk-bev .zk-tax-stats > div {
+  min-width: 0;
+}
+
+.zk-bev-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.zk-bev-tools .mesa-select,
+.zk-bev-tools .mesa-select-field,
+.zk-bev-tools .mesa-select-trigger {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 900px) {
+  .zk-bev-price-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.85rem 0.15rem 0.75rem;
+  }
+
+  .zk-bev-price-toolbar .zk-bev-tools {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.55rem;
+    justify-content: stretch;
+    flex: 1 1 auto;
+    width: 100%;
+  }
+
+  .zk-bev-price-toolbar .zk-bev-tools > * {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .zk-bev-search {
+    max-width: none;
+    width: 100%;
+    flex: none;
+  }
+
+  .zk-bev-save-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .zk-bev .zk-tax-hero {
+    grid-template-columns: 1fr;
+    padding: 0.9rem 0.85rem;
+  }
+
+  .zk-bev .zk-tax-hero-meta {
+    justify-items: stretch;
+  }
+
+  .zk-bev .zk-tax-pill {
+    justify-self: start;
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .zk-bev .zk-tax-bar {
+    margin: 0.65rem 0.65rem 0;
+    padding: 0.55rem 0.75rem;
+  }
+
+  .zk-bev .zk-tax-body {
+    padding: 0.65rem 0.65rem 1rem;
+    gap: 0.65rem;
+  }
+
+  .zk-bev .zk-tax-hero {
+    padding: 0.8rem 0.75rem;
+    border-radius: 14px;
+  }
+
+  .zk-bev .zk-tax-hero-copy h2 {
+    font-size: 1.15rem;
+  }
+
+  .zk-bev .zk-tax-hero-copy p {
+    font-size: 0.84rem;
+    overflow-wrap: anywhere;
+  }
+
+  .zk-bev .zk-tax-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.3rem;
+  }
+
+  .zk-bev .zk-tax-stats > div {
+    padding: 0.45rem 0.2rem;
+  }
+
+  .zk-bev .zk-tax-stats span {
+    font-size: 0.56rem;
+    letter-spacing: 0.02em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .zk-bev .zk-tax-stats strong {
+    font-size: 0.95rem;
+  }
+
+  .zk-bev .zk-tax-list-card {
+    padding: 0.75rem 0.65rem 0.85rem;
+    border-radius: 14px;
+  }
+
+  .zk-bev-price-toolbar {
+    padding: 0.55rem 0 0.65rem;
+  }
+
+  .zk-bev-sheet .zk-tax-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .zk-bev-scope {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.35rem;
+  }
+
+  .zk-bev-scope .zk-tax-tool {
+    flex: none;
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .zk-bev-price-input {
+    width: 4.5rem;
+  }
+
+  .zk-bev-table {
+    min-width: 460px;
+    font-size: 0.88rem;
+  }
+
+  .zk-bev-table th,
+  .zk-bev-table td {
+    padding: 0.5rem 0.45rem;
+  }
+
+  .zk-bev-hint,
+  .zk-bev-empty {
+    margin-inline: 0;
+  }
+}

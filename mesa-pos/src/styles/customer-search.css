@@ -1,0 +1,105 @@
+/* Customer Search — centered modal on all viewports (esp. mobile) */
+.cs-backdrop.modal-backdrop {
+  z-index: 80;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  place-items: unset;
+  box-sizing: border-box;
+  padding: max(0.75rem, env(safe-area-inset-top, 0px))
+    max(0.75rem, env(safe-area-inset-right, 0px))
+    max(0.75rem, env(safe-area-inset-bottom, 0px))
+    max(0.75rem, env(safe-area-inset-left, 0px));
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cs-backdrop .cs-shell {
+  width: min(980px, calc(100% - 0px));
+  max-width: 100%;
+  max-height: min(92vh, calc(100dvh - 1.5rem));
+  margin: auto;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+@media (max-width: 800px) {
+  .cs-backdrop.modal-backdrop {
+    padding: 0.75rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .cs-backdrop .cs-shell {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - 1.5rem);
+    border-radius: 16px;
+    padding: 0.75rem 0.8rem 0.85rem;
+    gap: 0.6rem;
+  }
+
+  .cs-head {
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+
+  .cs-head h2 {
+    font-size: 1.05rem;
+  }
+
+  .cs-head p {
+    font-size: 0.8rem;
+    line-height: 1.35;
+  }
+
+  .cs-layout {
+    grid-template-columns: 1fr;
+    min-height: 0;
+    gap: 0.65rem;
+  }
+
+  .cs-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem;
+  }
+
+  .cs-rail-btn {
+    min-width: 0;
+    padding: 0.55rem 0.4rem;
+    font-size: 0.72rem;
+  }
+
+  .cs-table-wrap {
+    max-height: min(36dvh, 240px);
+  }
+
+  .cs-form,
+  .cs-account {
+    grid-template-columns: 1fr;
+  }
+
+  .cs-form-actions {
+    justify-content: stretch;
+  }
+
+  .cs-form-actions .cs-rail-btn {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .cs-backdrop.modal-backdrop {
+    padding: 0.5rem;
+  }
+
+  .cs-backdrop .cs-shell {
+    max-height: calc(100dvh - 1rem);
+    border-radius: 14px;
+  }
+
+  .cs-rail {
+    grid-template-columns: 1fr 1fr;
+  }
+}

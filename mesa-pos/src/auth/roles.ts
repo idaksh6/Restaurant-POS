@@ -13,13 +13,15 @@ export type NavKey =
   | 'online'
   | 'kitchen'
   | 'inventory'
+  | 'expenses'
+  | 'accounts'
+  | 'reports'
   | 'suppliers'
   | 'purchase-orders'
   | 'crm'
   | 'masters'
   | 'settings'
   | 'back-office'
-  | 'expenses'
 
 export type AccessFlags = {
   nav: NavKey[]
@@ -58,13 +60,15 @@ const allNav: NavKey[] = [
   'online',
   'kitchen',
   'inventory',
+  'expenses',
+  'accounts',
+  'reports',
   'suppliers',
   'purchase-orders',
   'crm',
   'masters',
   'settings',
   'back-office',
-  'expenses',
 ]
 
 export const defaultCustomPrivileges: CustomPrivileges = {
@@ -207,10 +211,14 @@ export function navRequiredByFlags(flags: Omit<AccessFlags, 'nav'>): NavKey[] {
     keys.add('settings')
     keys.add('masters')
     keys.add('expenses')
+    keys.add('accounts')
+    keys.add('reports')
   }
   if (flags.canBackOffice) {
     keys.add('back-office')
     keys.add('expenses')
+    keys.add('accounts')
+    keys.add('reports')
   }
   if (flags.canManageUsers) {
     keys.add('settings')
@@ -612,13 +620,15 @@ export const navMeta: Record<NavKey, { to: string; label: string; end?: boolean 
   online: { to: '/online', label: 'Online' },
   kitchen: { to: '/kitchen', label: 'KOT' },
   inventory: { to: '/inventory', label: 'Stock' },
+  expenses: { to: '/expenses', label: 'Expenses' },
+  accounts: { to: '/accounts', label: 'Accounts', end: true },
+  reports: { to: '/reports', label: 'Reports', end: true },
   suppliers: { to: '/suppliers', label: 'Vendors' },
   'purchase-orders': { to: '/purchase-orders', label: 'POs' },
   crm: { to: '/crm', label: 'CRM' },
   masters: { to: '/masters', label: 'Masters' },
   settings: { to: '/settings', label: 'Settings', end: true },
   'back-office': { to: '/back-office', label: 'Office' },
-  expenses: { to: '/expenses', label: 'Expenses', end: true },
 }
 
 export const allNavKeys = allNav
@@ -644,8 +654,21 @@ export function pathAllowed(role: RoleKey, pathname: string) {
     )
   }
 
-  if (pathname.startsWith('/settings/accounts') || pathname.startsWith('/expenses')) {
+  if (pathname.startsWith('/accounts') || pathname.startsWith('/settings/accounts')) {
+    return (
+      perms.canBackOffice ||
+      perms.canMasters ||
+      isAdmin ||
+      perms.nav.includes('accounts') ||
+      perms.nav.includes('expenses')
+    )
+  }
+  if (pathname.startsWith('/expenses')) {
     return perms.canBackOffice || perms.canMasters || isAdmin || perms.nav.includes('expenses')
+  }
+
+  if (pathname.startsWith('/reports')) {
+    return perms.canBackOffice || perms.canMasters || isAdmin || perms.nav.includes('reports')
   }
 
   if (pathname.startsWith('/back-office')) {
@@ -666,12 +689,16 @@ export function pathAllowed(role: RoleKey, pathname: string) {
     pathname.startsWith('/settings/discount') ||
     pathname.startsWith('/settings/extra-charges') ||
     pathname.startsWith('/settings/printers') ||
+    pathname.startsWith('/settings/card-terminal') ||
+    pathname.startsWith('/settings/zatca') ||
     pathname.startsWith('/settings/delivery') ||
     pathname.startsWith('/settings/notifications') ||
     pathname.startsWith('/settings/units') ||
+    pathname.startsWith('/settings/beverages') ||
     pathname.startsWith('/settings/menu-details') ||
     pathname.startsWith('/settings/departments') ||
     pathname.startsWith('/settings/gift-cards') ||
+    pathname.startsWith('/settings/loyalty-campaigns') ||
     pathname.startsWith('/settings/food-vouchers') ||
     pathname.startsWith('/settings/menu-timetable') ||
     pathname.startsWith('/settings/floor') ||
@@ -700,6 +727,12 @@ export function pathAllowed(role: RoleKey, pathname: string) {
   }
   if (pathname.startsWith('/quick-serve')) {
     return allowed.some((to) => to === '/takeaway' || to === '/payments' || to === '/dine-in')
+  }
+  if (pathname.startsWith('/barcode')) {
+    return (
+      isAdmin ||
+      allowed.some((to) => to === '/takeaway' || to === '/payments' || to === '/dine-in' || to === '/quick-serve')
+    )
   }
   if (pathname === '/crm' || pathname.startsWith('/settings/customers')) {
     return allowed.includes('/crm') || allowed.includes('/settings')

@@ -1,16 +1,26 @@
 import type { RoleKey } from '../auth/roles'
 import { getApiBaseUrl } from './apiBase'
 
+export type ApiLicense = {
+  licenseStatus: 'pending' | 'active' | 'suspended' | 'expired'
+  activatedAt: string | null
+  expiresAt: string | null
+  inherited: boolean
+  daysRemaining: number | null
+}
+
 export type ApiCompany = {
   id: string
   companyName: string
   aliasName?: string | null
   taxId?: string | null
+  companyCode?: string | null
   hqPhone?: string | null
   enableTax?: boolean
   zatcaEnabled?: boolean
   currency?: string
   logoDataUrl?: string | null
+  license?: ApiLicense
   branches?: Array<{
     id: string
     companyId?: string
@@ -70,6 +80,7 @@ export type ApiLoginResult = {
     phone?: string | null
     active?: boolean
   }>
+  license?: ApiLicense
 }
 
 const API_BASE = () => getApiBaseUrl()
@@ -171,7 +182,14 @@ export async function apiActivateTerminal(taxId: string): Promise<ApiCompany> {
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(text || `Activate failed (${res.status})`)
+    try {
+      const json = JSON.parse(text) as { message?: string | string[] }
+      const msg = Array.isArray(json.message) ? json.message.join(', ') : json.message
+      throw new Error(msg || text || `Activate failed (${res.status})`)
+    } catch (err) {
+      if (err instanceof Error && err.message && !err.message.startsWith('Activate failed')) throw err
+      throw new Error(text || `Activate failed (${res.status})`)
+    }
   }
   return res.json() as Promise<ApiCompany>
 }

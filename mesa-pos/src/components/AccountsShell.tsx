@@ -6,7 +6,7 @@ import { useAuth } from '../state/AuthContext'
 import DashHeader from './DashHeader'
 import { HubFooter } from './HubChrome'
 
-export type AccountsSection = 'payment-types' | 'expense-types' | 'expense-details'
+export type AccountsSection = 'hub' | 'coa' | 'gl-export' | 'ap'
 
 type NavItem = {
   id: AccountsSection
@@ -14,36 +14,46 @@ type NavItem = {
   labelKey: I18nKey
   icon: string
   hintKey: I18nKey
+  end?: boolean
 }
 
 const NAV: NavItem[] = [
   {
-    id: 'payment-types',
-    to: '/expenses/payment-types',
-    labelKey: 'paymentTypes',
-    icon: '💳',
-    hintKey: 'paymentTypesHint',
+    id: 'hub',
+    to: '/accounts',
+    labelKey: 'accountsOverview',
+    icon: '⌂',
+    hintKey: 'accountsOverviewHint',
+    end: true,
   },
   {
-    id: 'expense-types',
-    to: '/expenses/types',
-    labelKey: 'expenseTypes',
-    icon: '🏷',
-    hintKey: 'expenseTypesHint',
+    id: 'coa',
+    to: '/accounts/coa',
+    labelKey: 'coaTitle',
+    icon: '📒',
+    hintKey: 'coaHint',
   },
   {
-    id: 'expense-details',
-    to: '/expenses',
-    labelKey: 'expenseDetails',
-    icon: '📋',
-    hintKey: 'expenseDetailsHint',
+    id: 'gl-export',
+    to: '/accounts/gl-export',
+    labelKey: 'glTitle',
+    icon: '📤',
+    hintKey: 'glHint',
+  },
+  {
+    id: 'ap',
+    to: '/accounts/ap',
+    labelKey: 'apTitle',
+    icon: '🧾',
+    hintKey: 'apHint',
   },
 ]
 
 const HERO_ICON: Record<AccountsSection, string> = {
-  'payment-types': '💳',
-  'expense-types': '🏷',
-  'expense-details': '📋',
+  hub: '📒',
+  coa: '📒',
+  'gl-export': '📤',
+  ap: '🧾',
 }
 
 type Props = {
@@ -79,20 +89,7 @@ export default function AccountsShell({
       />
 
       <div className="acct-page-inner">
-        <header className="acct-hero">
-          <div className="acct-hero-brand">
-            <span className="acct-hero-mark" aria-hidden>
-              {HERO_ICON[active]}
-            </span>
-            <div>
-              <h1>{title}</h1>
-              {subtitle ? <p>{subtitle}</p> : null}
-            </div>
-          </div>
-          {actions ? <div className="acct-hero-actions">{actions}</div> : null}
-        </header>
-
-        <div className="zk-acct-body">
+        <div className={`zk-acct-body${active === 'hub' ? ' is-hub' : ''}`}>
           <aside className="zk-acct-side">
             <div className="zk-acct-side-head">
               <p className="zk-acct-kicker">{t.accounts}</p>
@@ -107,7 +104,7 @@ export default function AccountsShell({
                   className={({ isActive }) =>
                     `zk-acct-nav-link${isActive || item.id === active ? ' active' : ''}`
                   }
-                  end={item.id === 'expense-details'}
+                  end={item.end}
                 >
                   <span className="zk-acct-nav-icon" aria-hidden>
                     {item.icon}
@@ -124,7 +121,21 @@ export default function AccountsShell({
             ) : null}
           </aside>
 
-          <section className="zk-acct-main">{children}</section>
+          <section className="zk-acct-main">
+            <header className="acct-hero">
+              <div className="acct-hero-brand">
+                <span className="acct-hero-mark" aria-hidden>
+                  {HERO_ICON[active]}
+                </span>
+                <div className="acct-hero-copy">
+                  <h1>{title}</h1>
+                  {subtitle ? <p>{subtitle}</p> : null}
+                </div>
+              </div>
+              {actions ? <div className="acct-hero-actions">{actions}</div> : null}
+            </header>
+            <div className="zk-acct-main-body">{children}</div>
+          </section>
         </div>
       </div>
 

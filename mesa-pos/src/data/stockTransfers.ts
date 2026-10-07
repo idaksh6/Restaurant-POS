@@ -37,6 +37,7 @@ export type StockTransfer = {
 }
 
 export const TRANSFERS_KEY = 'mesa-stock-transfers'
+export const TRANSFERS_CHANGED = 'mesa:stock-transfers-changed'
 
 function parseKind(value: unknown): StockTransferKind {
   if (value === 'location' || value === 'branch' || value === 'production') return value
@@ -99,6 +100,9 @@ export function loadAllTransfers(): StockTransfer[] {
 
 export function saveAllTransfers(rows: StockTransfer[]) {
   tenantSetItem(TRANSFERS_KEY, JSON.stringify(rows.slice(0, 300)))
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(TRANSFERS_CHANGED))
+  }
 }
 
 /** Transfers owned by or addressed to this branch. */
@@ -130,6 +134,13 @@ export function pendingBranchDispatch(branchId = getActiveBranchId()) {
   return loadAllTransfers().filter(
     (r) => r.kind === 'branch' && r.fromBranchId === branchId && r.status === 'requested',
   )
+}
+
+/** Display name without branch code prefix (e.g. "H001 · Spicy Masala" → "Spicy Masala"). */
+export function transferItemName(row: StockTransfer): string {
+  const raw = String(row.toName || row.fromName || row.fromSku || 'Item').trim()
+  const stripped = raw.replace(/^[^·•\-–]+?\s*[·•\-–]\s*/, '').trim()
+  return stripped || raw || String(row.fromSku || 'Item')
 }
 
 export function loadTransfers(branchId = getActiveBranchId()): StockTransfer[] {

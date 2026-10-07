@@ -1,0 +1,1 @@
+ALTER TABLE "FloorTable" ADD COLUMN IF NOT EXISTS "note" TEXT;

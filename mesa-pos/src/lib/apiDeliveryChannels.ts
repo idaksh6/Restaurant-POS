@@ -80,6 +80,13 @@ export async function apiSyncChannelMenu(branchId: string, channelId: string) {
   )
 }
 
+export async function apiTestChannelConnection(branchId: string, channelId: string) {
+  return deliveryFetch(
+    `/delivery/channels/${encodeURIComponent(channelId)}/test?branchId=${encodeURIComponent(branchId)}`,
+    { method: 'POST' },
+  ) as Promise<{ ok: boolean; mode: string; message: string }>
+}
+
 export async function apiAcceptChannelOrder(ticketId: string, etaMinutes?: number) {
   return deliveryFetch(`/delivery/orders/${encodeURIComponent(ticketId)}/accept`, {
     method: 'POST',

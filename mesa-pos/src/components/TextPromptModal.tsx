@@ -8,6 +8,7 @@ type Props = {
   placeholder?: string
   confirmLabel?: string
   cancelLabel?: string
+  suggestions?: readonly string[]
   onClose: () => void
   onConfirm: (value: string) => void
 }
@@ -19,6 +20,7 @@ export default function TextPromptModal({
   placeholder,
   confirmLabel = 'OK',
   cancelLabel = 'Cancel',
+  suggestions,
   onClose,
   onConfirm,
 }: Props) {
@@ -32,6 +34,21 @@ export default function TextPromptModal({
 
   function submit() {
     onConfirm(value.trim())
+  }
+
+  function applySuggestion(chip: string) {
+    const current = value.trim()
+    if (!current) {
+      setValue(chip)
+      return
+    }
+    const parts = current.split(',').map((p) => p.trim()).filter(Boolean)
+    const exists = parts.some((p) => p.toLowerCase() === chip.toLowerCase())
+    if (exists) {
+      setValue(parts.filter((p) => p.toLowerCase() !== chip.toLowerCase()).join(', '))
+      return
+    }
+    setValue(`${current}, ${chip}`)
   }
 
   return createPortal(
@@ -60,6 +77,26 @@ export default function TextPromptModal({
           placeholder={placeholder}
           onChange={(e) => setValue(e.target.value)}
         />
+        {suggestions && suggestions.length > 0 ? (
+          <div className="text-prompt-suggestions" role="group" aria-label="Note suggestions">
+            {suggestions.map((chip) => {
+              const active = value
+                .split(',')
+                .map((p) => p.trim().toLowerCase())
+                .includes(chip.toLowerCase())
+              return (
+                <button
+                  key={chip}
+                  type="button"
+                  className={`text-prompt-chip${active ? ' active' : ''}`}
+                  onClick={() => applySuggestion(chip)}
+                >
+                  {chip}
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
         <div className="text-prompt-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             {cancelLabel}

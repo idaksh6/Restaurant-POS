@@ -22,7 +22,7 @@ import { usePos } from '../state/PosContext'
 
 const durations = [1, 3, 6, 12] as const
 
-function blankBatch(): FoodVoucherBatch {
+function blankBatch(branchId: string): FoodVoucherBatch {
   return {
     id: `fvb-${Date.now()}`,
     name: '',
@@ -30,6 +30,7 @@ function blankBatch(): FoodVoucherBatch {
     count: 5,
     amount: 50,
     createdAt: new Date().toISOString(),
+    branchId,
   }
 }
 
@@ -37,7 +38,7 @@ export default function FoodVouchersPage() {
   const { user } = useAuth()
   const { flash } = usePos()
   const { t, lang } = useI18n()
-  const { company, activeBranch } = useBranch()
+  const { company, activeBranch, activeBranchId } = useBranch()
   const { batches, codes, saveBatch, removeBatch } = useFoodVouchers()
   const canAccess = user ? getPermissions(user.role).canMasters || user.role === 'admin' : false
 
@@ -61,7 +62,7 @@ export default function FoodVouchersPage() {
   function startNew() {
     setIsNew(true)
     setDuration(1)
-    setEditing(blankBatch())
+    setEditing(blankBatch(activeBranchId))
     setView('form')
   }
 
@@ -96,6 +97,7 @@ export default function FoodVouchersPage() {
       name: editing.name.trim(),
       count: Math.floor(editing.count),
       amount: Math.round(editing.amount * 100) / 100,
+      branchId: editing.branchId ?? activeBranchId,
     }
     const created = saveBatch(batch, isNew || !batches.some((b) => b.id === batch.id))
     setEditing(batch)

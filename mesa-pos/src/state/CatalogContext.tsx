@@ -49,6 +49,22 @@ import {
 } from '../data/discount'
 import { fromApiUnit, isDemoUnit, loadUnits, saveUnits, type MeasureUnit } from '../data/units'
 import {
+  fromApiBeveragePrice,
+  fromApiBeverageQty,
+  loadBeveragePrices,
+  loadBeverageQtys,
+  saveBeveragePrices,
+  saveBeverageQtys,
+  type BeveragePrice,
+  type BeverageQty,
+} from '../data/beverages'
+import {
+  fromApiAddonMaster,
+  loadAddonMasters,
+  saveAddonMasters,
+  type AddonMasterGroup,
+} from '../data/addonMasters'
+import {
   fromApiCharge,
   isDemoCharge,
   loadAllCharges,
@@ -84,10 +100,30 @@ import {
 } from '../lib/apiMasters'
 import { getActiveBranchId } from '../data/company'
 import { getDeviceId } from '../sync/deviceId'
-import { enqueueOutbox, dropPendingUpsertsFor } from '../sync/outbox'
+import { saveStockLocations } from '../data/stockLocations'
+import { isSeedYieldLink, saveYieldLinks } from '../data/stockYieldLinks'
+import { enqueueOutbox, dropPendingUpsertsFor, pruneRedundantOutbox } from '../sync/outbox'
 import { useAuth } from './AuthContext'
 import { useBranch } from './BranchContext'
 import { useSync } from '../sync/SyncContext'
+
+function listUiSig<T extends { id: string }>(
+  rows: T[],
+  fields: (row: T) => Array<string | number | boolean | null | undefined>,
+) {
+  return rows
+    .map((r) => `${r.id}:${fields(r).map((v) => (v == null ? '' : String(v))).join(':')}`)
+    .sort()
+    .join('|')
+}
+
+function keepIfSame<T extends { id: string }>(
+  prev: T[],
+  next: T[],
+  fields: (row: T) => Array<string | number | boolean | null | undefined>,
+) {
+  return listUiSig(prev, fields) === listUiSig(next, fields) ? prev : next
+}
 
 type CatalogValue = {
   giftCards: GiftCard[]
@@ -101,6 +137,9 @@ type CatalogValue = {
   extraCharges: ExtraCharge[]
   deliveryRiders: DeliveryRider[]
   printStations: PrintStation[]
+  beverageQtys: BeverageQty[]
+  beveragePrices: BeveragePrice[]
+  addonMasters: AddonMasterGroup[]
   saveGiftCard: (row: GiftCard) => void
   deleteGiftCard: (id: string) => void
   redeemGiftCard: (id: string, amount: number) => { ok: boolean; remaining: number }
@@ -124,6 +163,13 @@ type CatalogValue = {
   deleteDeliveryRider: (id: string) => void
   savePrintStation: (row: PrintStation) => void
   deletePrintStation: (id: string) => void
+  saveBeverageQty: (row: BeverageQty) => void
+  deleteBeverageQty: (id: string) => void
+  saveBeveragePrice: (row: BeveragePrice) => void
+  deleteBeveragePrice: (id: string) => void
+  saveBeveragePricesBulk: (rows: BeveragePrice[]) => void
+  saveAddonMaster: (row: AddonMasterGroup) => void
+  deleteAddonMaster: (id: string) => void
 }
 
 const CatalogContext = createContext<CatalogValue | null>(null)
@@ -135,8 +181,15 @@ function pushRow(kind: CatalogKind, row: { id: string; branchId?: string }) {
   const body = { kind, row }
   if (apiMastersReady()) {
     void apiPutCatalog(kind, row as unknown as Record<string, unknown>)
-      .then(() => dropPendingUpsertsFor(row.id, 'catalog.upsert'))
-      .catch(() => enqueueOutbox('catalog.upsert', row.id, body, getDeviceId(), branchId))
+      .then(() => {
+        dropPendingUpsertsFor(row.id, 'catalog.upsert')
+        pruneRedundantOutbox()
+      })
+      .catch(() => {
+        enqueueOutbox('catalog.upsert', row.id, body, getDeviceId(), branchId)
+        // Online REST is preferred; don't leave master-data backlog on the chip.
+        pruneRedundantOutbox()
+      })
   } else {
     enqueueOutbox('catalog.upsert', row.id, body, getDeviceId(), branchId)
   }
@@ -167,24 +220,83 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   const [extraCharges, setExtraCharges] = useState<ExtraCharge[]>(() => loadAllCharges())
   const [deliveryRiders, setDeliveryRiders] = useState<DeliveryRider[]>(() => loadAllRiders())
   const [printStations, setPrintStations] = useState<PrintStation[]>(() => loadAllPrinters())
+  const [beverageQtys, setBeverageQtys] = useState<BeverageQty[]>(() => loadBeverageQtys())
+  const [beveragePrices, setBeveragePrices] = useState<BeveragePrice[]>(() => loadBeveragePrices())
+  const [addonMasters, setAddonMasters] = useState<AddonMasterGroup[]>(() => loadAddonMasters())
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      setGiftCards(loadGiftCards())
-      setTaxes(loadTaxes())
-      setDiscounts(loadDiscounts())
-      setUnits(loadUnits())
-      setPaymentTypes(loadPaymentTypes())
-      setExpenseTypes(loadExpenseTypes())
-      setExpenseDetails(loadExpenseDetails())
-      setTimetables(loadTimetables())
-      setExtraCharges(loadAllCharges())
-      setDeliveryRiders(loadAllRiders())
-      setPrintStations(loadAllPrinters())
+      // Keep React references when local cache is unchanged — background sync must not blink tax UI.
+      setGiftCards((prev) =>
+        keepIfSame(prev, loadGiftCards(), (g) => [
+          g.number,
+          g.issueAmount,
+          g.extraCharges,
+          g.usedAmount,
+          g.active ? 1 : 0,
+        ]),
+      )
+      setTaxes((prev) =>
+        keepIfSame(prev, loadTaxes(), (t) => [t.name, t.percent, t.active ? 1 : 0, t.isDefault ? 1 : 0]),
+      )
+      setDiscounts((prev) =>
+        keepIfSame(prev, loadDiscounts(), (d) => [d.name, d.percent, d.active ? 1 : 0]),
+      )
+      setUnits((prev) =>
+        keepIfSame(prev, loadUnits(), (u) => [u.name, u.code, u.quantity, u.kind]),
+      )
+      setPaymentTypes((prev) =>
+        keepIfSame(prev, loadPaymentTypes(), (p) => [p.name, p.active ? 1 : 0, p.sort ?? 0]),
+      )
+      setExpenseTypes((prev) =>
+        keepIfSame(prev, loadExpenseTypes(), (e) => [e.name, e.active ? 1 : 0]),
+      )
+      setExpenseDetails((prev) =>
+        keepIfSame(prev, loadExpenseDetails(), (e) => [
+          e.description,
+          e.expenseTypeId,
+          e.amount,
+          e.date,
+          e.branchId ?? '',
+        ]),
+      )
+      setTimetables((prev) =>
+        keepIfSame(prev, loadTimetables(), (t) => [
+          t.name,
+          t.active ? 1 : 0,
+          (t.productIds ?? []).join(','),
+          (t.departmentIds ?? []).join(','),
+        ]),
+      )
+      setExtraCharges((prev) =>
+        keepIfSame(prev, loadAllCharges(), (c) => [
+          c.name,
+          c.amount,
+          c.percent ? 1 : 0,
+          c.active ? 1 : 0,
+          c.branchId ?? '',
+          (c.taxIds ?? []).join(','),
+        ]),
+      )
+      setDeliveryRiders((prev) =>
+        keepIfSame(prev, loadAllRiders(), (r) => [r.name, r.active ? 1 : 0, r.branchId ?? '']),
+      )
+      setPrintStations((prev) =>
+        keepIfSame(prev, loadAllPrinters(), (p) => [p.name, p.active ? 1 : 0]),
+      )
+      setBeverageQtys((prev) =>
+        keepIfSame(prev, loadBeverageQtys(), (b) => [b.name, b.ml, b.active ? 1 : 0]),
+      )
+      setBeveragePrices((prev) =>
+        keepIfSame(prev, loadBeveragePrices(), (b) => [b.productId, b.qtyId, b.price]),
+      )
+      setAddonMasters((prev) =>
+        keepIfSame(prev, loadAddonMasters(), (a) => [a.name, a.active ? 1 : 0]),
+      )
       if (!apiMastersReady()) return
       try {
-        const remote = await apiListCatalog()
+        const remote = await apiListCatalog(activeBranchId)
         if (cancelled) return
         const nextCards = (remote.giftCards ?? [])
           .map(fromApiGiftCard)
@@ -218,13 +330,27 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
           ? remote.printStations.map(fromApiPrinter)
           : loadAllPrinters()
         const remoteAreas = Array.isArray(remote.tableAreas)
-          ? remote.tableAreas.map(fromApiTableArea).filter((a) => a.id && a.name)
+          ? remote.tableAreas
+              .map(fromApiTableArea)
+              .filter((a) => a.id && a.name)
+              .map((a) => ({ ...a, branchId: a.branchId || activeBranchId }))
           : []
+        const nextBevQtys = Array.isArray(remote.beverageQtys)
+          ? remote.beverageQtys.map(fromApiBeverageQty)
+          : loadBeverageQtys()
+        const nextBevPrices = Array.isArray(remote.beveragePrices)
+          ? remote.beveragePrices.map(fromApiBeveragePrice)
+          : loadBeveragePrices()
+        const nextAddonMasters = Array.isArray(remote.addonMasters)
+          ? remote.addonMasters.map(fromApiAddonMaster)
+          : loadAddonMasters()
         saveGiftCards(nextCards)
         saveTaxes(nextTaxes)
         if (Array.isArray(remote.discounts)) {
           saveDiscounts(nextDiscounts)
-          setDiscounts(nextDiscounts)
+          setDiscounts((prev) =>
+            keepIfSame(prev, nextDiscounts, (d) => [d.name, d.percent, d.active ? 1 : 0]),
+          )
         }
         saveUnits(nextUnits)
         savePaymentTypes(nextPays)
@@ -234,30 +360,123 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         saveAllCharges(nextCharges)
         saveAllRiders(nextRiders)
         saveAllPrinters(nextPrinters)
+        if (Array.isArray(remote.beverageQtys)) {
+          saveBeverageQtys(nextBevQtys)
+          setBeverageQtys((prev) =>
+            keepIfSame(prev, nextBevQtys, (b) => [b.name, b.ml, b.active ? 1 : 0]),
+          )
+        }
+        if (Array.isArray(remote.beveragePrices)) {
+          saveBeveragePrices(nextBevPrices)
+          setBeveragePrices((prev) =>
+            keepIfSame(prev, nextBevPrices, (b) => [b.productId, b.qtyId, b.price]),
+          )
+        }
+        if (Array.isArray(remote.addonMasters)) {
+          saveAddonMasters(nextAddonMasters)
+          setAddonMasters((prev) =>
+            keepIfSame(prev, nextAddonMasters, (a) => [a.name, a.active ? 1 : 0]),
+          )
+        }
+        if (Array.isArray(remote.stockLocations) && remote.stockLocations.length) {
+          const locs = remote.stockLocations.map((row) => ({
+            id: String(row.id ?? ''),
+            label: String(row.label ?? '').trim() || String(row.id ?? ''),
+            hint: row.hint ? String(row.hint) : undefined,
+            type: (['cold', 'dry', 'station', 'other'].includes(String(row.type))
+              ? String(row.type)
+              : 'other') as import('../data/stockLocations').StockLocation['type'],
+            active: row.active !== false,
+            sortOrder: Number(row.sortOrder ?? 0) || 0,
+          })).filter((r) => r.id)
+          if (locs.length) saveStockLocations(locs)
+        }
+        if (Array.isArray(remote.yieldLinks)) {
+          const links = remote.yieldLinks
+            .map((row) => ({
+              id: String(row.id ?? ''),
+              fromSku: String(row.fromSku ?? '').trim(),
+              toSku: String(row.toSku ?? '').trim(),
+              defaultYieldPct: Math.min(
+                100,
+                Math.max(1, Math.round(Number(row.defaultYieldPct) || 100)),
+              ),
+              label: String(row.label ?? '').trim(),
+              note: row.note ? String(row.note) : undefined,
+              active: row.active !== false,
+              branchId: row.branchId ? String(row.branchId) : activeBranchId,
+            }))
+            .filter((r) => r.id && !isSeedYieldLink(r))
+          saveYieldLinks(links, activeBranchId)
+        }
         if (remoteAreas.length) {
-          const merged = mergeRemoteTableAreas(remoteAreas)
+          const merged = mergeRemoteTableAreas(remoteAreas, activeBranchId)
           for (const area of merged) {
             if (!remoteAreas.some((r) => r.id === area.id)) {
               pushRow('tableArea', toApiTableArea(area) as { id: string })
             }
           }
         } else {
-          // Upload local areas once so other devices can pull them.
-          const localAreas = loadTableAreas()
+          // Only upload this branch's areas — never push HO catalog into a new empty branch.
+          const localAreas = loadTableAreas(activeBranchId)
           for (const area of localAreas) {
-            pushRow('tableArea', toApiTableArea(area) as { id: string })
+            pushRow('tableArea', toApiTableArea({ ...area, branchId: activeBranchId }) as { id: string })
           }
         }
-        setGiftCards(nextCards)
-        setTaxes(nextTaxes)
-        setUnits(nextUnits)
-        setPaymentTypes(nextPays)
-        setExpenseTypes(nextExpTypes)
-        setExpenseDetails(nextExpDetails)
-        setTimetables(nextTimes)
-        setExtraCharges(nextCharges)
-        setDeliveryRiders(nextRiders)
-        setPrintStations(nextPrinters)
+        setGiftCards((prev) =>
+          keepIfSame(prev, nextCards, (g) => [
+            g.number,
+            g.issueAmount,
+            g.extraCharges,
+            g.usedAmount,
+            g.active ? 1 : 0,
+          ]),
+        )
+        setTaxes((prev) =>
+          keepIfSame(prev, nextTaxes, (t) => [t.name, t.percent, t.active ? 1 : 0, t.isDefault ? 1 : 0]),
+        )
+        setUnits((prev) =>
+          keepIfSame(prev, nextUnits, (u) => [u.name, u.code, u.quantity, u.kind]),
+        )
+        setPaymentTypes((prev) =>
+          keepIfSame(prev, nextPays, (p) => [p.name, p.active ? 1 : 0, p.sort ?? 0]),
+        )
+        setExpenseTypes((prev) =>
+          keepIfSame(prev, nextExpTypes, (e) => [e.name, e.active ? 1 : 0]),
+        )
+        setExpenseDetails((prev) =>
+          keepIfSame(prev, nextExpDetails, (e) => [
+            e.description,
+            e.expenseTypeId,
+            e.amount,
+            e.date,
+            e.branchId ?? '',
+          ]),
+        )
+        setTimetables((prev) =>
+          keepIfSame(prev, nextTimes, (t) => [
+            t.name,
+            t.active ? 1 : 0,
+            (t.productIds ?? []).join(','),
+            (t.departmentIds ?? []).join(','),
+          ]),
+        )
+        setExtraCharges((prev) =>
+          keepIfSame(prev, nextCharges, (c) => [
+            c.name,
+            c.amount,
+            c.percent ? 1 : 0,
+            c.active ? 1 : 0,
+            c.branchId ?? '',
+            (c.taxIds ?? []).join(','),
+          ]),
+        )
+        setDeliveryRiders((prev) =>
+          keepIfSame(prev, nextRiders, (r) => [r.name, r.active ? 1 : 0, r.branchId ?? '']),
+        )
+        setPrintStations((prev) =>
+          keepIfSame(prev, nextPrinters, (p) => [p.name, p.active ? 1 : 0]),
+        )
       } catch {
         /* keep local cache */
       }
@@ -265,7 +484,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [token, companyId, syncEpoch])
+  }, [token, companyId, syncEpoch, activeBranchId])
 
   const upsertList = useCallback(<T extends { id: string }>(rows: T[], row: T) => {
     return rows.some((r) => r.id === row.id) ? rows.map((r) => (r.id === row.id ? row : r)) : [...rows, row]
@@ -532,6 +751,92 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     [printStations],
   )
 
+  const saveBeverageQty = useCallback(
+    (row: BeverageQty) => {
+      let next = upsertList(beverageQtys, row)
+      if (row.isDefault) {
+        next = next.map((q) => ({ ...q, isDefault: q.id === row.id }))
+      }
+      setBeverageQtys(next)
+      saveBeverageQtys(next)
+      pushRow('beverageQty', row)
+    },
+    [beverageQtys, upsertList],
+  )
+
+  const deleteBeverageQty = useCallback(
+    (id: string) => {
+      const nextQty = beverageQtys.filter((q) => q.id !== id)
+      const nextPrices = beveragePrices.filter((p) => p.qtyId !== id)
+      setBeverageQtys(nextQty)
+      saveBeverageQtys(nextQty)
+      setBeveragePrices(nextPrices)
+      saveBeveragePrices(nextPrices)
+      pushDelete('beverageQty', id)
+      for (const p of beveragePrices.filter((x) => x.qtyId === id)) {
+        pushDelete('beveragePrice', p.id)
+      }
+    },
+    [beverageQtys, beveragePrices],
+  )
+
+  const saveBeveragePrice = useCallback(
+    (row: BeveragePrice) => {
+      const stamped = { ...row, branchId: row.branchId ?? getActiveBranchId() }
+      const next = upsertList(beveragePrices, stamped)
+      setBeveragePrices(next)
+      saveBeveragePrices(next)
+      pushRow('beveragePrice', stamped)
+    },
+    [beveragePrices, upsertList],
+  )
+
+  const deleteBeveragePrice = useCallback(
+    (id: string) => {
+      const next = beveragePrices.filter((p) => p.id !== id)
+      setBeveragePrices(next)
+      saveBeveragePrices(next)
+      pushDelete('beveragePrice', id)
+    },
+    [beveragePrices],
+  )
+
+  const saveBeveragePricesBulk = useCallback(
+    (rows: BeveragePrice[]) => {
+      let next = [...beveragePrices]
+      for (const row of rows) {
+        const stamped = { ...row, branchId: row.branchId ?? getActiveBranchId() }
+        next = next.some((p) => p.id === stamped.id)
+          ? next.map((p) => (p.id === stamped.id ? stamped : p))
+          : [...next, stamped]
+        pushRow('beveragePrice', stamped)
+      }
+      setBeveragePrices(next)
+      saveBeveragePrices(next)
+    },
+    [beveragePrices],
+  )
+
+  const saveAddonMaster = useCallback(
+    (row: AddonMasterGroup) => {
+      const next = upsertList(addonMasters, row)
+      setAddonMasters(next)
+      saveAddonMasters(next)
+      pushRow('addonMaster', row as { id: string; branchId?: string })
+    },
+    [addonMasters, upsertList],
+  )
+
+  const deleteAddonMaster = useCallback(
+    (id: string) => {
+      const next = addonMasters.filter((r) => r.id !== id)
+      setAddonMasters(next)
+      saveAddonMasters(next)
+      pushDelete('addonMaster', id)
+    },
+    [addonMasters],
+  )
+
   const value = useMemo(
     () => ({
       giftCards,
@@ -545,6 +850,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       extraCharges: extraCharges.filter((c) => !c.branchId || c.branchId === activeBranchId),
       deliveryRiders: deliveryRiders.filter((r) => !r.branchId || r.branchId === activeBranchId),
       printStations: printStations.filter((p) => !p.branchId || p.branchId === activeBranchId),
+      beverageQtys,
+      beveragePrices: beveragePrices.filter((p) => !p.branchId || p.branchId === activeBranchId),
+      addonMasters,
       saveGiftCard,
       deleteGiftCard,
       redeemGiftCard: redeemGiftCardFn,
@@ -568,6 +876,13 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       deleteDeliveryRider,
       savePrintStation,
       deletePrintStation,
+      saveBeverageQty,
+      deleteBeverageQty,
+      saveBeveragePrice,
+      deleteBeveragePrice,
+      saveBeveragePricesBulk,
+      saveAddonMaster,
+      deleteAddonMaster,
     }),
     [
       giftCards,
@@ -581,6 +896,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       extraCharges,
       deliveryRiders,
       printStations,
+      beverageQtys,
+      beveragePrices,
+      addonMasters,
       activeBranchId,
       saveGiftCard,
       deleteGiftCard,
@@ -605,6 +923,13 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       deleteDeliveryRider,
       savePrintStation,
       deletePrintStation,
+      saveBeverageQty,
+      deleteBeverageQty,
+      saveBeveragePrice,
+      deleteBeveragePrice,
+      saveBeveragePricesBulk,
+      saveAddonMaster,
+      deleteAddonMaster,
     ],
   )
 

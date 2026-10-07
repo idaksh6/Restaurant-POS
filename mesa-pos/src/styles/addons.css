@@ -1,0 +1,278 @@
+/* Addons master — responsive cards + sheet */
+
+.zk-addons,
+.zk-addons .zk-tax-body,
+.zk-addons .zk-tax-hero,
+.zk-addons .zk-tax-list-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.zk-addons {
+  overflow-x: clip;
+}
+
+.zk-addons .zk-tax-list-head {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.zk-addons-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.zk-addon-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+  height: 100%;
+  padding: 0.85rem 0.9rem;
+  border-radius: 16px;
+  border: 1px solid #dce5e0;
+  background: #f7faf8;
+  box-sizing: border-box;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.zk-addon-card.on {
+  background: color-mix(in srgb, var(--teal-soft, #d8ebe5) 55%, #fff);
+  border-color: color-mix(in srgb, var(--teal, #1f6b5c) 28%, #dce5e0);
+}
+
+.zk-addon-card-main {
+  appearance: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex: 1 1 auto;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.zk-addon-card-count {
+  flex: 0 0 auto;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--teal, #1f6b5c);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.zk-addon-card-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.zk-addon-card-body strong {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #12201c;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.zk-addon-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.zk-addon-card-badges .zk-tax-badge {
+  font-size: 0.68rem;
+}
+
+.zk-addon-card-opts {
+  margin: 0;
+  color: var(--muted, #5f7169);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.zk-addon-card-edit {
+  appearance: none;
+  align-self: stretch;
+  margin: 0;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid #d0dbd4;
+  background: #fff;
+  color: #2a3a34;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.zk-addon-card-edit:hover {
+  border-color: var(--teal, #1f6b5c);
+  color: var(--teal, #1f6b5c);
+  background: #fff;
+}
+
+.zk-addons .zk-addon-options {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.zk-addons .zk-addon-option-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5.5rem auto auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.zk-addons .zk-addon-option-row .search {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.zk-addons .zk-addon-option-row .muted {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.zk-addons .zk-vendors-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.zk-addons .zk-vendors-actions .zk-vendors-action.danger {
+  margin-inline-end: auto;
+}
+
+@media (max-width: 900px) {
+  .zk-addons .zk-tax-hero {
+    grid-template-columns: 1fr !important;
+  }
+
+  .zk-addons .zk-tax-hero-meta {
+    justify-items: stretch;
+    width: 100%;
+  }
+
+  .zk-addons .zk-tax-pill {
+    justify-self: start;
+  }
+
+  .zk-addons .zk-tax-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .zk-addons .zk-tax-list-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .zk-addons .zk-tax-list-tools {
+    width: 100%;
+  }
+
+  .zk-addons .zk-tax-list-tools .zk-tax-tool {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .zk-addons .zk-tax-form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .zk-addons .zk-tax-body {
+    padding: 0.65rem 0.65rem 1rem;
+  }
+
+  .zk-addons .zk-tax-bar {
+    margin-inline: 0.65rem;
+  }
+
+  .zk-addons .zk-tax-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .zk-addons-grid {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+  }
+
+  .zk-addon-card {
+    padding: 0.75rem 0.8rem;
+  }
+
+  .zk-addons .zk-bev-sheet {
+    width: min(100vw - 1rem, 520px);
+    max-height: min(92vh, 720px);
+    border-radius: 16px 16px 0 0;
+  }
+
+  .zk-addons .zk-addon-option-row {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      'name name'
+      'price money'
+      'remove remove';
+  }
+
+  .zk-addons .zk-addon-option-row > .search:first-child {
+    grid-area: name;
+  }
+
+  .zk-addons .zk-addon-option-row > .search:nth-child(2) {
+    grid-area: price;
+  }
+
+  .zk-addons .zk-addon-option-row > .muted {
+    grid-area: money;
+    justify-self: end;
+  }
+
+  .zk-addons .zk-addon-option-row > .mst-btn {
+    grid-area: remove;
+    width: 100%;
+  }
+
+  .zk-addons .zk-vendors-actions {
+    flex-direction: column-reverse;
+  }
+
+  .zk-addons .zk-vendors-actions .zk-vendors-action,
+  .zk-addons .zk-vendors-actions .zk-vendors-action.danger {
+    width: 100%;
+    margin: 0;
+    justify-content: center;
+  }
+}

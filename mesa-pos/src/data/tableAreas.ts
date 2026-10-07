@@ -1,4 +1,5 @@
-import { tableAreas as seedAreaNames } from './mock'
+import { getActiveBranchId } from './company'
+import { isHeadOfficeBranchId } from '../lib/stockBranch'
 import { tenantGetItem, tenantSetItem } from './repos/db'
 
 const AREAS_KEY = 'mesa-table-areas'
@@ -8,6 +9,8 @@ export type TableArea = {
   name: string
   sortOrder: number
   active: boolean
+  /** Branch that owns this area — required for new rows. */
+  branchId?: string
 }
 
 function slugAreaId(name: string, existing: TableArea[]) {
@@ -28,125 +31,183 @@ function slugAreaId(name: string, existing: TableArea[]) {
   return id
 }
 
-function seedAreas(): TableArea[] {
-  return seedAreaNames.map((name, i) => ({
-    id: `area-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-    name,
-    sortOrder: (i + 1) * 10,
-    active: true,
-  }))
+function normalizeArea(a: TableArea): TableArea {
+  return {
+    id: String(a.id),
+    name: String(a.name ?? '').trim(),
+    sortOrder: Number(a.sortOrder) || 0,
+    active: a.active !== false,
+    branchId: a.branchId ? String(a.branchId) : undefined,
+  }
 }
 
-export function loadTableAreas(): TableArea[] {
+/** All stored areas (every branch). Never auto-seeds demo areas. */
+export function loadAllTableAreas(): TableArea[] {
   try {
     const raw = tenantGetItem(AREAS_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as TableArea[]
-      if (Array.isArray(parsed) && parsed.length) {
+      if (Array.isArray(parsed)) {
         return parsed
-          .map((a) => ({
-            id: String(a.id),
-            name: String(a.name ?? '').trim(),
-            sortOrder: Number(a.sortOrder) || 0,
-            active: a.active !== false,
-          }))
+          .map(normalizeArea)
           .filter((a) => a.id && a.name)
           .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
       }
     }
   } catch {
-    /* seed */
+    /* empty */
   }
-  const seeded = seedAreas()
-  saveTableAreas(seeded)
-  return seeded
+  return []
 }
 
-export function saveTableAreas(rows: TableArea[]) {
-  const next = [...rows]
-    .map((a) => ({
-      ...a,
-      name: a.name.trim(),
-      sortOrder: Number(a.sortOrder) || 0,
-      active: a.active !== false,
-    }))
-    .filter((a) => a.id && a.name)
+/** Areas for one branch. Unscoped legacy rows only show on Head Office. */
+export function loadTableAreas(branchId = getActiveBranchId()): TableArea[] {
+  const all = loadAllTableAreas()
+  const scoped = all.filter((a) => a.branchId === branchId)
+  if (scoped.length) return scoped
+  if (isHeadOfficeBranchId(branchId)) {
+    return all.filter((a) => !a.branchId)
+  }
+  return []
+}
+
+export function saveTableAreas(rows: TableArea[], branchId = getActiveBranchId()) {
+  const scoped = rows
+    .map((a) => normalizeArea({ ...a, branchId: a.branchId ?? branchId }))
+    .filter((a) => a.id && a.name && a.branchId === branchId)
     .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
+  const all = loadAllTableAreas()
+  // Keep other branches' areas. Keep unscoped legacy unless Head Office is
+  // saving scoped rows (then migrate legacy off the shared bucket).
+  const others = all.filter((a) => {
+    if (a.branchId === branchId) return false
+    if (!a.branchId) {
+      if (isHeadOfficeBranchId(branchId) && scoped.length) return false
+      return true
+    }
+    return true
+  })
+  const next = [...others, ...scoped]
   tenantSetItem(AREAS_KEY, JSON.stringify(next))
   if (typeof window !== 'undefined') {
     queueMicrotask(() => window.dispatchEvent(new Event('mesa:table-areas-changed')))
   }
-  return next
+  if (scoped.length) return scoped
+  if (isHeadOfficeBranchId(branchId)) return all.filter((a) => !a.branchId)
+  return []
 }
 
 export function fromApiTableArea(row: Record<string, unknown>): TableArea {
-  return {
+  return normalizeArea({
     id: String(row.id ?? ''),
     name: String(row.name ?? '').trim(),
     sortOrder: Number(row.sort ?? row.sortOrder ?? 0) || 0,
     active: row.active !== false,
-  }
+    branchId: row.branchId ? String(row.branchId) : undefined,
+  })
 }
 
 export function toApiTableArea(row: TableArea): Record<string, unknown> {
+  const branchId = row.branchId ?? getActiveBranchId()
   return {
     id: row.id,
     name: row.name,
     sort: row.sortOrder,
     sortOrder: row.sortOrder,
     active: row.active !== false,
+    branchId,
   }
 }
 
-/** Merge server catalog into local areas (server wins on same id). */
-export function mergeRemoteTableAreas(remote: TableArea[], local = loadTableAreas()): TableArea[] {
+/** Merge server catalog for this branch into local areas (server wins on same id). */
+export function mergeRemoteTableAreas(
+  remote: TableArea[],
+  branchId = getActiveBranchId(),
+  local = loadTableAreas(branchId),
+): TableArea[] {
   const byId = new Map<string, TableArea>()
-  for (const a of local) byId.set(a.id, a)
+  for (const a of local) {
+    if (a.branchId && a.branchId !== branchId) continue
+    byId.set(a.id, { ...a, branchId })
+  }
   for (const a of remote) {
     if (!a.id || !a.name) continue
-    byId.set(a.id, a)
+    if (a.branchId && a.branchId !== branchId) continue
+    // Skip company-wide legacy rows when this is not Head Office.
+    if (!a.branchId && !isHeadOfficeBranchId(branchId)) continue
+    byId.set(a.id, { ...a, branchId })
   }
-  // Also match by name so seed/local ids don't duplicate remote rows
   const byName = new Map<string, TableArea>()
   for (const a of byId.values()) {
     const key = a.name.toLowerCase()
     const prev = byName.get(key)
     if (!prev || remote.some((r) => r.id === a.id)) byName.set(key, a)
   }
-  return saveTableAreas([...byName.values()])
+  return saveTableAreas([...byName.values()], branchId)
 }
 
 export function nextAreaSortOrder(rows: TableArea[]) {
-  return (rows.reduce((m, r) => Math.max(m, r.sortOrder), 0) || 0) + 10
+  return (rows.reduce((m, r) => Math.max(m, r.sortOrder), 0) || 0) + 1
 }
 
-export function createTableArea(name: string, rows = loadTableAreas()): TableArea {
+export function createTableArea(
+  name: string,
+  rows = loadTableAreas(),
+  branchId = getActiveBranchId(),
+): TableArea {
   const trimmed = name.trim()
   return {
     id: slugAreaId(trimmed, rows),
     name: trimmed,
     sortOrder: nextAreaSortOrder(rows),
     active: true,
+    branchId,
   }
 }
 
-/** Ensure catalog includes every area name used on floor tables. */
-export function ensureAreasFromTables(areaNames: string[], rows = loadTableAreas()): TableArea[] {
-  let next = [...rows]
+/** Ensure catalog includes every area name used on floor tables for this branch. */
+export function ensureAreasFromTables(
+  areaNames: string[],
+  rows?: TableArea[],
+  branchId = getActiveBranchId(),
+): TableArea[] {
+  let next = [...(rows ?? loadTableAreas(branchId))]
   let changed = false
   for (const raw of areaNames) {
     const name = raw.trim()
     if (!name) continue
     if (next.some((a) => a.name.toLowerCase() === name.toLowerCase())) continue
-    next.push(createTableArea(name, next))
+    next.push(createTableArea(name, next, branchId))
     changed = true
   }
-  if (changed) return saveTableAreas(next)
+  if (changed) return saveTableAreas(next, branchId)
   return next
+}
+
+/** Floor tables store the area name — printer routing keys on the area id. */
+export function areaIdByName(name: string | undefined, rows = loadTableAreas()): string | undefined {
+  const key = name?.trim().toLowerCase()
+  if (!key) return undefined
+  return rows.find((a) => a.name.trim().toLowerCase() === key)?.id
 }
 
 export function activeAreaNames(rows = loadTableAreas()): string[] {
   return rows.filter((a) => a.active).map((a) => a.name)
+}
+
+/** Lowercased names of inactive catalog areas. */
+export function inactiveAreaNameSet(rows = loadTableAreas()): Set<string> {
+  return new Set(
+    rows.filter((a) => !a.active).map((a) => a.name.trim().toLowerCase()).filter(Boolean),
+  )
+}
+
+export function isTableAreaActive(name: string, catalog = loadTableAreas()): boolean {
+  const key = name.trim().toLowerCase()
+  if (!key) return true
+  const hit = catalog.find((a) => a.name.trim().toLowerCase() === key)
+  if (!hit) return true
+  return hit.active !== false
 }
 
 export function orderedAreaNames(used: string[], catalog = loadTableAreas()): string[] {
@@ -168,6 +229,7 @@ export function orderedAreaNames(used: string[], catalog = loadTableAreas()): st
     usedNorm.delete(a.name.toLowerCase())
   }
   for (const leftover of usedNorm.values()) {
+    if (!isTableAreaActive(leftover, catalog)) continue
     if (seen.has(leftover.toLowerCase())) continue
     ordered.push(leftover)
     seen.add(leftover.toLowerCase())

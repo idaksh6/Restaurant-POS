@@ -21,6 +21,7 @@ import {
   deriveStatus,
   ensureDefaultSuppliers,
   fromApiPO,
+  isSeedVendor,
   isDemoVendor,
   loadAllPOs,
   mergeRemotePOs,
@@ -165,18 +166,15 @@ function loadSuppliers(): Supplier[] {
     if (raw) {
       const parsed = JSON.parse(raw) as Supplier[]
       if (Array.isArray(parsed)) {
-        const hadReal = parsed.some((s) => !isDemoVendor(s.id))
         const next = ensureDefaultSuppliers(parsed)
-        if (!hadReal && next.length) saveSuppliers(next)
+        if (next.length !== parsed.length) saveSuppliers(next)
         return next
       }
     }
   } catch {
     /* ignore */
   }
-  const seeded = ensureDefaultSuppliers([])
-  saveSuppliers(seeded)
-  return seeded
+  return []
 }
 
 function loadLedger(): VendorLedgerEntry[] {
@@ -227,18 +225,15 @@ export function PurchasingProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         const remoteVendors = (remote.vendors ?? [])
           .map(fromApiVendor)
-          .filter((s) => !isDemoVendor(s.id))
+          .filter((s) => !isSeedVendor(s.id))
         const vendors = ensureDefaultSuppliers(remoteVendors)
         const ledger = (remote.ledger ?? [])
           .map(fromApiLedger)
-          .filter((e) => !DEMO_LEDGER_IDS.has(e.id) && !isDemoVendor(e.supplierId))
+          .filter((e) => !DEMO_LEDGER_IDS.has(e.id) && !isSeedVendor(e.supplierId))
         saveSuppliers(vendors)
         saveLedger(ledger)
         setSuppliers(vendors)
         setVendorLedger(ledger)
-        if (!remoteVendors.length && vendors.length) {
-          for (const v of vendors) pushVendor(v)
-        }
       } catch {
         /* keep local cache */
       }

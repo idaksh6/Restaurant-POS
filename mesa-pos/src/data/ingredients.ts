@@ -18,6 +18,8 @@ export type Ingredient = {
   category: string
   unit: string
   active: boolean
+  /** Branch that owns this ingredient master row. */
+  branchId?: string
   /** Default supplier for POs and receiving — edited on this master only. */
   vendorId?: string
   /** Denormalized vendor name for display / offline. */
@@ -247,6 +249,7 @@ export function fromApiIngredient(row: Record<string, unknown>): Ingredient {
     category: String(row.category ?? 'General'),
     unit: String(row.unit ?? 'pcs'),
     active: row.active !== false,
+    branchId: row.branchId ? String(row.branchId) : undefined,
     vendorId: row.vendorId ? String(row.vendorId) : undefined,
     vendor: row.vendor ? String(row.vendor) : undefined,
     vendorLinks,
@@ -255,29 +258,73 @@ export function fromApiIngredient(row: Record<string, unknown>): Ingredient {
   })
 }
 
-/** Keep local catalog rows; overlay server updates by id (multi-device safe). */
-export function mergeRemoteIngredients(local: Ingredient[], remote: Ingredient[]): Ingredient[] {
+function isSeedIngredientId(id: string) {
+  return /^s\d+$/.test(String(id || '').trim())
+}
+
+const SEED_INGREDIENT_SKUS = new Set([
+  'MEAT-RIB-300',
+  'MEAT-CHK-BR',
+  'DRY-ARB-1',
+  'PRD-TOM',
+  'DRY-BUR',
+  'BEV-LEM',
+  'BEV-ESP',
+  'DRY-CHO',
+  'DRY-OIL',
+  'SEA-BAS',
+  'DAIR-MILK',
+  'DRY-FLR',
+  'PRD-POT-RAW',
+  'PRD-POT-FRY',
+  'DRY-PAN-BLK',
+  'DRY-PAN-CKB',
+])
+
+export function isSeedIngredient(row: { id?: string; sku?: string }): boolean {
+  if (row.id && isSeedIngredientId(row.id)) return true
+  const sku = String(row.sku || '')
+    .trim()
+    .toUpperCase()
+  return Boolean(sku && SEED_INGREDIENT_SKUS.has(sku))
+}
+
+export function ingredientsForBranch(rows: Ingredient[], branchId: string): Ingredient[] {
+  return rows.filter(
+    (r) => r.branchId === branchId && !isSeedIngredient(r),
+  )
+}
+
+/** Keep local catalog rows for this branch; overlay server updates by id. */
+export function mergeRemoteIngredients(
+  local: Ingredient[],
+  remote: Ingredient[],
+  branchId?: string,
+): Ingredient[] {
+  const others = branchId
+    ? local.filter((r) => r.branchId && r.branchId !== branchId && !isSeedIngredient(r))
+    : []
+  // Never adopt unscoped / seed leftovers into the active branch.
+  const scopedLocal = branchId
+    ? local.filter((r) => r.branchId === branchId && !isSeedIngredient(r))
+    : local.filter((r) => !isSeedIngredient(r))
   const byId = new Map<string, Ingredient>()
-  for (const row of local) {
+  for (const row of scopedLocal) {
     if (row?.id) byId.set(row.id, normalizeIngredient(row))
   }
   for (const row of remote) {
-    if (!row?.id) continue
+    if (!row?.id || isSeedIngredient(row)) continue
+    if (branchId && row.branchId && row.branchId !== branchId) continue
     const prev = byId.get(row.id)
-    const next = normalizeIngredient(row)
-    if (prev) {
-      byId.set(row.id, {
-        ...prev,
-        ...next,
-        vendorLinks: next.vendorLinks?.length ? next.vendorLinks : prev.vendorLinks,
-        reorderAt: (next.reorderAt ?? 0) > 0 ? next.reorderAt : prev.reorderAt ?? next.reorderAt,
-        defaultLocationId: next.defaultLocationId || prev.defaultLocationId,
-      })
-    } else {
-      byId.set(row.id, next)
-    }
+    const next = normalizeIngredient({
+      ...row,
+      branchId: row.branchId ?? branchId ?? prev?.branchId,
+    })
+    if (branchId && next.branchId !== branchId) continue
+    byId.set(row.id, prev ? { ...prev, ...next, id: next.id } : next)
   }
-  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name))
+  const merged = [...byId.values()].map(normalizeIngredient)
+  return [...others, ...merged].sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /** Add ingredient rows for stock SKUs that are not in the catalog yet. */

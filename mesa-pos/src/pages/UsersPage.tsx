@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { getPermissions, loadManagedRoles, roleDisplayName } from '../auth/roles'
+import ArabicTextInput from '../components/ArabicTextInput'
 import { HubFooter, HubHeader } from '../components/HubChrome'
 import AccessDenied from '../components/AccessDenied'
 import MesaSelect from '../components/MesaSelect'
 import Req from '../components/Req'
 import { useI18n } from '../locale/i18n'
 import { loadBranches, getActiveBranchId } from '../data/company'
+import { latinToArabic } from '../lib/arabicTransliterate'
 import { loadManagedUsers, mergeRemoteUsers, saveManagedUsers, isSeedManagedUser, toStaffAccount, upsertManagedUser, type ManagedUser } from '../data/staffUsers'
+import type { StaffAccount } from '../data/staff'
 import { apiAccessReady, apiListUsers, apiSaveUser, syncCompanyRoles } from '../lib/apiAccess'
 import { settingsHubPath } from '../lib/settingsHub'
 import { useAuth } from '../state/AuthContext'
@@ -40,7 +43,7 @@ const emptyForm = (): FormState => ({
 })
 
 export default function UsersPage() {
-  const { user, companyId, refreshStaff } = useAuth()
+  const { user, companyId, refreshStaff, applyUserProfile } = useAuth()
   const { activeBranchId } = useBranch()
   const { flash } = usePos()
   const { syncEpoch, runSync } = useSync()
@@ -78,13 +81,14 @@ export default function UsersPage() {
       window.removeEventListener('mesa:access-refresh', onRemote)
     }
   }, [cid, syncEpoch])
-  const visibleRows = useMemo(
-    () =>
-      rows.filter(
-        (r) => r.role === 'admin' || !r.branchId || r.branchId === activeBranchId,
-      ),
-    [rows, activeBranchId],
-  )
+  const visibleRows = useMemo(() => {
+    // Settings list shows every company user; branch is only a label on the card.
+    return [...rows].sort((a, b) => {
+      if (a.role === 'admin' && b.role !== 'admin') return -1
+      if (b.role === 'admin' && a.role !== 'admin') return 1
+      return a.name.localeCompare(b.name)
+    })
+  }, [rows])
 
   useEffect(() => {
     let alive = true
@@ -99,7 +103,8 @@ export default function UsersPage() {
       }
       try {
         await syncCompanyRoles(cid)
-        const remote = await apiListUsers(activeBranchId)
+        // Company-wide list (not branch-scoped) so users on other branches stay visible.
+        const remote = await apiListUsers()
         if (!alive) return
         const mapped = remote.map((u) => ({
           id: u.id,
@@ -111,7 +116,6 @@ export default function UsersPage() {
           active: u.active,
           companyId: u.companyId ?? cid,
         }))
-        // Keep local pins / pending creates only — never flash seed demos over the API list.
         const prev = loadManagedUsers(cid).filter((r) => !isSeedManagedUser(r))
         const merged = mergeRemoteUsers(prev, mapped, overlay.pendingUsers)
         saveManagedUsers(cid, merged)
@@ -134,7 +138,7 @@ export default function UsersPage() {
       alive = false
       window.removeEventListener('mesa:users-changed', onUsers)
     }
-  }, [cid, activeBranchId, syncEpoch])
+  }, [cid, syncEpoch])
 
   function startAdd() {
     if (pinMode) return
@@ -310,9 +314,28 @@ export default function UsersPage() {
         dropPendingUpsertsFor(savedLocal.id, 'user.upsert')
         if (saved.id) dropPendingUpsertsFor(saved.id, 'user.upsert')
         setRows(loadManagedUsers(cid))
+        const profileId = saved.id || savedLocal.id
+        if (profileId && user?.id === profileId) {
+          applyUserProfile({
+            id: profileId,
+            name: payload.name,
+            role: payload.role as StaffAccount['role'],
+            roleLabel: roleDisplayName(payload.role as StaffAccount['role']),
+            branchId: payload.branchId ?? null,
+          })
+        }
         void refreshStaff()
       } else {
         setRows(loadManagedUsers(cid))
+        if (savedLocal.id && user?.id === savedLocal.id) {
+          applyUserProfile({
+            id: savedLocal.id,
+            name: payload.name,
+            role: payload.role as StaffAccount['role'],
+            roleLabel: roleDisplayName(payload.role as StaffAccount['role']),
+            branchId: payload.branchId ?? null,
+          })
+        }
       }
       setEditing(null)
       setConfirmPin('')
@@ -352,7 +375,9 @@ export default function UsersPage() {
       </div>
 
       <div className="zk-units-body">
-        {pinMode ? <p className="zk-units-hint">{t.pickUserPin}</p> : null}
+        {pinMode ? <p className="zk-units-hint">{t.pickUserPin}</p> : (
+          <p className="zk-units-hint">All company users · tap a card to edit · branch shown on each card</p>
+        )}
         {!listReady ? (
           <div className="zk-units-empty">
             <strong>{t.loadingUsers}</strong>
@@ -453,16 +478,24 @@ export default function UsersPage() {
                   className="search"
                   autoFocus
                   value={editing.name}
-                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                  onChange={(e) => {
+                    const name = e.target.value
+                    setEditing({
+                      ...editing,
+                      name,
+                      nameAr: latinToArabic(name),
+                    })
+                  }}
                 />
               </label>
               <label>
                 <span>Arabic name</span>
-                <input
-                  className="search"
-                  dir="rtl"
+                <ArabicTextInput
                   value={editing.nameAr}
-                  onChange={(e) => setEditing({ ...editing, nameAr: e.target.value })}
+                  onChange={(nameAr) => setEditing({ ...editing, nameAr })}
+                  mode="ar"
+                  autoComplete="off"
+                  placeholder="Fills from Name · edit anytime"
                 />
               </label>
               <label>

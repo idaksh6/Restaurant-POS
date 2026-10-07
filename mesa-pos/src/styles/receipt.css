@@ -1,0 +1,247 @@
+/* e-Bill / receipt modal item columns */
+
+/* Tall bills: keep header fixed, scroll receipt body */
+.modal-backdrop:has(.receipt-card) {
+  align-items: center;
+  justify-items: center;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 1rem;
+}
+
+.modal-card.receipt-card {
+  width: min(420px, 100%);
+  max-height: min(90dvh, 860px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow: hidden;
+  padding: 1rem;
+}
+
+.modal-card.receipt-card > .section-head {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.modal-card.receipt-card > .action-row {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.modal-card.receipt-card > .receipt-print-status {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+  background: #f5f8f6;
+  color: #33463f;
+  border: 1px solid #dfe8e3;
+}
+
+.modal-card.receipt-card > .receipt-print-status.st-done {
+  background: #e6f4ef;
+  color: #004d3a;
+  border-color: #b9dccf;
+}
+
+.modal-card.receipt-card > .receipt-print-status.st-failed {
+  background: #fdecec;
+  color: #9b1c1c;
+  border-color: #f3c4c4;
+}
+
+.modal-card.receipt-card .receipt-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+/* Compact receipt preview: smaller type so bilingual names fit on one line each */
+.modal-card.receipt-card .receipt-body {
+  font-size: 0.8rem;
+  padding: 0.9rem 0.85rem 0.85rem;
+}
+
+.modal-card.receipt-card .receipt-brand {
+  font-size: 1rem !important;
+  margin-bottom: 0.35rem !important;
+}
+
+.modal-card.receipt-card .receipt-body p {
+  font-size: 0.74rem;
+  margin: 0.1rem 0;
+}
+
+.modal-card.receipt-card .receipt-line {
+  font-size: 0.8rem;
+  margin: 0.22rem 0;
+}
+
+.receipt-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.6rem 0 0.4rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px dashed var(--line);
+}
+
+.receipt-line-head,
+.receipt-line-cols {
+  display: grid;
+  /* Wider item column + compact type so bilingual names stay on one line each */
+  grid-template-columns: minmax(0, 1.8fr) 2rem 4.5rem 5rem;
+  gap: 0.35rem;
+  align-items: start;
+  font-size: 0.8rem;
+  line-height: 1.3;
+}
+
+.receipt-line-head {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.15rem;
+}
+
+.receipt-line-cols .r-item {
+  min-width: 0;
+  word-break: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.8rem;
+}
+
+.receipt-line-cols .r-item-en {
+  display: block;
+  font-size: inherit;
+}
+
+.receipt-line-cols .r-item-ar {
+  display: block;
+  font-size: inherit;
+  font-weight: 400;
+  color: var(--ink-soft, #2a3b35);
+  line-height: 1.2;
+}
+
+.receipt-line-head .r-qty,
+.receipt-line-head .r-rate,
+.receipt-line-head .r-total,
+.receipt-line-cols .r-qty,
+.receipt-line-cols .r-rate,
+.receipt-line-cols .r-total {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.receipt-line-cols .r-total {
+  font-weight: 650;
+}
+
+[dir='rtl'] .receipt-line-head .r-qty,
+[dir='rtl'] .receipt-line-head .r-rate,
+[dir='rtl'] .receipt-line-head .r-total,
+[dir='rtl'] .receipt-line-cols .r-qty,
+[dir='rtl'] .receipt-line-cols .r-rate,
+[dir='rtl'] .receipt-line-cols .r-total {
+  text-align: start;
+}
+
+.receipt-bill-total {
+  border-top: 1px dashed var(--line);
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  font-weight: 600;
+}
+
+.receipt-vat-hint {
+  font-size: 0.75em;
+  font-weight: 600;
+  text-decoration: none;
+  opacity: 0.65;
+  cursor: help;
+}
+
+.receipt-vat-row[title] {
+  cursor: help;
+}
+
+.receipt-bill-no {
+  font-weight: 800;
+  font-size: 1.05em;
+  letter-spacing: 0.02em;
+}
+
+.receipt-meta-strong {
+  font-weight: 700;
+}
+
+.receipt-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+/* Phase 2 QR carries ~500 chars (≈90 modules); 120px is unreadable by phone cameras */
+.receipt-zatca img.qr-dense {
+  width: 240px;
+  height: 240px;
+  max-width: 100%;
+  padding: 0;
+}
+
+/* ZATCA QR placeholder while the Phase 2 report is in flight */
+.receipt-zatca-wait {
+  width: 120px;
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px dashed var(--line, #cbd5d1);
+  border-radius: 8px;
+  background: #f8faf9;
+  color: #64706b;
+  text-align: center;
+  padding: 0.5rem;
+  box-sizing: border-box;
+}
+
+.receipt-zatca-wait small {
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
+.receipt-zatca-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2.5px solid #cfe3da;
+  border-top-color: #0f7a5a;
+  animation: receipt-zatca-spin 0.9s linear infinite;
+}
+
+@keyframes receipt-zatca-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

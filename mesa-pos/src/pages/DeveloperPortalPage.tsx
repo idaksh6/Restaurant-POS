@@ -23,15 +23,25 @@ type UserRow = {
   role?: string
 }
 
+type LicenseInfo = {
+  licenseStatus: 'pending' | 'active' | 'suspended' | 'expired'
+  activatedAt: string | null
+  expiresAt: string | null
+  inherited: boolean
+  daysRemaining: number | null
+}
+
 type CompanyRow = {
   id: string
   companyName: string
   taxId: string | null
+  companyCode?: string | null
   aliasName?: string | null
   hqPhone?: string | null
   databaseName?: string
   branches: BranchRow[]
   users: UserRow[]
+  license?: LicenseInfo
 }
 
 type EditBranch = {
@@ -61,6 +71,7 @@ const TOKEN_KEY = 'mesa-dev-portal-token'
 const emptyForm = {
   companyName: '',
   aliasName: '',
+  companyCode: '',
   taxId: '',
   hqPhone: '',
   country: 'Saudi Arabia · SAR',
@@ -85,6 +96,33 @@ const COUNTRY_OPTIONS = [
   { value: 'Oman · OMR', label: 'Oman (OMR)' },
 ] as const
 
+function displayTaxId(taxId: string | null | undefined) {
+  if (!taxId || /^NOVAT-/i.test(taxId)) return '— (no VAT)'
+  return taxId
+}
+
+function licenseBadge(lic?: LicenseInfo | null) {
+  const s = lic?.licenseStatus || 'pending'
+  const label =
+    s === 'active'
+      ? 'Active'
+      : s === 'expired'
+        ? 'Expired'
+        : s === 'suspended'
+          ? 'Suspended'
+          : 'Pending'
+  return { status: s, label }
+}
+
+function fmtDate(iso: string | null | undefined) {
+  if (!iso) return '—'
+  try {
+    return new Date(iso).toLocaleDateString()
+  } catch {
+    return iso.slice(0, 10)
+  }
+}
+
 export default function DeveloperPortalPage() {
   const navigate = useNavigate()
   const { bindTerminal } = useAuth()
@@ -101,6 +139,7 @@ export default function DeveloperPortalPage() {
   const [busy, setBusy] = useState(false)
   const [linkEnAr, setLinkEnAr] = useState(true)
   const [editId, setEditId] = useState<string | null>(null)
+  const [editCompanyCode, setEditCompanyCode] = useState('')
   const [editCompany, setEditCompany] = useState({
     companyName: '',
     aliasName: '',
@@ -109,6 +148,8 @@ export default function DeveloperPortalPage() {
   })
   const [editBranches, setEditBranches] = useState<EditBranch[]>([])
   const [editUsers, setEditUsers] = useState<EditUser[]>([])
+  const [licenseExpires, setLicenseExpires] = useState('')
+  const [licenseBusy, setLicenseBusy] = useState(false)
 
   const patch = <K extends keyof typeof emptyForm>(key: K, value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -283,13 +324,56 @@ export default function DeveloperPortalPage() {
     try {
       const res = await fetch(`${base}/dev/companies/${id}`, { headers: authHeaders() })
       if (!res.ok) throw new Error(await res.text())
-      setDetail((await res.json()) as CompanyRow)
+      const company = (await res.json()) as CompanyRow
+      setDetail(company)
       setSelectedId(id)
+      setLicenseExpires(company.license?.expiresAt ? company.license.expiresAt.slice(0, 10) : '')
       setTab('detail')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load company')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function saveLicense(
+    id: string,
+    body: {
+      expiresAt?: string | null
+      extendMonths?: number
+      licenseStatus?: string
+      activateNow?: boolean
+    },
+  ) {
+    const base = API()
+    if (!base || !token) return
+    setLicenseBusy(true)
+    setError('')
+    setOk('')
+    try {
+      const res = await fetch(`${base}/dev/companies/${id}/license`, {
+        method: 'PUT',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const text = await res.text()
+      if (!res.ok) {
+        let msg = text
+        try {
+          const j = JSON.parse(text) as { message?: string }
+          if (j.message) msg = j.message
+        } catch {
+          /* keep */
+        }
+        throw new Error(msg || `License update failed (${res.status})`)
+      }
+      setOk('License updated')
+      await openDetail(id)
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'License update failed')
+    } finally {
+      setLicenseBusy(false)
     }
   }
 
@@ -305,10 +389,11 @@ export default function DeveloperPortalPage() {
       const company = (await res.json()) as CompanyRow
       setEditId(company.id)
       setSelectedId(company.id)
+      setEditCompanyCode(company.companyCode || '')
       setEditCompany({
         companyName: company.companyName ?? '',
         aliasName: company.aliasName ?? '',
-        taxId: company.taxId ?? '',
+        taxId: /^NOVAT-/i.test(company.taxId || '') ? '' : (company.taxId ?? ''),
         hqPhone: company.hqPhone ?? '',
       })
       setEditBranches(
@@ -406,6 +491,7 @@ export default function DeveloperPortalPage() {
         message?: string | string[]
         error?: string
         databaseName?: string
+        companyCode?: string
         company?: { companyName?: string; id?: string }
         branch?: { code?: string }
         admin?: { username?: string }
@@ -417,7 +503,7 @@ export default function DeveloperPortalPage() {
         throw new Error(msg)
       }
       setOk(
-        `Created ${data.company?.companyName} · DB ${data.databaseName || '—'} · branch ${data.branch?.code} · admin ${data.admin?.username}`,
+        `Created ${data.company?.companyName} · code ${data.companyCode || '—'} · DB ${data.databaseName || '—'} · admin ${data.admin?.username}`,
       )
       setForm(emptyForm)
       setLinkEnAr(true)
@@ -485,7 +571,7 @@ export default function DeveloperPortalPage() {
             <div className="dev-mark sm">D</div>
             <div>
               <strong>Developer portal</strong>
-              <span>Companies · VAT · admin users</span>
+              <span>Companies · codes · VAT · admin users</span>
             </div>
           </div>
           <div className="dev-top-actions">
@@ -534,28 +620,36 @@ export default function DeveloperPortalPage() {
                 <thead>
                   <tr>
                     <th>Company</th>
+                    <th>Code</th>
+                    <th>Status</th>
+                    <th>Expires</th>
                     <th>VAT</th>
-                    <th>Database</th>
                     <th>Branches</th>
-                    <th>Admins</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
                   {companies.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="dev-empty">
+                      <td colSpan={7} className="dev-empty">
                         No companies yet. Use Register to add one.
                       </td>
                     </tr>
                   ) : (
-                    companies.map((c) => (
+                    companies.map((c) => {
+                      const badge = licenseBadge(c.license)
+                      return (
                       <tr key={c.id} className={selectedId === c.id ? 'selected' : ''}>
                         <td>{c.companyName}</td>
-                        <td className="mesa-ltr-nums">{c.taxId || '—'}</td>
-                        <td className="mesa-ltr-nums">{c.databaseName || '—'}</td>
+                        <td className="mesa-ltr-nums">
+                          <strong>{c.companyCode || '—'}</strong>
+                        </td>
+                        <td>
+                          <span className={`dev-license-badge st-${badge.status}`}>{badge.label}</span>
+                        </td>
+                        <td className="mesa-ltr-nums">{fmtDate(c.license?.expiresAt)}</td>
+                        <td className="mesa-ltr-nums">{displayTaxId(c.taxId)}</td>
                         <td>{c.branches.map((b) => b.code).join(', ') || '—'}</td>
-                        <td>{c.users.map((u) => u.username).join(', ') || '—'}</td>
                         <td>
                           <div className="dev-row-actions">
                             <button
@@ -582,7 +676,8 @@ export default function DeveloperPortalPage() {
                           </div>
                         </td>
                       </tr>
-                    ))
+                      )
+                    })
                   )}
                 </tbody>
               </table>
@@ -612,8 +707,16 @@ export default function DeveloperPortalPage() {
             </div>
             <div className="dev-detail-grid">
               <div>
+                <p className="dev-meta-label">Company code (POS activate)</p>
+                <p className="mesa-ltr-nums">
+                  <strong style={{ fontSize: '1.35rem', letterSpacing: '0.04em' }}>
+                    {detail.companyCode || '—'}
+                  </strong>
+                </p>
+              </div>
+              <div>
                 <p className="dev-meta-label">VAT</p>
-                <p className="mesa-ltr-nums">{detail.taxId || '—'}</p>
+                <p className="mesa-ltr-nums">{displayTaxId(detail.taxId)}</p>
               </div>
               <div>
                 <p className="dev-meta-label">Database</p>
@@ -629,7 +732,98 @@ export default function DeveloperPortalPage() {
                   <p dir="rtl">{detail.aliasName}</p>
                 </div>
               ) : null}
+              <div>
+                <p className="dev-meta-label">POS license</p>
+                <p>
+                  <span className={`dev-license-badge st-${licenseBadge(detail.license).status}`}>
+                    {licenseBadge(detail.license).label}
+                  </span>
+                  {detail.license?.inherited ? (
+                    <span className="dev-meta-hint"> · first device activated; others inherit</span>
+                  ) : (
+                    <span className="dev-meta-hint"> · waiting for first POS activate</span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="dev-meta-label">Activated at</p>
+                <p className="mesa-ltr-nums">{fmtDate(detail.license?.activatedAt)}</p>
+              </div>
+              <div>
+                <p className="dev-meta-label">Expires at</p>
+                <p className="mesa-ltr-nums">
+                  {fmtDate(detail.license?.expiresAt)}
+                  {typeof detail.license?.daysRemaining === 'number' ? (
+                    <span className="dev-meta-hint">
+                      {' '}
+                      · {detail.license.daysRemaining} day
+                      {detail.license.daysRemaining === 1 ? '' : 's'} left
+                    </span>
+                  ) : null}
+                </p>
+              </div>
             </div>
+
+            <h3>POS expiry</h3>
+            <div className="dev-license-editor">
+              <label className="dev-field">
+                <span>Expiry date</span>
+                <input
+                  type="date"
+                  className="mesa-ltr-nums"
+                  value={licenseExpires}
+                  onChange={(e) => setLicenseExpires(e.target.value)}
+                />
+              </label>
+              <div className="dev-row-actions" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="dev-btn primary compact"
+                  disabled={licenseBusy || !licenseExpires}
+                  onClick={() =>
+                    void saveLicense(detail.id, {
+                      expiresAt: licenseExpires ? `${licenseExpires}T23:59:59.000Z` : null,
+                      licenseStatus: 'active',
+                    })
+                  }
+                >
+                  Save expiry
+                </button>
+                <button
+                  type="button"
+                  className="dev-btn ghost compact"
+                  disabled={licenseBusy}
+                  onClick={() => void saveLicense(detail.id, { extendMonths: 12 })}
+                >
+                  +12 months
+                </button>
+                <button
+                  type="button"
+                  className="dev-btn ghost compact"
+                  disabled={licenseBusy}
+                  onClick={() => void saveLicense(detail.id, { extendMonths: 3 })}
+                >
+                  +3 months
+                </button>
+                <button
+                  type="button"
+                  className="dev-btn ghost compact"
+                  disabled={licenseBusy}
+                  onClick={() => void saveLicense(detail.id, { activateNow: true })}
+                >
+                  Activate now
+                </button>
+                <button
+                  type="button"
+                  className="dev-btn ghost compact"
+                  disabled={licenseBusy}
+                  onClick={() => void saveLicense(detail.id, { licenseStatus: 'suspended' })}
+                >
+                  Suspend
+                </button>
+              </div>
+            </div>
+
             <h3>Branches</h3>
             <ul className="dev-list">
               {detail.branches.map((b) => (
@@ -696,12 +890,16 @@ export default function DeveloperPortalPage() {
                 />
               </label>
               <label className="dev-field">
-                <span>VAT / Tax ID *</span>
+                <span>Company code (POS activate)</span>
+                <input className="mesa-ltr-nums" readOnly value={editCompanyCode || '—'} />
+              </label>
+              <label className="dev-field">
+                <span>VAT / Tax ID (optional)</span>
                 <input
                   className="mesa-ltr-nums"
-                  required
                   value={editCompany.taxId}
                   onChange={(e) => setEditCompany((prev) => ({ ...prev, taxId: e.target.value }))}
+                  placeholder="Leave blank if no VAT"
                 />
               </label>
               <label className="dev-field">
@@ -954,13 +1152,24 @@ export default function DeveloperPortalPage() {
                 />
               </label>
               <label className="dev-field">
-                <span>VAT / Tax ID *</span>
+                <span>Company code</span>
                 <input
                   className="mesa-ltr-nums"
-                  required
+                  value={form.companyCode}
+                  onChange={(e) => patch('companyCode', e.target.value.toUpperCase())}
+                  placeholder="Auto C001… or e.g. SARFA"
+                  maxLength={12}
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="dev-field">
+                <span>VAT / Tax ID (optional)</span>
+                <input
+                  className="mesa-ltr-nums"
                   value={form.taxId}
                   onChange={(e) => patch('taxId', e.target.value)}
-                  placeholder="3xxxxxxxxxxxxxxx003"
+                  placeholder="Leave blank if no VAT"
                 />
               </label>
               <label className="dev-field">

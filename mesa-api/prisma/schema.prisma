@@ -12,9 +12,17 @@ datasource db {
 model TenantRegistry {
   id           String   @id
   taxId        String   @unique
+  /** Short POS activation code (e.g. C001). Unique across tenants. */
+  companyCode  String   @unique
   companyName  String
   databaseName String
   databaseUrl  String
+  /** pending | active | suspended — expired is derived from expiresAt */
+  licenseStatus String  @default("pending")
+  /** Set once on first POS device activation (other devices inherit). */
+  activatedAt   DateTime?
+  /** Subscription end — hard-block login/activate after this (default +12 months from activate). */
+  expiresAt     DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
@@ -34,8 +42,16 @@ model Company {
   zatcaCsid          String?
   zatcaPrivateKey    String?
   zatcaBinaryToken   String?
+  /** CSID secret from Fatoora (Basic auth with binary token). */
+  zatcaSecret        String?
+  /** Compliance onboarding request id (for production CSID exchange). */
+  zatcaComplianceRequestId String?
+  /** compliance | production */
+  zatcaCsidKind      String?
   /** Previous invoice hash (PIH chain). */
   zatcaPih           String?
+  /** Monotonic ICV counter for simplified invoices. */
+  zatcaIcv           Int      @default(0)
   currency     String     @default("Saudi Arabia · SAR")
   logoDataUrl  String?
   hqPhone      String?
@@ -78,21 +94,23 @@ model Company {
 }
 
 model ZatcaInvoice {
-  id          String   @id
-  companyId   String
-  status      String   @default("pending")
-  totalSar    Float
-  vatSar      Float
-  sellerVat   String
-  sellerName  String
-  timestamp   String
-  tlvBase64   String?
-  invoiceHash String?
-  zatcaUuid   String?
-  message     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  company     Company  @relation(fields: [companyId], references: [id])
+  id             String   @id
+  companyId      String
+  status         String   @default("pending")
+  totalSar       Float
+  vatSar         Float
+  sellerVat      String
+  sellerName     String
+  timestamp      String
+  tlvBase64      String?
+  invoiceHash    String?
+  zatcaUuid      String?
+  /// Full Phase-2 TLV (tags 1–9) when gateway returns stamped QR payload
+  qrPhase2Base64 String?
+  message        String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  company        Company  @relation(fields: [companyId], references: [id])
 
   @@index([companyId])
 }
@@ -225,6 +243,7 @@ model FoodVoucherBatch {
   id         String            @id
   companyId  String
   company    Company           @relation(fields: [companyId], references: [id])
+  branchId   String?
   name       String
   expiryDate String
   count      Int
@@ -234,12 +253,14 @@ model FoodVoucherBatch {
   codes      FoodVoucherCode[]
 
   @@index([companyId])
+  @@index([companyId, branchId])
 }
 
 model FoodVoucherCode {
   id         String           @id
   companyId  String
   company    Company          @relation(fields: [companyId], references: [id])
+  branchId   String?
   batchId    String
   batch      FoodVoucherBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
   name       String
@@ -252,6 +273,7 @@ model FoodVoucherCode {
 
   @@unique([companyId, code])
   @@index([companyId])
+  @@index([companyId, branchId])
   @@index([companyId, batchId])
 }
 
@@ -446,6 +468,15 @@ model PrintStation {
   footer       String   @default("")
   active       Boolean  @default(true)
   sort         Int      @default(0)
+  /// browser | usb | lan | wifi (null = legacy row, treated as browser / named Windows printer)
+  connection   String?
+  host         String?
+  port         Int?
+  /// ["kot","bill","receipt"]
+  purposes     Json?
+  /// paper / content / device options (autoCut, printLogo, fontSize, printMode, timeoutMs …)
+  options      Json?
+  isDefault    Boolean?
   updatedAt    DateTime @updatedAt
 
   @@index([companyId, branchId])
@@ -462,6 +493,8 @@ model ExtraCharge {
   percent   Boolean  @default(false)
   active    Boolean  @default(true)
   sort      Int      @default(0)
+  /// Tax rate ids (at most one). Empty = company default VAT.
+  taxIds    Json?
   updatedAt DateTime @updatedAt
 
   @@index([companyId, branchId])
@@ -513,6 +546,7 @@ model FloorTable {
   label     String
   seats     Int      @default(2)
   area      String   @default("Main Hall")
+  note      String?
   sort      Int      @default(0)
   active    Boolean  @default(true)
   updatedAt DateTime @updatedAt
@@ -748,6 +782,12 @@ model SalesLedger {
   loyaltyRedeem  Float?
   voidReason     String?
   voidLineName   String?
+  billNo         Int?
+  orderId        String?
+  staffUsername  String?
+  tableLabel     String?
+  /// ZATCA invoice id issued at settle — Back Office reprints reuse the reported QR
+  invoiceUuid    String?
   updatedAt      DateTime @updatedAt
 
   @@index([companyId, branchId])

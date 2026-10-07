@@ -18,8 +18,8 @@ export class AuthController {
 
   /** Bind a POS terminal by VAT — does not list other tenants. */
   @Post('terminal')
-  terminal(@Body() body: { taxId?: string }) {
-    return this.auth.lookupCompany(body.taxId ?? '')
+  terminal(@Body() body: { taxId?: string; companyCode?: string }) {
+    return this.auth.lookupCompany(body.companyCode ?? body.taxId ?? '')
   }
 
   /** Terminal staff roster for the bound company only. */
